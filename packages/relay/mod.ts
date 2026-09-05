@@ -110,6 +110,10 @@ export type {
 export { authenticate, DatabaseUserStore, GitHubAuthProvider, LocalAuthProvider } from "./core/index.ts";
 export type { AuthenticatedUser, AuthIdentity, AuthProvider, GitHubProfile, UserStore } from "./core/index.ts";
 
+// Database (shared Turso client for the session and user stores)
+export { createDatabaseClient, databaseCredentialsFromEnv } from "./core/database.ts";
+export type { DatabaseClient, DatabaseCredentials } from "./core/database.ts";
+
 // Paths
 export { homeDir, relayDir } from "./core/paths.ts";
 

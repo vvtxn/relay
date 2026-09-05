@@ -1,4 +1,4 @@
-import { createClient } from "@tursodatabase/serverless/compat";
+import { createDatabaseClient, type DatabaseClient, databaseCredentialsFromEnv } from "../database.ts";
 import type { AuthenticatedUser, AuthIdentity, UserStore } from "./types.ts";
 
 const SCHEMA = `
@@ -19,7 +19,6 @@ CREATE INDEX IF NOT EXISTS auth_identities_user_idx ON auth_identities (user_id)
 
 type QueryArgs = (string | null)[];
 type Result = { rows: Record<string, unknown>[] };
-type DatabaseClient = Pick<ReturnType<typeof createClient>, "execute" | "batch">;
 
 function isConstraintViolation(error: unknown): boolean {
 	if (!(error instanceof Error)) return false;
@@ -43,30 +42,39 @@ function rowString(row: Record<string, unknown>, key: string): string {
 	return value;
 }
 
+function optionalRowString(row: Record<string, unknown>, key: string): string | undefined {
+	const value = row[key];
+	return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+function userFromRow(row: Record<string, unknown>): AuthenticatedUser {
+	const user: AuthenticatedUser = { id: rowString(row, "user_id") };
+	const email = optionalRowString(row, "email");
+	if (email) user.name = email;
+	return user;
+}
+
 /** Turso-backed mapping from provider identities to internal user IDs. */
 export class DatabaseUserStore implements UserStore {
 	private readonly client: DatabaseClient;
 	private readonly schemaReady: Promise<void>;
 
 	constructor(options: DatabaseUserStoreOptions) {
-		this.client = options.client ?? createClient({ url: options.url, authToken: options.authToken });
+		this.client = options.client ?? createDatabaseClient({ url: options.url, authToken: options.authToken });
 		this.schemaReady = this.initialize();
 	}
 
 	static fromEnv(options: Omit<DatabaseUserStoreOptions, "url" | "authToken" | "client"> = {}): DatabaseUserStore {
-		const url = Deno.env.get("TURSO_DB_URL");
-		const authToken = Deno.env.get("TURSO_DB_TOKEN");
-		if (!url || !authToken) throw new Error("TURSO_DB_URL and TURSO_DB_TOKEN are required");
-		return new DatabaseUserStore({ url, authToken, ...options });
+		return new DatabaseUserStore({ ...databaseCredentialsFromEnv(), ...options });
 	}
 
 	async resolve(identity: AuthIdentity): Promise<AuthenticatedUser> {
 		await this.schemaReady;
 		const existing = await this.execute({
-			sql: "SELECT user_id FROM auth_identities WHERE provider = ? AND provider_subject = ?",
+			sql: "SELECT user_id, email FROM auth_identities WHERE provider = ? AND provider_subject = ?",
 			args: [identity.provider, identity.subject],
 		});
-		if (existing.rows[0]) return { id: rowString(existing.rows[0], "user_id") };
+		if (existing.rows[0]) return userFromRow(existing.rows[0]);
 
 		const userId = newId();
 		const now = new Date().toISOString();
@@ -80,15 +88,17 @@ export class DatabaseUserStore implements UserStore {
 				},
 			];
 			await this.client.batch(statements, "write");
-			return { id: userId };
+			const user: AuthenticatedUser = { id: userId };
+			if (identity.email) user.name = identity.email;
+			return user;
 		} catch (error) {
 			// Another client may have claimed the identity between our read and insert.
 			if (!isConstraintViolation(error)) throw error;
 			const raced = await this.execute({
-				sql: "SELECT user_id FROM auth_identities WHERE provider = ? AND provider_subject = ?",
+				sql: "SELECT user_id, email FROM auth_identities WHERE provider = ? AND provider_subject = ?",
 				args: [identity.provider, identity.subject],
 			});
-			if (raced.rows[0]) return { id: rowString(raced.rows[0], "user_id") };
+			if (raced.rows[0]) return userFromRow(raced.rows[0]);
 			throw error;
 		}
 	}

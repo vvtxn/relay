@@ -32,7 +32,35 @@ Deno.test("authenticate resolves an identity through the user store", async () =
 		},
 	});
 	assertEquals(received, { provider: "local", subject: "dev-user" });
-	assertEquals(user, { id: "internal-user-id" });
+	assertEquals(user, { id: "internal-user-id", name: "dev-user", provider: "local" });
+});
+
+Deno.test("authenticate prefers the identity email as the display name", async () => {
+	const user = await authenticate(new GitHubAuthProvider(), { id: 12345, email: "dev@example.com" }, {
+		resolve: () => Promise.resolve({ id: "internal-user-id" }),
+	});
+	assertEquals(user.name, "dev@example.com");
+});
+
+Deno.test("authenticate falls back to the subject when no email is available", async () => {
+	const user = await authenticate(new GitHubAuthProvider(), { id: 12345 }, {
+		resolve: () => Promise.resolve({ id: "internal-user-id" }),
+	});
+	assertEquals(user.name, "12345");
+});
+
+Deno.test("authenticate prefers the name stored on the user record", async () => {
+	const user = await authenticate(new GitHubAuthProvider(), { id: 12345, email: "identity@example.com" }, {
+		resolve: () => Promise.resolve({ id: "internal-user-id", name: "stored@example.com" }),
+	});
+	assertEquals(user.name, "stored@example.com");
+});
+
+Deno.test("authenticate treats an empty stored name as missing", async () => {
+	const user = await authenticate(new LocalAuthProvider("dev-user"), undefined, {
+		resolve: () => Promise.resolve({ id: "internal-user-id", name: "" }),
+	});
+	assertEquals(user.name, "dev-user");
 });
 
 Deno.test("LocalAuthProvider rejects an empty subject", () => {
@@ -40,25 +68,29 @@ Deno.test("LocalAuthProvider rejects an empty subject", () => {
 });
 
 type Statement = { sql: string; args?: unknown[] };
+type IdentityRecord = { userId: string; email: string | null };
 
 class FakeUserClient {
-	private readonly identities = new Map<string, string>();
+	private readonly identities = new Map<string, IdentityRecord>();
 	private nextBatchError: Error | undefined;
-	private racedUserId: string | undefined;
+	private racedUser: IdentityRecord | undefined;
 
 	setBatchError(error: Error): void {
 		this.nextBatchError = error;
 	}
 
 	setRacedUser(id: string): void {
-		this.racedUserId = id;
+		this.racedUser = { userId: id, email: null };
 	}
 
 	execute(statement: string | Statement): Promise<{ rows: Record<string, unknown>[] }> {
 		if (typeof statement !== "string" && statement.sql.startsWith("SELECT user_id")) {
 			const key = `${statement.args?.[0]}:${statement.args?.[1]}`;
-			const userId = this.identities.get(key) ?? this.racedUserId;
-			return Promise.resolve({ rows: userId ? [{ user_id: userId }] : [] });
+			const record = this.identities.get(key) ?? this.racedUser;
+			if (!record) return Promise.resolve({ rows: [] });
+			const row: Record<string, unknown> = { user_id: record.userId };
+			if (record.email) row.email = record.email;
+			return Promise.resolve({ rows: [row] });
 		}
 		return Promise.resolve({ rows: [] });
 	}
@@ -70,7 +102,10 @@ class FakeUserClient {
 			return Promise.reject(error);
 		}
 		const identity = statements[1].args ?? [];
-		this.identities.set(`${identity[1]}:${identity[2]}`, String(identity[0]));
+		this.identities.set(`${identity[1]}:${identity[2]}`, {
+			userId: String(identity[0]),
+			email: typeof identity[3] === "string" ? identity[3] : null,
+		});
 		return Promise.resolve();
 	}
 }
@@ -92,6 +127,17 @@ Deno.test("DatabaseUserStore resolves existing identities and creates new users"
 	const second = await store.resolve(identity);
 
 	assertEquals(second, first);
+});
+
+Deno.test("DatabaseUserStore returns the stored email as the display name", async () => {
+	const store = userStoreWithFake(new FakeUserClient());
+	const identity = { provider: "github", subject: "123", email: "dev@example.com" };
+
+	const created = await store.resolve(identity);
+	const resolved = await store.resolve({ ...identity, email: "changed@example.com" });
+
+	assertEquals(created, { id: created.id, name: "dev@example.com" });
+	assertEquals(resolved, { id: created.id, name: "dev@example.com" });
 });
 
 Deno.test("DatabaseUserStore recovers when another client wins the identity race", async () => {

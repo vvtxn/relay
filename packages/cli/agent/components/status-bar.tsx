@@ -39,7 +39,12 @@ function TokenBar({ tokenCount }: { tokenCount: number }) {
 // ---------------------------------------------------------------------------
 
 export function StatusBar(
-	{ tokenCount, totalCost, branchName }: { tokenCount: number; totalCost: number; branchName: string },
+	{ tokenCount, totalCost, branchName, userName }: {
+		tokenCount: number;
+		totalCost: number;
+		branchName: string;
+		userName?: string;
+	},
 ) {
 	return (
 		<Box flexDirection="row" justifyContent="space-between" padding={1}>
@@ -48,6 +53,7 @@ export function StatusBar(
 					Relay
 				</Text>
 				{branchName && <Text color={theme.warning}>on {branchName}</Text>}
+				{userName && <Text color={theme.textDim}>as {userName}</Text>}
 			</Box>
 			<Box flexDirection="row" gap={1}>
 				<TokenBar tokenCount={tokenCount} />

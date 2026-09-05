@@ -12,6 +12,7 @@ core/
 ├── display.ts            # Display utilities: UIToolCall, parseDiffLines, tool arg/output formatting
 ├── paths.ts              # relayDir(), homeDir() helpers
 ├── context.ts            # Context trimming (token estimation, turn-based truncation)
+├── database.ts           # Shared Turso client factory + env credentials (used by session and user stores)
 ├── system-prompt.ts      # Re-exports the default system prompt (raw .md import)
 ├── system-prompt.md      # Default system prompt for coding agents (shared across clients)
 ├── workspace.ts          # Workspace-rooted fs helpers: expandMentions, listProjectFiles, git metadata

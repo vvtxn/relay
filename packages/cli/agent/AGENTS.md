@@ -11,6 +11,7 @@ agent/
 ├── config.ts             # Default provider config (baseURL, model)
 ├── auth.ts               # API key loading from ~/.relay/auth.json
 ├── components/
+│   ├── boot-screen.tsx   # BootScreen (loading) and BootError shown while auth resolves
 │   ├── chat.tsx          # MessageView, ToolCallView, DiffView, UIMessage type
 │   └── status-bar.tsx    # StatusBar, TokenBar
 └── hooks/
@@ -49,10 +50,19 @@ await runAgentLoop(messages, config, {
 });
 ```
 
+### Boot Flow
+
+Authentication and the initial session resolve in the background (via a module-level `boot` signal + `bootstrap()`), not
+at import time. `Root` renders `BootScreen` (loading) or `BootError` (friendly failure) and mounts `App` only once a
+user and session exist — so missing env vars or an unreachable database never crash before the TUI renders. Both
+database stores share one Turso client created with `createDatabaseClient(databaseCredentialsFromEnv())`.
+
 ### UI Components
 
+- `Root` — Switches between BootScreen, BootError, and App based on the boot signal
 - `App` — Main component with signals, command palettes, input handling
-- `StatusBar` (components/status-bar.tsx) — Branch name, token usage bar, cost display
+- `BootScreen` / `BootError` (components/boot-screen.tsx) — Auth loading and failure states
+- `StatusBar` (components/status-bar.tsx) — Branch name, signed-in user, token usage bar, cost display
 - `MessageView` (components/chat.tsx) — Renders user and agent messages with markdown
 - `ToolCallView` (components/chat.tsx) — Displays tool calls with display names, input, output, diffs
 - `DiffView` (components/chat.tsx) — Renders colored unified diffs with line numbers

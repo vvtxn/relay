@@ -15,7 +15,15 @@ import {
 	type SessionScope,
 	stripAttachedContext,
 } from "@vvtxn/relay/core/sessions/index.ts";
-import { authenticate, DatabaseUserStore, LocalAuthProvider } from "@vvtxn/relay/core/index.ts";
+import { signal } from "@preact/signals-core";
+import {
+	authenticate,
+	type AuthenticatedUser,
+	createDatabaseClient,
+	databaseCredentialsFromEnv,
+	DatabaseUserStore,
+	LocalAuthProvider,
+} from "@vvtxn/relay/core/index.ts";
 import { run } from "@/tui/render/index.ts";
 import {
 	ApprovalPrompt,
@@ -48,16 +56,6 @@ const apiKey = await loadApiKey();
 const branchName = await getGitBranch(Deno.cwd()) ?? "";
 
 const provider = new CompletionsProvider({ apiKey, baseURL: config.baseURL });
-const sessionStore = DatabaseSessionStore.fromEnv();
-const user = await authenticate(
-	LocalAuthProvider.fromEnv(),
-	undefined,
-	DatabaseUserStore.fromEnv(),
-);
-const sessionScope: SessionScope = {
-	ownerId: user.id,
-	cwd: Deno.cwd(),
-};
 const workspaceTools = createWorkspaceTools(Deno.cwd());
 /** Tools the user chose to always allow (process-lifetime memory). */
 const alwaysApprovedTools = new Set<string>();
@@ -67,6 +65,7 @@ const alwaysApprovedTools = new Set<string>();
 // ---------------------------------------------------------------------------
 
 import { StatusBar } from "./components/status-bar.tsx";
+import { BootError, BootScreen } from "./components/boot-screen.tsx";
 import { MessageView, type UIMessage } from "./components/chat.tsx";
 
 // ---------------------------------------------------------------------------
@@ -138,7 +137,15 @@ function entriesToUIMessages(entries: Entry[]): UIMessage[] {
 	return messages;
 }
 
-function App({ onQuit, initialSession }: { onQuit: () => void; initialSession: SessionHandle }) {
+interface AppProps {
+	onQuit: () => void;
+	user: AuthenticatedUser;
+	initialSession: SessionHandle;
+	sessionStore: DatabaseSessionStore;
+	sessionScope: SessionScope;
+}
+
+function App({ onQuit, user, initialSession, sessionStore, sessionScope }: AppProps) {
 	// Registered first so a pending approval consumes keys (Esc denies) before
 	// the double-Esc cancel handler below sees them.
 	const approval = useApprovalPrompt();
@@ -499,12 +506,18 @@ function App({ onQuit, initialSession }: { onQuit: () => void; initialSession: S
 
 	return (
 		<Box flex flexDirection="column" padding={1}>
-			<StatusBar tokenCount={tokenCount.value} totalCost={totalCost.value} branchName={branchName} />
+			<StatusBar
+				tokenCount={tokenCount.value}
+				totalCost={totalCost.value}
+				branchName={branchName}
+				userName={user.name}
+			/>
 
 			{uiMessages.value.length === 0
 				? (
 					<WelcomeScreen
 						version={VERSION}
+						userName={user.name}
 						hints="Enter to send • @ for files • / for commands • PageUp/PageDown to scroll • i/Esc to toggle mode"
 					/>
 				)
@@ -575,9 +588,64 @@ async function beforeQuit() {
 }
 
 // ---------------------------------------------------------------------------
+// Boot — authenticate and open the initial session in the background while the
+// TUI shows a loading state, then swap in the app or an error screen. This
+// keeps module import cheap and renders auth failures instead of crashing.
+// ---------------------------------------------------------------------------
+
+type BootState =
+	| { kind: "loading" }
+	| { kind: "error"; message: string }
+	| {
+		kind: "ready";
+		user: AuthenticatedUser;
+		session: SessionHandle;
+		sessionStore: DatabaseSessionStore;
+		sessionScope: SessionScope;
+	};
+
+const boot = signal<BootState>({ kind: "loading" });
+
+void bootstrap();
+
+async function bootstrap(): Promise<void> {
+	try {
+		// One shared connection for both stores (schema runs once per client).
+		const credentials = databaseCredentialsFromEnv();
+		const client = createDatabaseClient(credentials);
+		const sessionStore = new DatabaseSessionStore({ ...credentials, client });
+		const userStore = new DatabaseUserStore({ ...credentials, client });
+		const user = await authenticate(LocalAuthProvider.fromEnv(), undefined, userStore);
+		const sessionScope: SessionScope = { ownerId: user.id, cwd: Deno.cwd() };
+		const session = sessionStore.create(sessionScope);
+		currentSession = session;
+		boot.value = { kind: "ready", user, session, sessionStore, sessionScope };
+	} catch (error) {
+		boot.value = { kind: "error", message: error instanceof Error ? error.message : String(error) };
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Root
+// ---------------------------------------------------------------------------
+
+function Root({ quit }: { quit: () => void }) {
+	const state = boot.value;
+	if (state.kind === "loading") return <BootScreen />;
+	if (state.kind === "error") return <BootError message={state.message} />;
+	return (
+		<App
+			onQuit={quit}
+			user={state.user}
+			initialSession={state.session}
+			sessionStore={state.sessionStore}
+			sessionScope={state.sessionScope}
+		/>
+	);
+}
+
+// ---------------------------------------------------------------------------
 // Entry
 // ---------------------------------------------------------------------------
 
-const initialSession = sessionStore.create(sessionScope);
-currentSession = initialSession;
-run((quit) => <App onQuit={quit} initialSession={initialSession} />, beforeQuit);
+run((quit) => <Root quit={quit} />, beforeQuit);

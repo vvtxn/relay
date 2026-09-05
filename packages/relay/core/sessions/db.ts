@@ -1,4 +1,4 @@
-import { createClient } from "@tursodatabase/serverless/compat";
+import { createDatabaseClient, type DatabaseClient, databaseCredentialsFromEnv } from "../database.ts";
 import type { Entry, NewEntry, SessionHandle, SessionScope, SessionStore, SessionSummary } from "./types.ts";
 import { CURRENT_VERSION } from "./types.ts";
 
@@ -32,7 +32,6 @@ CREATE INDEX IF NOT EXISTS session_entries_session_seq_idx
 type QueryArgs = (string | number | null)[];
 type Statement = { sql: string; args?: QueryArgs };
 type Result = { rows: Record<string, unknown>[] };
-type DatabaseClient = Pick<ReturnType<typeof createClient>, "execute" | "batch">;
 
 export interface DatabaseSessionStoreOptions {
 	url: string;
@@ -64,17 +63,14 @@ export class DatabaseSessionStore implements SessionStore {
 	private readonly schemaReady: Promise<void>;
 
 	constructor(options: DatabaseSessionStoreOptions) {
-		this.client = options.client ?? createClient({ url: options.url, authToken: options.authToken });
+		this.client = options.client ?? createDatabaseClient({ url: options.url, authToken: options.authToken });
 		this.schemaReady = this.initialize();
 	}
 
-	static fromEnv(): DatabaseSessionStore {
-		const url = Deno.env.get("TURSO_DB_URL");
-		const authToken = Deno.env.get("TURSO_DB_TOKEN");
-		if (!url || !authToken) {
-			throw new Error("TURSO_DB_URL and TURSO_DB_TOKEN are required");
-		}
-		return new DatabaseSessionStore({ url, authToken });
+	static fromEnv(
+		options: Omit<DatabaseSessionStoreOptions, "url" | "authToken" | "client"> = {},
+	): DatabaseSessionStore {
+		return new DatabaseSessionStore({ ...databaseCredentialsFromEnv(), ...options });
 	}
 
 	create(scope: SessionScope): SessionHandle {
