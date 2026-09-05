@@ -6,8 +6,8 @@ const here = import.meta.dirname ?? ".";
 export default defineConfig({
 	resolve: {
 		alias: [
-			{ find: "@vvtxn/relay/", replacement: path.resolve(here, "../relay/") },
-			{ find: "@vvtxn/client/", replacement: path.resolve(here, "../client/") },
+			{ find: "@vvtxn/relay/", replacement: path.resolve(here, "../relay/") + "/" },
+			{ find: "@vvtxn/client/", replacement: path.resolve(here, "../client/") + "/" },
 		],
 	},
 	esbuild: {
