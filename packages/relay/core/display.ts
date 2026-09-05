@@ -2,6 +2,9 @@
  * Display utilities for agent output — shared across all clients (TUI, web, mobile).
  */
 
+import type { Entry } from "./sessions/types.ts";
+import { stripAttachedContext } from "./sessions/manager.ts";
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -12,6 +15,13 @@ export interface UIToolCall {
 	input: string;
 	output: string;
 	diff?: string;
+}
+
+/** A chat message as rendered by clients: user text or agent text + tool calls. */
+export interface UIMessage {
+	role: "user" | "agent";
+	content: string;
+	toolCalls?: UIToolCall[];
 }
 
 /** A single line of parsed unified diff output (without color assignment). */
@@ -66,6 +76,39 @@ export function summarizeToolArgs(name: string, args: string): string {
 
 export function createUIToolCall(name: string, args: string): UIToolCall {
 	return { name, input: summarizeToolArgs(name, args), output: "" };
+}
+
+/**
+ * Convert persisted session entries into display-ready UI messages.
+ * Tool results are folded into their corresponding tool calls.
+ */
+export function entriesToUIMessages(entries: Entry[]): UIMessage[] {
+	const messages: UIMessage[] = [];
+	const toolCallIdMap = new Map<string, UIToolCall>();
+
+	for (const entry of entries) {
+		if (entry.type === "message" && entry.role === "user" && typeof entry.content === "string") {
+			messages.push({ role: "user", content: stripAttachedContext(entry.content) });
+		} else if (entry.type === "message" && entry.role === "assistant") {
+			const hasContent = typeof entry.content === "string" && entry.content.trim();
+			const hasToolCalls = entry.toolCalls && entry.toolCalls.length > 0;
+			if (!hasContent && !hasToolCalls) continue;
+			const toolCalls: UIToolCall[] = entry.toolCalls?.map((tc) => {
+				const uiTc = createUIToolCall(tc.function.name, tc.function.arguments);
+				toolCallIdMap.set(tc.id, uiTc);
+				return uiTc;
+			}) ?? [];
+			messages.push({
+				role: "agent",
+				content: typeof entry.content === "string" ? entry.content : "",
+				toolCalls,
+			});
+		} else if (entry.type === "tool_result") {
+			const tc = toolCallIdMap.get(entry.toolCallId);
+			if (tc) tc.output = entry.content;
+		}
+	}
+	return messages;
 }
 
 // ---------------------------------------------------------------------------

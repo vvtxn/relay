@@ -65,13 +65,14 @@ export type { RunnerCallbacks } from "./core/runner.ts";
 // Display utilities
 export {
 	createUIToolCall,
+	entriesToUIMessages,
 	getToolDisplayName,
 	getToolDisplayOutput,
 	parseDiffLines,
 	summarizeToolArgs,
 	TOOL_DISPLAY_NAMES,
 } from "./core/display.ts";
-export type { DiffLine, UIToolCall } from "./core/display.ts";
+export type { DiffLine, UIMessage, UIToolCall } from "./core/display.ts";
 
 // Context trimming
 export { estimateMessageTokens, estimateTokens, trimContext } from "./core/context.ts";
