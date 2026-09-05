@@ -9,6 +9,8 @@
 		"@/tui/render/jsx-runtime": "./tui/render/jsx-runtime.ts",
 		"@/tui/render/jsx-dev-runtime": "./tui/render/jsx-dev-runtime.ts",
 		"@vvtxn/relay/": "../relay/",
+		"@vvtxn/client/": "../client/",
+		"@vvtxn/server/": "../server/",
 		"@preact/signals-core": "npm:@preact/signals-core@^1.11.1",
 		"yoga-layout": "npm:yoga-layout@^3.2.1"
 	},

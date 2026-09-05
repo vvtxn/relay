@@ -25,6 +25,7 @@ export { encodeSSEFrame, readSSEStream } from "./sse.ts";
 export type {
 	ApprovalDecision,
 	ApprovalRequest,
+	ConfigResponse,
 	CreateSessionRequest,
 	CreateSessionResponse,
 	ErrorResponse,

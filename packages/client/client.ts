@@ -1,6 +1,7 @@
 import type {
 	ApprovalDecision,
 	ApprovalRequest,
+	ConfigResponse,
 	CreateSessionRequest,
 	CreateSessionResponse,
 	ErrorResponse,
@@ -67,6 +68,10 @@ export class RelayClient {
 
 	async workspace(): Promise<WorkspaceResponse> {
 		return await this.get("/api/workspace");
+	}
+
+	async getConfig(): Promise<ConfigResponse> {
+		return await this.get("/api/config");
 	}
 
 	async listSessions(cwd: string): Promise<SessionListResponse> {

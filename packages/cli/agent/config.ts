@@ -2,21 +2,12 @@ import { join } from "@std/path/join";
 import { relayDir } from "@vvtxn/relay/core/paths.ts";
 
 export interface RelayConfig {
-	baseURL: string;
-	model: string;
-	temperature: number;
-	maxTokens: number;
-	preserveRecentTurns: number;
-	maxCompletionTokens: number;
+	/** Base URL of the Relay server this CLI talks to. */
+	serverUrl: string;
 }
 
 const defaults: RelayConfig = {
-	baseURL: "https://openrouter.ai/api/v1",
-	model: "moonshotai/kimi-k2.6",
-	temperature: 0.1,
-	maxTokens: 350_000,
-	preserveRecentTurns: 6,
-	maxCompletionTokens: 16_384,
+	serverUrl: "http://127.0.0.1:7433",
 };
 
 function loadUserConfig(): Partial<RelayConfig> {
@@ -35,3 +26,8 @@ function loadUserConfig(): Partial<RelayConfig> {
 }
 
 export const config: RelayConfig = { ...defaults, ...loadUserConfig() };
+
+/** Environment overrides the config file. */
+export function resolveServerUrl(): string {
+	return Deno.env.get("RELAY_SERVER_URL") ?? config.serverUrl;
+}

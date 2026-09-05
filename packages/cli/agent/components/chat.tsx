@@ -1,17 +1,9 @@
 import { Box, Markdown, Text } from "@/tui/render/components.tsx";
 import { theme } from "@/tui/theme.ts";
 import { getToolDisplayName, getToolDisplayOutput, parseDiffLines } from "@vvtxn/relay/core/display.ts";
-import type { UIToolCall } from "@vvtxn/relay/core/display.ts";
+import type { UIMessage, UIToolCall } from "@vvtxn/relay/core/display.ts";
 
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
-
-export interface UIMessage {
-	role: "user" | "agent";
-	content: string;
-	toolCalls?: UIToolCall[];
-}
+export type { UIMessage };
 
 // ---------------------------------------------------------------------------
 // DiffView

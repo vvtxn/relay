@@ -30,6 +30,13 @@ export interface WorkspaceResponse {
 	cwd: string;
 }
 
+/** Model + context info for status displays. */
+export interface ConfigResponse {
+	model: string;
+	/** Context window budget used for the token bar. */
+	contextTokens: number;
+}
+
 export interface SessionListResponse {
 	sessions: SessionSummary[];
 }

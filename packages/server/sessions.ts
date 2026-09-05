@@ -1,6 +1,7 @@
 import { getGitBranch } from "@vvtxn/relay/core/workspace.ts";
 import type { SessionHandle } from "@vvtxn/relay/core/sessions/index.ts";
 import type {
+	ConfigResponse,
 	CreateSessionRequest,
 	CreateSessionResponse,
 	MeResponse,
@@ -42,6 +43,12 @@ export function handleMe(services: ServerServices): Response {
 			...(user.provider && { provider: user.provider }),
 		} satisfies MeResponse,
 	);
+}
+
+/** Model + context info for client status displays. */
+export function handleConfig(services: ServerServices): Response {
+	const { config } = services;
+	return json({ model: config.model, contextTokens: config.maxTokens } satisfies ConfigResponse);
 }
 
 export async function handleListSessions(services: ServerServices, url: URL): Promise<Response> {

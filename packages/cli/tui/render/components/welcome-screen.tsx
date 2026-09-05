@@ -1,6 +1,5 @@
 import { Box, Text } from "../components.tsx";
 import { theme } from "@/tui/theme.ts";
-import { config } from "@/agent/config.ts";
 
 // Spaces use \u00A0 (non-breaking space) so wrapText doesn't collapse them
 const LOGO = [
@@ -17,10 +16,12 @@ export interface WelcomeScreenProps {
 	subtitle?: string;
 	hints?: string;
 	userName?: string;
+	/** Active model identifier, when the client knows it. */
+	model?: string;
 }
 
 export function WelcomeScreen(
-	{ version, subtitle = "Type a message to get started", hints, userName }: WelcomeScreenProps,
+	{ version, subtitle = "Type a message to get started", hints, userName, model }: WelcomeScreenProps,
 ) {
 	return (
 		<Box flex flexDirection="column" justifyContent="center" alignItems="center" gap={1}>
@@ -29,7 +30,7 @@ export function WelcomeScreen(
 			</Box>
 			<Box flexDirection="column" alignItems="center" gap={1}>
 				<Text color={theme.textMuted}>v{version}</Text>
-				<Text color={theme.textDim}>{config.model.split("/").pop()}</Text>
+				{model && <Text color={theme.textDim}>{model.split("/").pop()}</Text>}
 				{userName && <Text color={theme.textDim}>signed in as {userName}</Text>}
 				<Text color={theme.textDim} italic>{subtitle}</Text>
 				{hints && <Text color={theme.textDim} italic>{hints}</Text>}

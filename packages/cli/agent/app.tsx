@@ -1,29 +1,7 @@
-import { runAgentLoop } from "@vvtxn/relay/core/runner.ts";
-import type { ToolResult } from "@vvtxn/relay/core/tools/types.ts";
-import { createUIToolCall, getToolDisplayName, summarizeToolArgs } from "@vvtxn/relay/core/display.ts";
-import type { UIToolCall } from "@vvtxn/relay/core/display.ts";
-import type { Message, Usage } from "@vvtxn/relay/api/types.ts";
-import { CompletionsProvider } from "@vvtxn/relay/api/providers/completions.ts";
-import { createToolRegistry, createWorkspaceTools } from "@vvtxn/relay/core/tools/index.ts";
-import { type ApprovalHandler, withApproval } from "@vvtxn/relay/core/tools/approval.ts";
-import { expandMentions, getGitBranch } from "@vvtxn/relay/core/workspace.ts";
-import {
-	DatabaseSessionStore,
-	entriesToMessages,
-	type Entry,
-	type SessionHandle,
-	type SessionScope,
-	stripAttachedContext,
-} from "@vvtxn/relay/core/sessions/index.ts";
+import { createUIToolCall, entriesToUIMessages, getToolDisplayName } from "@vvtxn/relay/core/display.ts";
+import type { UIMessage, UIToolCall } from "@vvtxn/relay/core/display.ts";
+import type { ConfigResponse, MeResponse, PendingApprovalInfo, ServerEvent } from "@vvtxn/client/protocol.ts";
 import { signal } from "@preact/signals-core";
-import {
-	authenticate,
-	type AuthenticatedUser,
-	createDatabaseClient,
-	databaseCredentialsFromEnv,
-	DatabaseUserStore,
-	LocalAuthProvider,
-} from "@vvtxn/relay/core/index.ts";
 import { run } from "@/tui/render/index.ts";
 import {
 	ApprovalPrompt,
@@ -35,38 +13,18 @@ import {
 	TextInput,
 	WelcomeScreen,
 } from "@/tui/render/components.tsx";
-import { getHookKey, hasCleanup, setCleanup, useSignal } from "@/tui/render/hooks/signals.ts";
-import { type ApprovalDecision, useApprovalPrompt } from "@/tui/render/hooks/approval.ts";
+import { getHookKey, hasCleanup, setCleanup, useSignal, useSignalEffect } from "@/tui/render/hooks/signals.ts";
+import { useApprovalPrompt } from "@/tui/render/hooks/approval.ts";
 import { useTextInput, type VimMode } from "@/tui/render/hooks/text-input.ts";
 import { type CommandPaletteItem, useCommandPalette } from "@/tui/render/hooks/command-palette.ts";
 import { inputManager } from "@/tui/core/input.ts";
 import { useProjectFiles } from "./hooks/project-files.ts";
-import { config } from "./config.ts";
-import { loadApiKey } from "./auth.ts";
+import { client, serverUrl } from "./client.ts";
 import { theme } from "@/tui/theme.ts";
 import { VERSION } from "../version.ts";
-import { SYSTEM_PROMPT } from "@vvtxn/relay/core/system-prompt.ts";
-
-// ---------------------------------------------------------------------------
-// Config
-// ---------------------------------------------------------------------------
-
-const apiKey = await loadApiKey();
-
-const branchName = await getGitBranch(Deno.cwd()) ?? "";
-
-const provider = new CompletionsProvider({ apiKey, baseURL: config.baseURL });
-const workspaceTools = createWorkspaceTools(Deno.cwd());
-/** Tools the user chose to always allow (process-lifetime memory). */
-const alwaysApprovedTools = new Set<string>();
-
-// ---------------------------------------------------------------------------
-// UI Types
-// ---------------------------------------------------------------------------
-
 import { StatusBar } from "./components/status-bar.tsx";
 import { BootError, BootScreen } from "./components/boot-screen.tsx";
-import { MessageView, type UIMessage } from "./components/chat.tsx";
+import { MessageView } from "./components/chat.tsx";
 
 // ---------------------------------------------------------------------------
 // Commands
@@ -107,45 +65,14 @@ function formatStatus(status: AgentStatus): string {
 // Main App
 // ---------------------------------------------------------------------------
 
-function entriesToUIMessages(entries: Entry[]): UIMessage[] {
-	const messages: UIMessage[] = [];
-	const toolCallIdMap = new Map<string, UIToolCall>();
-
-	for (const entry of entries) {
-		if (entry.type === "message" && entry.role === "user" && typeof entry.content === "string") {
-			const displayContent = stripAttachedContext(entry.content);
-			messages.push({ role: "user", content: displayContent });
-		} else if (entry.type === "message" && entry.role === "assistant") {
-			const hasContent = typeof entry.content === "string" && entry.content.trim();
-			const hasToolCalls = entry.toolCalls && entry.toolCalls.length > 0;
-			if (!hasContent && !hasToolCalls) continue;
-			const toolCalls: UIToolCall[] = entry.toolCalls?.map((tc) => {
-				const uiTc = createUIToolCall(tc.function.name, tc.function.arguments);
-				toolCallIdMap.set(tc.id, uiTc);
-				return uiTc;
-			}) ?? [];
-			messages.push({
-				role: "agent",
-				content: typeof entry.content === "string" ? entry.content : "",
-				toolCalls,
-			});
-		} else if (entry.type === "tool_result") {
-			const tc = toolCallIdMap.get(entry.toolCallId);
-			if (tc) tc.output = entry.content;
-		}
-	}
-	return messages;
-}
-
 interface AppProps {
 	onQuit: () => void;
-	user: AuthenticatedUser;
-	initialSession: SessionHandle;
-	sessionStore: DatabaseSessionStore;
-	sessionScope: SessionScope;
+	user: MeResponse;
+	initialSessionId: string;
+	info: ConfigResponse;
 }
 
-function App({ onQuit, user, initialSession, sessionStore, sessionScope }: AppProps) {
+function App({ onQuit, user, initialSessionId, info }: AppProps) {
 	// Registered first so a pending approval consumes keys (Esc denies) before
 	// the double-Esc cancel handler below sees them.
 	const approval = useApprovalPrompt();
@@ -156,23 +83,239 @@ function App({ onQuit, user, initialSession, sessionStore, sessionScope }: AppPr
 	const status = useSignal<AgentStatus>({ kind: "thinking" });
 	const tokenCount = useSignal(0);
 	const totalCost = useSignal(0);
-	const sessionId = useSignal(0);
+	const sessionId = useSignal<string | null>(initialSessionId);
+	const branchName = useSignal<string | null>(null);
 	const uiMessages = useSignal<UIMessage[]>([]);
-	const session = useSignal<SessionHandle>(initialSession);
-	const generationCosts = useSignal(new Map<string, number>());
-	const abortController = useSignal<AbortController | null>(null);
 	const escPrimed = useSignal(false);
 
-	// Double-Esc to cancel streaming (only when loading, so it doesn't conflict with vim mode toggle)
+	// Streaming draft state (shared across the session's event stream)
+	const draft = { text: "", toolCalls: [] as UIToolCall[], msgIndex: -1 };
+	let toolCallIndex = new Map<string, number>();
+	let syncTimer: ReturnType<typeof setTimeout> | null = null;
+	let syncPending = false;
+	let currentAsk: { sessionId: string; toolCallId: string } | null = null;
+	const remotelyResolved = new Set<string>();
+
+	const doSync = () => {
+		const msgs = [...uiMessages.value];
+		const entry: UIMessage = { role: "agent", content: draft.text, toolCalls: [...draft.toolCalls] };
+		if (draft.msgIndex >= 0 && draft.msgIndex < msgs.length) {
+			msgs[draft.msgIndex] = entry;
+		} else {
+			draft.msgIndex = msgs.length;
+			msgs.push(entry);
+		}
+		uiMessages.value = msgs;
+		syncPending = false;
+	};
+
+	const syncDraft = (force = false) => {
+		if (force) {
+			if (syncTimer) clearTimeout(syncTimer);
+			syncTimer = null;
+			doSync();
+			return;
+		}
+		if (syncPending) return;
+		syncPending = true;
+		syncTimer = setTimeout(() => {
+			syncTimer = null;
+			doSync();
+		}, 50);
+	};
+
+	const finalizeDraft = () => {
+		if (syncTimer) clearTimeout(syncTimer);
+		syncTimer = null;
+		syncPending = false;
+		if (draft.text || draft.toolCalls.length > 0) doSync();
+		draft.text = "";
+		draft.toolCalls = [];
+		draft.msgIndex = -1;
+		toolCallIndex = new Map();
+	};
+
+	const showError = (message: string) => {
+		uiMessages.value = [...uiMessages.value, { role: "agent", content: `**Error:** ${message}` }];
+	};
+
+	const refreshSession = async () => {
+		const id = sessionId.value;
+		if (!id) return;
+		try {
+			const response = await client.openSession(id);
+			if (sessionId.value !== id) return;
+			uiMessages.value = entriesToUIMessages(response.entries);
+			tokenCount.value = response.tokens;
+			totalCost.value = response.cost;
+			branchName.value = response.branch;
+		} catch {
+			// Keep the current view on transient failures
+		}
+	};
+
+	// -----------------------------------------------------------------------
+	// Approval flow — requests arrive as SSE events; decisions POST back
+	// -----------------------------------------------------------------------
+
+	const handleApprovalRequired = (info: PendingApprovalInfo) => {
+		void (async () => {
+			const askSessionId = sessionId.value;
+			if (!askSessionId) return;
+			currentAsk = { sessionId: askSessionId, toolCallId: info.toolCallId };
+			const decision = await approval.ask({
+				toolName: getToolDisplayName(info.toolName),
+				summary: info.summary,
+			});
+			const wasCurrent = currentAsk?.toolCallId === info.toolCallId;
+			currentAsk = null;
+			if (!wasCurrent) return;
+			if (remotelyResolved.has(info.toolCallId)) {
+				remotelyResolved.delete(info.toolCallId);
+				return;
+			}
+			if (sessionId.value !== askSessionId) return;
+			try {
+				await client.approve(askSessionId, info.toolCallId, decision);
+			} catch {
+				// The server already resolved (or dropped) this approval
+			}
+		})();
+	};
+
+	const dropPendingAsk = (denyOnServer: boolean) => {
+		const ask = currentAsk;
+		currentAsk = null;
+		if (!ask) return;
+		if (denyOnServer) void client.approve(ask.sessionId, ask.toolCallId, "deny").catch(() => {});
+		approval.cancel();
+	};
+
+	// -----------------------------------------------------------------------
+	// SSE event folding
+	// -----------------------------------------------------------------------
+
+	const foldEvent = (event: ServerEvent) => {
+		switch (event.type) {
+			case "run_state": {
+				draft.text = event.draftText;
+				draft.toolCalls = event.toolCalls.map((tc) => ({
+					...createUIToolCall(tc.name, tc.args),
+					output: tc.result?.content ?? "",
+					diff: tc.result?.meta?.diff,
+				}));
+				toolCallIndex = new Map();
+				event.toolCalls.forEach((tc, i) => toolCallIndex.set(tc.id, i));
+				draft.msgIndex = -1;
+				tokenCount.value = event.tokens;
+				totalCost.value = event.cost;
+				isLoading.value = true;
+				if (event.pendingApproval) handleApprovalRequired(event.pendingApproval);
+				syncDraft(true);
+				break;
+			}
+			case "text_delta":
+				status.value = { kind: "writing" };
+				draft.text += event.content;
+				syncDraft();
+				break;
+			case "tool_call_start":
+				status.value = { kind: "running_tool", toolName: event.name };
+				break;
+			case "tool_call_end": {
+				toolCallIndex.set(event.id, draft.toolCalls.length);
+				draft.toolCalls.push(createUIToolCall(event.name, event.args));
+				syncDraft(true);
+				break;
+			}
+			case "tool_result": {
+				const idx = toolCallIndex.get(event.id);
+				if (idx !== undefined && idx < draft.toolCalls.length) {
+					draft.toolCalls[idx] = {
+						...draft.toolCalls[idx],
+						output: event.result.content,
+						diff: event.result.meta?.diff,
+					};
+				}
+				syncDraft(true);
+				break;
+			}
+			case "message_complete":
+				tokenCount.value = event.tokens;
+				totalCost.value = event.cost;
+				status.value = { kind: "thinking" };
+				break;
+			case "turn_complete":
+				finalizeDraft();
+				status.value = { kind: "thinking" };
+				break;
+			case "approval_required":
+				handleApprovalRequired(event.approval);
+				break;
+			case "approval_resolved":
+				remotelyResolved.add(event.toolCallId);
+				if (currentAsk?.toolCallId === event.toolCallId) {
+					currentAsk = null;
+					approval.cancel();
+				}
+				break;
+			case "error":
+				showError(event.message);
+				break;
+			case "run_finished":
+				finalizeDraft();
+				isLoading.value = false;
+				void refreshSession();
+				break;
+		}
+	};
+
+	// -----------------------------------------------------------------------
+	// Session stream — one subscription per session, reconnect with backoff
+	// -----------------------------------------------------------------------
+
+	useSignalEffect(() => {
+		const id = sessionId.value;
+		if (!id) return;
+		const ac = new AbortController();
+		let backoff = 500;
+
+		void (async () => {
+			while (!ac.signal.aborted) {
+				try {
+					for await (const event of client.subscribe(id, { signal: ac.signal })) {
+						if (sessionId.value !== id) break;
+						foldEvent(event);
+					}
+				} catch (error) {
+					if (ac.signal.aborted || sessionId.value !== id) break;
+					showError(`Stream error: ${error instanceof Error ? error.message : String(error)}`);
+				}
+				if (ac.signal.aborted || sessionId.value !== id) break;
+				await new Promise((resolve) => setTimeout(resolve, backoff));
+				backoff = Math.min(backoff * 2, 5000);
+			}
+		})();
+
+		// Load the session content (branch, tokens, history) for the new id
+		void refreshSession();
+
+		return () => ac.abort();
+	});
+
+	// Double-Esc to cancel the running turn (only when loading, so it doesn't
+	// conflict with vim mode toggle)
 	const cancelKey = getHookKey("cancel-");
 	if (!hasCleanup(cancelKey)) {
 		let lastEsc = 0;
 		let escTimer: ReturnType<typeof setTimeout> | null = null;
 		const cleanup = inputManager.onKeyGlobal((event) => {
 			if (event.key !== "escape" || !isLoading.value) return false;
+			const id = sessionId.value;
+			if (!id) return false;
 			const now = Date.now();
 			if (now - lastEsc < 1500) {
-				abortController.value?.abort();
+				void client.cancel(id).catch(() => {});
 				lastEsc = 0;
 				escPrimed.value = false;
 				if (escTimer) {
@@ -193,8 +336,13 @@ function App({ onQuit, user, initialSession, sessionStore, sessionScope }: AppPr
 		setCleanup(cancelKey, cleanup);
 	}
 
+	// -----------------------------------------------------------------------
+	// Actions
+	// -----------------------------------------------------------------------
+
 	const handleSubmit = (value: string) => {
-		if (!value.trim() || isLoading.value) return;
+		const id = sessionId.value;
+		if (!value.trim() || isLoading.value || !id) return;
 
 		uiMessages.value = [...uiMessages.value, { role: "user", content: value }];
 		input.value = "";
@@ -202,204 +350,50 @@ function App({ onQuit, user, initialSession, sessionStore, sessionScope }: AppPr
 		isLoading.value = true;
 		status.value = { kind: "thinking" };
 
-		const ac = new AbortController();
-		abortController.value = ac;
-		void runSubmission(value, ac);
+		void (async () => {
+			try {
+				await client.sendMessage(id, value);
+			} catch (error) {
+				isLoading.value = false;
+				status.value = { kind: "thinking" };
+				showError(error instanceof Error ? error.message : String(error));
+			}
+		})();
 	};
 
-	const runSubmission = async (value: string, ac: AbortController) => {
-		let syncTimer: ReturnType<typeof setTimeout> | null = null;
+	const openSessionById = (id: string) => {
+		if (sessionId.value === id) return;
+		dropPendingAsk(true);
+		sessionId.value = id;
+		uiMessages.value = [];
+		tokenCount.value = 0;
+		totalCost.value = 0;
+		branchName.value = null;
+		isLoading.value = false;
+		// History + stream arrive via the session effect (refresh + subscribe)
+	};
+
+	const startNewChat = async () => {
+		dropPendingAsk(true);
 		try {
-			// Resolve @mentions: read file/directory contents and append as context
-			const expandedValue = await expandMentions(value, Deno.cwd());
-
-			// Store stripped version in session (without file content bloat in history)
-			await session.value.append({ type: "message", role: "user", content: stripAttachedContext(expandedValue) });
-			const messages = entriesToMessages(session.value.getEntries());
-
-			// Replace the last user message with the full expanded content for the LLM
-			for (let i = messages.length - 1; i >= 0; i--) {
-				if (messages[i].role === "user") {
-					messages[i] = { ...messages[i], content: expandedValue };
-					break;
-				}
-			}
-
-			const approvalHandler: ApprovalHandler = async (tool, toolInput) => {
-				const name = tool.definition.function.name;
-				if (alwaysApprovedTools.has(name)) return true;
-				if (ac.signal.aborted) return false;
-
-				const decision = await Promise.race([
-					approval.ask({
-						toolName: getToolDisplayName(name),
-						summary: summarizeToolArgs(name, JSON.stringify(toolInput)),
-					}),
-					// Deny the prompt if the run is aborted while waiting for an answer
-					new Promise<ApprovalDecision>((resolve) => {
-						ac.signal.addEventListener("abort", () => {
-							approval.cancel();
-							resolve("deny");
-						}, { once: true });
-					}),
-				]);
-
-				if (decision === "always") {
-					alwaysApprovedTools.add(name);
-					return true;
-				}
-				return decision === "allow";
-			};
-			const tools = createToolRegistry(withApproval(workspaceTools, approvalHandler));
-
-			const draft = { text: "", toolCalls: [] as UIToolCall[], msgIndex: -1 };
-			const toolCallIndex = new Map<string, number>();
-
-			let syncPending = false;
-
-			const doSync = () => {
-				const msgs = [...uiMessages.value];
-				const entry: UIMessage = { role: "agent", content: draft.text, toolCalls: [...draft.toolCalls] };
-				if (draft.msgIndex >= 0 && draft.msgIndex < msgs.length) {
-					msgs[draft.msgIndex] = entry;
-				} else {
-					draft.msgIndex = msgs.length;
-					msgs.push(entry);
-				}
-				uiMessages.value = msgs;
-				syncPending = false;
-			};
-
-			const syncDraft = (force = false) => {
-				if (force) {
-					if (syncTimer) clearTimeout(syncTimer);
-					syncTimer = null;
-					doSync();
-					return;
-				}
-				if (syncPending) return;
-				syncPending = true;
-				syncTimer = setTimeout(() => {
-					syncTimer = null;
-					doSync();
-				}, 50);
-			};
-
-			await runAgentLoop(messages, {
-				provider,
-				tools,
-				model: config.model,
-				systemPrompt: SYSTEM_PROMPT,
-				temperature: config.temperature,
-				contextLimit: { maxTokens: config.maxTokens, preserveRecentTurns: config.preserveRecentTurns },
-				maxTokens: config.maxCompletionTokens,
-				signal: ac.signal,
-			}, {
-				onTextDelta(delta: string) {
-					status.value = { kind: "writing" };
-					draft.text += delta;
-					syncDraft();
-				},
-				onToolCallEnd(id: string, name: string, args: string) {
-					status.value = { kind: "running_tool", toolName: name };
-					const idx = draft.toolCalls.length;
-					toolCallIndex.set(id, idx);
-					draft.toolCalls.push(createUIToolCall(name, args));
-					syncDraft(true);
-				},
-				onToolResult(id: string, result: ToolResult) {
-					const idx = toolCallIndex.get(id);
-					if (idx !== undefined && idx < draft.toolCalls.length) {
-						draft.toolCalls[idx] = {
-							...draft.toolCalls[idx],
-							output: result.content,
-							diff: result.meta?.diff,
-						};
-					}
-					syncDraft(true);
-				},
-				onMessageComplete(usage?: Usage, generationId?: string) {
-					const fallbackCost = usage?.cost ?? 0;
-					if (usage) {
-						tokenCount.value = usage.prompt_tokens + usage.completion_tokens;
-						if (fallbackCost) {
-							totalCost.value += fallbackCost;
-							session.value.setCost(totalCost.value);
-						}
-						session.value.setTokens(tokenCount.value);
-					}
-					if (generationId) {
-						generationCosts.value.set(generationId, fallbackCost);
-						const sid = sessionId.value;
-						provider.getGenerationStats(generationId).then((stats) => {
-							if (!stats || sessionId.value !== sid) return;
-							if (stats.totalCost !== null) {
-								totalCost.value += stats.totalCost - (generationCosts.value.get(generationId) ?? 0);
-								generationCosts.value.delete(generationId);
-								session.value.setCost(totalCost.value);
-							}
-							if (!usage && stats.promptTokens !== null && stats.completionTokens !== null) {
-								tokenCount.value = stats.promptTokens + stats.completionTokens;
-								session.value.setTokens(tokenCount.value);
-							}
-						}).catch(() => {});
-					}
-					status.value = { kind: "thinking" };
-				},
-				onTurnComplete: async (assistantMessage: Message, toolResults: Message[]) => {
-					if (syncTimer) clearTimeout(syncTimer);
-					syncTimer = null;
-					syncPending = false;
-					if (draft.text || draft.toolCalls.length > 0) doSync();
-
-					const am = assistantMessage;
-					await session.value.append({
-						type: "message",
-						role: "assistant",
-						content: am.content,
-						...(am.tool_calls?.length && { toolCalls: am.tool_calls }),
-					});
-
-					for (const tr of toolResults) {
-						await session.value.append({
-							type: "tool_result",
-							toolCallId: tr.tool_call_id!,
-							toolName: tr.name!,
-							content: tr.content!,
-						});
-					}
-
-					draft.text = "";
-					draft.toolCalls = [];
-					draft.msgIndex = -1;
-					toolCallIndex.clear();
-				},
-				onError(error: Error) {
-					if (ac.signal.aborted) return;
-					uiMessages.value = [
-						...uiMessages.value,
-						{ role: "agent", content: `**Error:** ${error.message}` },
-					];
-				},
-			});
-
-			if (syncTimer) clearTimeout(syncTimer);
-			syncTimer = null;
-			if (draft.text || draft.toolCalls.length > 0) doSync();
-		} catch (error) {
-			if (!ac.signal.aborted) {
-				const message = error instanceof Error ? error.message : String(error);
-				uiMessages.value = [...uiMessages.value, { role: "agent", content: `**Error:** ${message}` }];
-			}
-		} finally {
-			if (syncTimer) clearTimeout(syncTimer);
+			const response = await client.createSession(Deno.cwd());
+			sessionId.value = response.id;
+			uiMessages.value = [];
+			tokenCount.value = 0;
+			totalCost.value = 0;
+			branchName.value = null;
 			isLoading.value = false;
-			abortController.value = null;
+		} catch (error) {
+			showError(error instanceof Error ? error.message : String(error));
 		}
 	};
 
+	// -----------------------------------------------------------------------
+	// Palettes
+	// -----------------------------------------------------------------------
+
 	const fileMentionStart = useSignal<number | null>(null);
-	const projectFiles = useProjectFiles();
+	const projectFiles = useProjectFiles(() => sessionId.value);
 
 	const threadItems = useSignal<CommandPaletteItem[]>([]);
 
@@ -409,18 +403,7 @@ function App({ onQuit, user, initialSession, sessionStore, sessionScope }: AppPr
 		maxResults: 20,
 		onSelect: (item) => {
 			if (isLoading.value) return;
-			void (async () => {
-				await session.value.flush();
-				const sm = await sessionStore.open(item.id, sessionScope.ownerId);
-				session.value = sm;
-				currentSession = sm;
-				uiMessages.value = entriesToUIMessages(sm.getEntries());
-				tokenCount.value = sm.getTokens();
-				totalCost.value = sm.getCost();
-				sessionId.value++;
-			})().catch((error) => {
-				uiMessages.value = [...uiMessages.value, { role: "agent", content: `**Session error:** ${error}` }];
-			});
+			void openSessionById(item.id);
 		},
 	});
 
@@ -453,21 +436,10 @@ function App({ onQuit, user, initialSession, sessionStore, sessionScope }: AppPr
 		mode,
 		onSelect: (item) => {
 			if (item.id === "new-chat") {
-				void (async () => {
-					await session.value.flush();
-					uiMessages.value = [];
-					tokenCount.value = 0;
-					totalCost.value = 0;
-					sessionId.value++;
-					const newSm = sessionStore.create(sessionScope);
-					session.value = newSm;
-					currentSession = newSm;
-				})().catch((error) => {
-					uiMessages.value = [...uiMessages.value, { role: "agent", content: `**Session error:** ${error}` }];
-				});
+				void startNewChat();
 			} else if (item.id === "threads") {
-				void sessionStore.listSummaries(sessionScope).then((summaries) => {
-					threadItems.value = summaries.map((s) => {
+				void client.listSessions(Deno.cwd()).then((response) => {
+					threadItems.value = response.sessions.map((s) => {
 						const date = new Date(s.timestamp);
 						const label = date.toLocaleString();
 						const preview = s.firstUserMessage
@@ -479,12 +451,10 @@ function App({ onQuit, user, initialSession, sessionStore, sessionScope }: AppPr
 					});
 					threadsPalette.openPalette();
 				}).catch((error) => {
-					uiMessages.value = [...uiMessages.value, { role: "agent", content: `**Session error:** ${error}` }];
+					showError(error instanceof Error ? error.message : String(error));
 				});
 			} else if (item.id === "quit") {
-				void session.value.flush().then(onQuit).catch((error) => {
-					uiMessages.value = [...uiMessages.value, { role: "agent", content: `**Session error:** ${error}` }];
-				});
+				onQuit();
 			}
 		},
 	});
@@ -509,8 +479,10 @@ function App({ onQuit, user, initialSession, sessionStore, sessionScope }: AppPr
 			<StatusBar
 				tokenCount={tokenCount.value}
 				totalCost={totalCost.value}
-				branchName={branchName}
+				branchName={branchName.value ?? ""}
 				userName={user.name}
+				contextWindow={info.contextTokens}
+				model={info.model}
 			/>
 
 			{uiMessages.value.length === 0
@@ -518,6 +490,7 @@ function App({ onQuit, user, initialSession, sessionStore, sessionScope }: AppPr
 					<WelcomeScreen
 						version={VERSION}
 						userName={user.name}
+						model={info.model}
 						hints="Enter to send • @ for files • / for commands • PageUp/PageDown to scroll • i/Esc to toggle mode"
 					/>
 				)
@@ -575,34 +548,13 @@ function App({ onQuit, user, initialSession, sessionStore, sessionScope }: AppPr
 }
 
 // ---------------------------------------------------------------------------
-// Quit handler — flush the current session before exiting
-// ---------------------------------------------------------------------------
-
-let currentSession: SessionHandle | null = null;
-
-async function beforeQuit() {
-	if (currentSession) {
-		await currentSession.flush();
-		currentSession = null;
-	}
-}
-
-// ---------------------------------------------------------------------------
-// Boot — authenticate and open the initial session in the background while the
-// TUI shows a loading state, then swap in the app or an error screen. This
-// keeps module import cheap and renders auth failures instead of crashing.
+// Boot — verify the server is reachable, resolve the user, create a session
 // ---------------------------------------------------------------------------
 
 type BootState =
 	| { kind: "loading" }
 	| { kind: "error"; message: string }
-	| {
-		kind: "ready";
-		user: AuthenticatedUser;
-		session: SessionHandle;
-		sessionStore: DatabaseSessionStore;
-		sessionScope: SessionScope;
-	};
+	| { kind: "ready"; user: MeResponse; sessionId: string; info: ConfigResponse };
 
 const boot = signal<BootState>({ kind: "loading" });
 
@@ -610,16 +562,16 @@ void bootstrap();
 
 async function bootstrap(): Promise<void> {
 	try {
-		// One shared connection for both stores (schema runs once per client).
-		const credentials = databaseCredentialsFromEnv();
-		const client = createDatabaseClient(credentials);
-		const sessionStore = new DatabaseSessionStore({ ...credentials, client });
-		const userStore = new DatabaseUserStore({ ...credentials, client });
-		const user = await authenticate(LocalAuthProvider.fromEnv(), undefined, userStore);
-		const sessionScope: SessionScope = { ownerId: user.id, cwd: Deno.cwd() };
-		const session = sessionStore.create(sessionScope);
-		currentSession = session;
-		boot.value = { kind: "ready", user, session, sessionStore, sessionScope };
+		try {
+			await client.health();
+		} catch {
+			throw new Error(
+				`Cannot reach the Relay server at ${serverUrl}. Start one with 'relay serve'.`,
+			);
+		}
+		const [user, info] = await Promise.all([client.me(), client.getConfig()]);
+		const response = await client.createSession(Deno.cwd());
+		boot.value = { kind: "ready", user, sessionId: response.id, info };
 	} catch (error) {
 		boot.value = { kind: "error", message: error instanceof Error ? error.message : String(error) };
 	}
@@ -633,19 +585,11 @@ function Root({ quit }: { quit: () => void }) {
 	const state = boot.value;
 	if (state.kind === "loading") return <BootScreen />;
 	if (state.kind === "error") return <BootError message={state.message} />;
-	return (
-		<App
-			onQuit={quit}
-			user={state.user}
-			initialSession={state.session}
-			sessionStore={state.sessionStore}
-			sessionScope={state.sessionScope}
-		/>
-	);
+	return <App onQuit={quit} user={state.user} initialSessionId={state.sessionId} info={state.info} />;
 }
 
 // ---------------------------------------------------------------------------
 // Entry
 // ---------------------------------------------------------------------------
 
-run((quit) => <Root quit={quit} />, beforeQuit);
+run((quit) => <Root quit={quit} />, () => {});

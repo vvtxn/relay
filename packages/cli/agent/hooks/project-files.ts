@@ -1,25 +1,33 @@
 import type { CommandPaletteItem } from "@/tui/render/hooks/command-palette.ts";
 import { useSignal } from "@/tui/render/hooks/signals.ts";
-import { listProjectFiles } from "@vvtxn/relay/core/workspace.ts";
+import { client } from "../client.ts";
 
-export function useProjectFiles(root: string = Deno.cwd()) {
+/**
+ * Project file listing for the @-mention picker, served by the Relay server
+ * (the server owns the workspace filesystem). Cached per session.
+ */
+export function useProjectFiles(getSessionId: () => string | null) {
 	const files = useSignal<CommandPaletteItem[]>([]);
 	const status = useSignal<"idle" | "indexing" | "ready" | "error">("idle");
 	const generation = useSignal(0);
+	const cachedSession = useSignal<string | null>(null);
 
 	const startIndexing = () => {
-		if (status.value === "indexing" || status.value === "ready") return;
+		const id = getSessionId();
+		if (!id || status.value === "indexing") return;
+		if (cachedSession.value === id && status.value === "ready") return;
 		status.value = "indexing";
-		const currentGeneration = ++generation.value;
+		const gen = ++generation.value;
 
-		(async () => {
+		void (async () => {
 			try {
-				const paths = await listProjectFiles(root);
-				if (currentGeneration !== generation.value) return;
-				files.value = paths.map((p) => ({ id: p, title: p }));
+				const response = await client.listFiles(id);
+				if (gen !== generation.value) return;
+				files.value = response.files.map((p) => ({ id: p, title: p }));
+				cachedSession.value = id;
 				status.value = "ready";
 			} catch {
-				if (currentGeneration !== generation.value) return;
+				if (gen !== generation.value) return;
 				status.value = "error";
 			}
 		})();
@@ -27,7 +35,6 @@ export function useProjectFiles(root: string = Deno.cwd()) {
 
 	const cancelIndexing = () => {
 		generation.value++;
-		if (status.value === "indexing") status.value = "idle";
 	};
 
 	return { files, status, startIndexing, cancelIndexing };

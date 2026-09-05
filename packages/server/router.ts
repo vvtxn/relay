@@ -1,7 +1,14 @@
 import type { HealthResponse } from "@vvtxn/client/protocol.ts";
 import type { ServerServices } from "./services.ts";
 import { BadRequestError, error, NotFoundError } from "./http.ts";
-import { handleCreateSession, handleListSessions, handleMe, handleOpenSession, handleSendMessage } from "./sessions.ts";
+import {
+	handleConfig,
+	handleCreateSession,
+	handleListSessions,
+	handleMe,
+	handleOpenSession,
+	handleSendMessage,
+} from "./sessions.ts";
 import { handleEvents } from "./sse.ts";
 import { handleListFiles } from "./files.ts";
 import { handleApprove, handleCancel } from "./approvals.ts";
@@ -27,6 +34,7 @@ export async function handleRequest(services: ServerServices, request: Request):
 			});
 		}
 		if (method === "GET" && path === "/api/me") return await handleMe(services);
+		if (method === "GET" && path === "/api/config") return handleConfig(services);
 		if (method === "GET" && path === "/api/workspace") return handleWorkspace(services);
 
 		// Sessions collection
