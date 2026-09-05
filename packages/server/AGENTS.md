@@ -1,0 +1,120 @@
+# AGENTS.md - Server
+
+HTTP + SSE server hosting the Relay agent runtime. Plain TypeScript on `Deno.serve` — no web framework.
+
+## Architecture
+
+```
+server/
+├── deno.json        # @vvtxn/server; exports "./main" for the CLI serve subcommand
+├── mod.ts           # Public exports (startServer, createServices, handleRequest, RunManager)
+├── main.ts          # Entry point: config from env → createServices → Deno.serve
+├── config.ts        # serverConfigFromEnv: port, host, LLM key/model, Turso, auth, static dir
+├── services.ts      # ServerServices + createServices() — the composition seam
+├── router.ts        # Manual route matching; error mapping (400/404/405/500)
+├── http.ts          # json()/error() helpers, readJsonBody, BadRequest/NotFound errors
+├── sessions.ts      # /api/me, /api/config, session CRUD, message submission
+├── run.ts           # RunManager: one active run per session, SSE fan-out, approvals
+├── approvals.ts     # /api/sessions/:id/approve + /cancel handlers
+├── sse.ts           # GET /api/sessions/:id/events (snapshot + live stream + heartbeat)
+├── files.ts         # GET /api/sessions/:id/files (project file listing for @-mentions)
+├── workspace.ts     # GET /api/workspace (server default cwd)
+├── static.ts        # Static web app serving with SPA fallback + path confinement
+├── config.test.ts   # Config parsing tests
+└── run.test.ts      # RunManager tests (fake store/provider)
+```
+
+## Key Concepts
+
+### Composition seam (`services.ts`)
+
+`createServices(config)` builds every long-lived service once and returns a plain `ServerServices` object that each
+route handler receives as a parameter. There is no module-level hidden state — this is the Effect-ready boundary: each
+field can later become an Effect Layer without touching handlers.
+
+### RunManager (`run.ts`)
+
+Owns active runs, one per session:
+
+- `startMessage()` claims the slot synchronously (409-equivalent via `RunConflictError`) then runs the agent loop in the
+  background; concurrent submits are rejected
+- Bridges runner callbacks to `ServerEvent`s fanned out to per-session SSE subscribers
+- Tracks in-flight draft state (text, tool calls, results) for `run_state` snapshots sent to late subscribers
+- Gates side-effecting tools via `withApproval`: pending approvals live in a map, decisions arrive via
+  `resolveApproval()`, and the handler races the run's AbortSignal (mirrors the CLI pattern)
+- "always allow" is per session, in memory
+- Persists assistant/tool entries on `turn_complete` and token/cost on the session handle; flushes on run end
+- Denies any still-pending approvals in `finally` so promises never leak
+
+### Sessions
+
+The database store inserts sessions lazily (on first append), so sessions created in-process are not yet visible to
+`store.open()`. All session routes go through `openSessionHandle()` (sessions.ts): try the store, fall back to the live
+RunManager handle.
+
+The per-session workspace cwd comes from the client (CLI sends its terminal cwd; web sends the sidebar value). File
+tools are confined to that cwd; bash is not (documented in relay core AGENTS.md).
+
+### Auth
+
+Single-user local mode: `LocalAuthProvider(DEV_AUTH_SUBJECT)` resolved through `DatabaseUserStore` — the same identity
+the CLI uses, so sessions hand off between clients. GitHub OAuth routes are a future transport change behind the
+existing `AuthProvider` contract; no storage changes needed.
+
+### API key
+
+`LLM_API_KEY` env wins; otherwise the CLI's `~/.relay/auth.json` is read (injectable reader for tests).
+
+### Static serving
+
+`RELAY_STATIC_DIR` (e.g. `packages/web/dist`) enables serving the built web app with SPA fallback. Paths are confined to
+the static dir.
+
+## API Surface
+
+| Endpoint                     | Method | Purpose                                               |
+| ---------------------------- | ------ | ----------------------------------------------------- |
+| `/api/health`                | GET    | Liveness + version                                    |
+| `/api/me`                    | GET    | Authenticated user                                    |
+| `/api/config`                | GET    | Model + context window for status displays            |
+| `/api/workspace`             | GET    | Server default cwd                                    |
+| `/api/sessions?cwd=`         | GET    | Session summaries for a workspace                     |
+| `/api/sessions`              | POST   | Create session                                        |
+| `/api/sessions/:id`          | GET    | Open (header, entries, tokens, cost, branch, running) |
+| `/api/sessions/:id/messages` | POST   | Submit user message (starts a run)                    |
+| `/api/sessions/:id/approve`  | POST   | Resolve pending approval                              |
+| `/api/sessions/:id/cancel`   | POST   | Abort active run                                      |
+| `/api/sessions/:id/events`   | GET    | SSE stream                                            |
+| `/api/sessions/:id/files`    | GET    | Project file listing                                  |
+
+Payload types live in `@vvtxn/client/protocol.ts` — never redeclare them here.
+
+## Environment
+
+- `LLM_API_KEY` (or `~/.relay/auth.json` fallback), `LLM_BASE_URL`, `LLM_MODEL`, `LLM_TEMPERATURE`, `LLM_MAX_TOKENS`,
+  `LLM_MAX_COMPLETION_TOKENS`
+- `TURSO_DB_URL`, `TURSO_DB_TOKEN`, `DEV_AUTH_SUBJECT`
+- `RELAY_PORT` (default 7433), `RELAY_HOST` (default 127.0.0.1), `RELAY_WORKSPACE`, `RELAY_STATIC_DIR`
+
+## Running
+
+```bash
+deno task serve          # from repo root, loads .env
+relay serve              # compiled binary subcommand
+```
+
+## Task Completion Checklist
+
+After concluding that a task is complete, always run these commands from the repo root:
+
+1. `deno task fmt` — auto-format all code
+2. `deno task lint` — check for lint errors
+3. `deno task test` — run the test suite
+
+## Code Patterns
+
+- Handlers receive `services` explicitly; never read env at request time
+- Route handlers throw `BadRequestError`/`NotFoundError`; the router maps them to responses
+- SSE frames via `encodeSSEFrame` from `@vvtxn/client`; heartbeats as SSE comments every 15s
+- `deno-lint-ignore` is rarely needed — prefer extracting non-async generators
+- Tests use fake stores/providers (see `run.test.ts`), never a live database

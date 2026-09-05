@@ -1,101 +1,94 @@
 # AGENTS.md - Agent
 
-The CLI application entry point: ties together the TUI, the relay agent library, and session management.
+The CLI application: a TUI client of the Relay server. All agent execution (loop, tools, sessions, approvals, tokens)
+happens server-side; the CLI talks to it over the `@vvtxn/client` protocol (REST + SSE).
 
 ## Architecture
 
 ```
 agent/
-├── index.ts              # Application entry point (imports app.tsx)
-├── app.tsx               # App component, signals, runSubmission, command palettes
-├── config.ts             # Default provider config (baseURL, model)
-├── auth.ts               # API key loading from ~/.relay/auth.json
+├── index.ts              # Entry point: `relay serve` → @vvtxn/server; default → app.tsx
+├── app.tsx               # App component, signals, SSE event folding, command palettes
+├── client.ts             # RelayClient singleton (server URL from config/env)
+├── config.ts             # RelayConfig: serverUrl (env RELAY_SERVER_URL or ~/.relay/config.json)
 ├── components/
-│   ├── boot-screen.tsx   # BootScreen (loading) and BootError shown while auth resolves
-│   ├── chat.tsx          # MessageView, ToolCallView, DiffView, UIMessage type
-│   └── status-bar.tsx    # StatusBar, TokenBar
+│   ├── boot-screen.tsx   # BootScreen (loading) and BootError shown while the server is resolved
+│   ├── chat.tsx          # MessageView, ToolCallView, DiffView; re-exports shared UIMessage
+│   └── status-bar.tsx    # StatusBar, TokenBar (context window arrives from /api/config)
 └── hooks/
-    └── project-files.ts  # useProjectFiles hook (git ls-files / directory walk)
+    └── project-files.ts  # useProjectFiles hook (file listing from the server)
 ```
 
 ## Key Concepts
 
 ### Application Structure
 
-`app.tsx` is a thin shell (~490 lines) that wires together:
+`app.tsx` wires together:
 
-- **Relay library** (`@vvtxn/relay`) — agent loop, tools, sessions, display utilities
+- **Relay display utilities** (`@vvtxn/relay/core/display.ts`) — `entriesToUIMessages`, `createUIToolCall`, display
+  names/output, diff parsing (pure, shared with the web app)
+- **API client** (`./client.ts`, `@vvtxn/client`) — RelayClient + protocol types
 - **TUI framework** (`@/tui`) — terminal rendering, components, hooks, input handling
-- **Local modules** — config, auth, UI components
+- **Local modules** — config, UI components, project-files hook
 
-```typescript
-import { runAgentLoop } from "@vvtxn/relay/core/runner.ts";
-import { CompletionsProvider } from "@vvtxn/relay/api/providers/completions.ts";
-import { createToolRegistry, createWorkspaceTools } from "@vvtxn/relay/core/tools/index.ts";
-import { withApproval } from "@vvtxn/relay/core/tools/approval.ts";
-import { StatusBar } from "./components/status-bar.tsx";
-import { MessageView } from "./components/chat.tsx";
-```
+The agent runtime is NOT in this package. `runAgentLoop`, tools, providers, and session stores were removed — use
+`@vvtxn/server` for the runtime and `@vvtxn/client` for the transport.
 
-### How the Agent Runs
+### How a Turn Runs
 
-```typescript
-await runAgentLoop(messages, config, {
-    onTextDelta(delta)        { /* accumulate text, sync signals */ },
-    onToolCallEnd(id, ...)    { /* create UIToolCall, sync signals */ },
-    onToolResult(id, result)  { /* update output/diff, sync signals */ },
-    onMessageComplete(...)    { /* track tokens/cost */ },
-    onTurnComplete(...)       { /* persist to session, clear draft */ },
-    onError(error)            { /* display error */ },
-});
-```
+1. `POST /api/sessions/:id/messages` with the raw text (the server expands `@mentions` and persists entries)
+2. The per-session SSE stream (subscribed in a `useSignalEffect` keyed by session id) delivers events
+3. Events fold into the same draft logic the TUI has always used: `text_delta`/`tool_call_*` accumulate a draft
+   (throttled 50ms sync), `turn_complete` finalizes it into `uiMessages`, `run_finished` refetches the session so
+   persisted entries are the source of truth
+4. `message_complete` events carry authoritative token/cost totals
+
+### Approvals
+
+`approval_required` events drive the existing `ApprovalPrompt` hook (`allow`/`always`/`deny`); decisions POST to
+`/api/sessions/:id/approve`. `approval_resolved` events (another client answered, or the run ended) cancel the local
+ask. Switching sessions denies any pending ask server-side so runs never hang.
 
 ### Boot Flow
 
-Authentication and the initial session resolve in the background (via a module-level `boot` signal + `bootstrap()`), not
-at import time. `Root` renders `BootScreen` (loading) or `BootError` (friendly failure) and mounts `App` only once a
-user and session exist — so missing env vars or an unreachable database never crash before the TUI renders. Both
-database stores share one Turso client created with `createDatabaseClient(databaseCredentialsFromEnv())`.
+`bootstrap()` health-checks the server (`Cannot reach the Relay server at ... Start one with 'relay serve'.`), fetches
+`/api/me` + `/api/config` in parallel, then creates a session for `Deno.cwd()`. `Root` renders `BootScreen` (loading) or
+`BootError` (friendly failure) and mounts `App` only once a user, session, and server info exist.
+
+### Cancellation
+
+Double-Esc (within 1.5s) while a run is active POSTs `/api/sessions/:id/cancel`. The server aborts the run's
+AbortController; `run_finished(cancelled)` arrives on the stream like any other event.
+
+### Configuration
+
+- `RELAY_SERVER_URL` env overrides `~/.relay/config.json` `serverUrl` (default `http://127.0.0.1:7433`)
+- `config.json` is auto-created with defaults on first run
+
+The LLM API key lives server-side only (`LLM_API_KEY` env or `~/.relay/auth.json` fallback read by the server). The CLI
+never prompts for one.
 
 ### UI Components
 
 - `Root` — Switches between BootScreen, BootError, and App based on the boot signal
-- `App` — Main component with signals, command palettes, input handling
-- `BootScreen` / `BootError` (components/boot-screen.tsx) — Auth loading and failure states
-- `StatusBar` (components/status-bar.tsx) — Branch name, signed-in user, token usage bar, cost display
-- `MessageView` (components/chat.tsx) — Renders user and agent messages with markdown
-- `ToolCallView` (components/chat.tsx) — Displays tool calls with display names, input, output, diffs
-- `DiffView` (components/chat.tsx) — Renders colored unified diffs with line numbers
-
-### Configuration
-
-- `LLM_API_KEY` (required) — API key for the LLM provider
-
-Defaults in `config.ts`:
-
-- `baseURL` — defaults to `https://openrouter.ai/api/v1`
-- `model` — defaults to `moonshotai/kimi-k2.6`
-
-### Features
-
-- Reactive state via `useSignal`
-- Vim-style input via `useTextInput`
-- Command palette (new chat, threads, quit) via `useCommandPalette`
-- File mentions via `@` with project file indexing
-- Tool approval prompts (`ApprovalPrompt`) for side-effecting tools, with per-process "always allow" memory
-- Double Esc to cancel in-progress generation
-- Token usage and cost tracking (including OpenRouter generation stats)
-- Session persistence with thread switching
+- `App` — Signals, event folding, palettes, approval handling
+- `StatusBar` — Model (from server), branch, user, token bar, cost
+- `MessageView` / `ToolCallView` / `DiffView` (components/chat.tsx) — Shared display contract from
+  `@vvtxn/relay/core/display.ts`; `UIMessage` is re-exported from there (single definition)
 
 ## Dependencies
 
-- `@vvtxn/relay` — Agent loop, runner, tools, sessions, display utilities
-- `@/tui` — Terminal UI framework (components, hooks, input manager)
+- `@vvtxn/client` — protocol types + RelayClient
+- `@vvtxn/server` — only for the `serve` subcommand entry
+- `@vvtxn/relay` — display utilities only
+- `@/tui` — terminal UI framework
 
 ## Running
 
 ```bash
-deno task agent
+deno task serve          # start the server (required)
+deno task agent          # start the TUI (another terminal)
+relay serve && relay     # compiled binary equivalents
 ```
 
 ## Task Completion Checklist
@@ -106,15 +99,10 @@ After concluding that a task is complete, always run these commands from the rep
 2. `deno task lint` — check for lint errors
 3. `deno task test` — run the test suite
 
-If any command fails, fix the issues and re-run until all pass cleanly.
-
 ## Code Patterns
 
-- UI components are split into `agent/components/` — not all in `app.tsx`
-- Business logic delegates to `@vvtxn/relay`
-- Use signals for reactive UI updates
-- Handle errors gracefully with user feedback
-- `@mention` expansion, project file listing, and git branch come from `@vvtxn/relay/core/workspace.ts` (rooted at
-  `Deno.cwd()`); the system prompt comes from `@vvtxn/relay/core/system-prompt.ts`
-- Tools are workspace-rooted (`createWorkspaceTools(Deno.cwd())`) and gated via `withApproval` + `useApprovalPrompt`;
-  the approval hook must be registered before the double-Esc cancel handler
+- Business logic lives server-side; this package only folds events into UI state
+- Use signals for reactive UI updates; register the approval hook before the double-Esc handler
+- Session switching resets signals and lets the session `useSignalEffect` re-subscribe + refetch
+- `@mention` file listing comes from `useProjectFiles` (server endpoint), keyed per session
+- `entriesToUIMessages` renders persisted sessions — do not duplicate the conversion locally

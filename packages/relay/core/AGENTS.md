@@ -9,7 +9,7 @@ core/
 ├── index.ts              # Internal barrel re-exports (see packages/relay/mod.ts for public API)
 ├── agent.ts              # Agent loop (async generator yielding AgentEvents)
 ├── runner.ts             # runAgentLoop() convenience wrapper with callbacks
-├── display.ts            # Display utilities: UIToolCall, parseDiffLines, tool arg/output formatting
+├── display.ts            # Display utilities: UIMessage, UIToolCall, parseDiffLines, arg/output formatting
 ├── paths.ts              # relayDir(), homeDir() helpers
 ├── context.ts            # Context trimming (token estimation, turn-based truncation)
 ├── database.ts           # Shared Turso client factory + env credentials (used by session and user stores)
@@ -99,9 +99,12 @@ type AgentEvent =
 
 ### Display Utilities (`display.ts`)
 
-Shared across all clients:
+Shared across all clients (TUI, web). Deliberately dependency-free so browser bundles can import it:
 
 - `UIToolCall` — Display-ready tool call with summarized args and formatted output
+- `UIMessage` — Client-agnostic chat message (`user` or `agent` with tool calls)
+- `entriesToUIMessages()` — Converts session entries into UIMessages, folding tool results into their calls
+- `stripAttachedContext()` — Removes `@mention` attached-context blocks from user content
 - `createUIToolCall()` — Creates a UIToolCall from tool name and JSON args
 - `summarizeToolArgs()` — Converts JSON args to human-readable summary (path, pattern, command, etc.)
 - `getToolDisplayName()` — Maps internal tool names to display labels (e.g. `read_file` → "read")

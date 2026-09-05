@@ -1,10 +1,11 @@
 # Relay v0.8.0
 
-A coding agent with a custom terminal UI framework, built with Deno and TypeScript.
+A coding agent with a terminal UI and a web UI, built with Deno and TypeScript.
 
 Relay is a monorepo (Deno workspace) containing a terminal UI framework powered by a custom JSX runtime and Yoga flexbox
-layout, an OpenAI-compatible LLM API layer with streaming support, and an agentic loop with built-in tools — all wired
-together into an interactive coding assistant that runs entirely in your terminal.
+layout, an OpenAI-compatible LLM API layer with streaming support, and an agentic loop with built-in tools. One agent
+runtime is hosted by an HTTP + SSE server; both the terminal client and the browser client talk to it over the same wire
+protocol and share the same sessions.
 
 > **Note — Project Transition**
 >
@@ -19,8 +20,11 @@ together into an interactive coding assistant that runs entirely in your termina
 
 ## Features
 
+- **Terminal + web clients** — One server, two frontends, shared sessions; start a thread in the terminal, continue it
+  in the browser
 - **Custom JSX-based TUI framework** — Flexbox layout via Yoga, double-buffered rendering, reactive signals, vim-mode
   text input
+- **Preact web client** — Vite build, streaming chat, rendered diffs, markdown, @-mention file picker, approval dialogs
 - **OpenAI-compatible API layer** — Works with any provider exposing `/v1/chat/completions` (OpenRouter, OpenAI, local
   models, etc.)
 - **Streaming agent loop** — Async generator that yields events for real-time UI updates as the LLM thinks and uses
@@ -28,9 +32,10 @@ together into an interactive coding assistant that runs entirely in your termina
 - **Built-in tools** — Bash, file read/write/edit, and grep for filesystem interaction
 - **Shared session storage** — Conversations persist in a Turso database so terminal and web clients share the same
   session history
+- **Tool approval** — Side-effecting tools wait for an allow/deny decision in either client
 - **Inline diffs** — File write and edit operations display colored unified diffs with line numbers
-- **Markdown rendering** — Inline markdown display in the terminal with syntax highlighting
-- **Command palette** — Fuzzy-searchable command menu
+- **Markdown rendering** — Inline markdown display in the terminal and the browser
+- **Command palette** — Fuzzy-searchable command menu in the terminal
 
 ## Install
 
@@ -54,9 +59,9 @@ cd relay
 deno task build        # outputs dist/relay
 ```
 
-On first run, Relay will prompt you for an API key and save it to `~/.relay/auth.json`.
+The server reads its LLM API key from `LLM_API_KEY`, falling back to `~/.relay/auth.json`.
 
-Model and provider settings are configured in `~/.relay/config.json`.
+Server settings (`serverUrl` for the terminal client) are configured in `~/.relay/config.json`.
 
 ## Quick Start
 
@@ -71,20 +76,40 @@ git clone https://github.com/vvtxn/relay.git
 cd relay
 ```
 
-Set your API key:
+Set your environment:
 
 ```bash
-export LLM_API_KEY="your-api-key"
 export TURSO_DB_URL="your-database-url"
 export TURSO_DB_TOKEN="your-database-token"
 export DEV_AUTH_SUBJECT="your-local-user"
+# Optional — falls back to ~/.relay/auth.json written by the CLI:
+export LLM_API_KEY="your-api-key"
 ```
 
 ### Run
 
+Start the server (hosts the agent runtime):
+
 ```bash
-deno task agent
+deno task serve
 ```
+
+Then use either client:
+
+```bash
+deno task agent        # terminal UI (another shell)
+deno task web:dev      # web UI at http://localhost:5173 (proxies /api to the server)
+```
+
+For production, build the web app and let the server serve it:
+
+```bash
+deno task web:build
+RELAY_STATIC_DIR=packages/web/dist deno task serve
+# open http://127.0.0.1:7433
+```
+
+The compiled binary ships both: `relay serve` starts the server, `relay` starts the terminal UI.
 
 ## Architecture
 
@@ -93,7 +118,10 @@ deno task agent
 │   ├── relay/              # Core agent library (@vvtxn/relay)
 │   │   ├── api/            # LLM provider types and CompletionsProvider
 │   │   └── core/           # Agent loop, runner, tools, sessions, context, display
-│   └── cli/                # CLI + TUI frontend (@vvtxn/cli)
+│   ├── client/             # Wire protocol + RelayClient (@vvtxn/client)
+│   ├── server/             # HTTP + SSE server hosting the runtime (@vvtxn/server)
+│   ├── web/                # Preact + Vite web client (@vvtxn/web)
+│   └── cli/                # TUI client + serve subcommand (@vvtxn/cli)
 │       ├── agent/          # App entry point, config, components, hooks
 │       └── tui/            # Terminal UI framework (JSX runtime, Yoga layout)
 ├── scripts/                # Build and version bump scripts
@@ -106,8 +134,42 @@ deno task agent
 ```
 packages/relay  (leaf — no internal deps)
        ↑
-packages/cli  (depends on packages/relay + npm:@preact/signals-core + npm:yoga-layout)
+packages/client  (protocol + transport, type-only relay imports)
+       ↑                    ↑
+packages/server        packages/web
+       ↑
+packages/cli  (TUI client + serve subcommand)
 ```
+
+All clients talk to the server over the shared protocol in `packages/client`. The agent loop, tools, and session stores
+execute only in `packages/server`; `packages/relay` powers it and provides display utilities (message mapping, diffs) to
+both frontends.
+
+### `packages/client/` — Wire Protocol + Client
+
+The single source of truth for the server↔client contract, shared by the CLI (Deno) and the web app (browser):
+
+- `protocol.ts` — REST payloads + SSE `ServerEvent` union (plain JSON types)
+- `sse.ts` — fetch-based SSE parser (no EventSource; works in Deno and browsers) + server-side frame encoder
+- `client.ts` — `RelayClient` (typed methods for every endpoint, `subscribe()` for event streams)
+
+### `packages/server/` — Agent Runtime Host
+
+A dependency-free `Deno.serve` application:
+
+- **RunManager** — one active run per session; bridges agent events onto per-session SSE streams; gates side-effecting
+  tools behind approval decisions that arrive over HTTP
+- **Sessions** — create/open/list against the shared Turso store; per-session workspace cwd (file tools are confined to
+  it)
+- **Auth** — local dev auth (`DEV_AUTH_SUBJECT`) resolved through the shared user store, so CLI and web share
+  identities; GitHub OAuth slots in later behind the same contract
+- **Static serving** — serves the built web app with SPA fallback when `RELAY_STATIC_DIR` is set
+
+### `packages/web/` — Preact Client
+
+Vite-built SPA (`deno task web:build` / `web:dev`): streaming chat with live drafts, tool call cards with rendered
+diffs, safe vdom markdown, @-mention file picker, session sidebar with workspace switching, approval dialogs, and a
+token/cost status bar. State is `@preact/signals`; the SSE event folding mirrors the CLI's logic exactly.
 
 ### `packages/relay/api/` — LLM Provider Layer
 
@@ -141,7 +203,7 @@ The agent loop is an async generator (`run()`) that streams `AgentEvent`s:
 development uses `DEV_AUTH_SUBJECT`; GitHub identity mapping is ready for a future OAuth flow.
 
 **Session persistence** — Conversations are stored in the shared Turso database and can be shared by the terminal and
-web clients. The terminal requires `TURSO_DB_URL`, `TURSO_DB_TOKEN`, and `DEV_AUTH_SUBJECT` while local auth is active:
+web clients. The server requires `TURSO_DB_URL`, `TURSO_DB_TOKEN`, and `DEV_AUTH_SUBJECT` while local auth is active:
 
 - **Create** — New sessions with unique IDs and timestamps
 - **Continue** — Resume the most recent session for a workspace
@@ -185,16 +247,18 @@ A custom terminal UI framework with:
 | `useScrollArea(opts)`     | Scroll state with keyboard control  |
 | `useCommandPalette(opts)` | Command palette state and filtering |
 
-### `packages/cli/agent/` — Application
+### `packages/cli/agent/` — Terminal Application
 
-Ties everything together into the interactive terminal agent:
+A thin TUI client of the server:
 
-- `system-prompt.md` — The system prompt for the agent
-- Status bar with git branch, token usage progress bar, and cost tracking
+- Status bar with model, git branch, token usage progress bar, and cost tracking
 - Scrollable chat history with markdown rendering
 - Streaming tool call display
 - Vim-mode text input
-- Command palette (`/`) for actions like "New Chat" and "Quit"
+- Command palette (`/`) for actions like "New Chat", "Threads", and "Quit"
+- Tool approval prompts (`y`/`a`/`n`) for side-effecting tools, with per-process "always allow" memory
+- Double Esc to cancel in-progress generation
+- `@` file mentions backed by the server's project file listing
 
 ## Development
 
@@ -203,7 +267,11 @@ deno task fmt          # Format code
 deno task fmt:check    # Check formatting
 deno task lint         # Lint
 deno task test         # Run tests
-deno task build        # Build binary (dist/relay)
+deno task serve        # Run the server (loads .env)
+deno task agent        # Run the terminal client (requires a running server)
+deno task web:dev      # Web client dev server (proxies /api to the server)
+deno task web:build    # Build the web client (packages/web/dist)
+deno task build        # Build binary (dist/relay; includes TUI + serve)
 deno task version      # Show current version
 deno task version:bump <patch|minor|major>  # Bump version
 ```
@@ -235,9 +303,9 @@ Tag-based releases via GitHub Actions (`.github/workflows/release.yml`):
 3. `git tag v<version> && git push --tags`
 4. CI builds the Linux binary without embedding environment files and creates the GitHub Release
 
-The released binary reads `LLM_API_KEY`, `TURSO_DB_URL`, `TURSO_DB_TOKEN`, and `DEV_AUTH_SUBJECT` from its runtime
-environment. Local `deno task build` builds may load `.env` automatically, but release builds should not include secrets
-in the executable.
+The released binary reads `LLM_API_KEY` (or falls back to `~/.relay/auth.json`), `TURSO_DB_URL`, `TURSO_DB_TOKEN`, and
+`DEV_AUTH_SUBJECT` from its runtime environment. Local `deno task build` builds may load `.env` automatically, but
+release builds should not include secrets in the executable.
 
 ## License
 
