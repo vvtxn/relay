@@ -1,0 +1,19 @@
+{
+	"name": "@vvtxn/web",
+	"version": "0.1.0",
+	"exports": {
+		".": "./src/main.tsx"
+	},
+	"imports": {
+		"@/": "./",
+		"@vvtxn/relay/": "../relay/",
+		"@vvtxn/client/": "../client/",
+		"preact": "npm:preact@^10.27.0",
+		"@preact/signals": "npm:@preact/signals@^2.0.0",
+		"vite": "npm:vite@^7.1.0"
+	},
+	"compilerOptions": {
+		"jsx": "react-jsx",
+		"jsxImportSource": "preact"
+	}
+}
