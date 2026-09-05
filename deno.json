@@ -1,5 +1,5 @@
 {
-	"workspace": ["packages/relay", "packages/cli", "packages/client"],
+	"workspace": ["packages/relay", "packages/cli", "packages/client", "packages/server"],
 	"nodeModulesDir": "none",
 	"tasks": {
 		"fmt": "deno fmt",
