@@ -1,9 +1,10 @@
 /**
  * Display utilities for agent output — shared across all clients (TUI, web, mobile).
+ *
+ * Deliberately dependency-free: this module is imported by browser bundles.
  */
 
 import type { Entry } from "./sessions/types.ts";
-import { stripAttachedContext } from "./sessions/manager.ts";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -76,6 +77,11 @@ export function summarizeToolArgs(name: string, args: string): string {
 
 export function createUIToolCall(name: string, args: string): UIToolCall {
 	return { name, input: summarizeToolArgs(name, args), output: "" };
+}
+
+/** Strip @mention attached_context blocks from user message content to reduce token bloat in history. */
+export function stripAttachedContext(content: string): string {
+	return content.replace(/\n\n<attached_context>[\s\S]*<\/attached_context>$/, "");
 }
 
 /**

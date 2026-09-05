@@ -61,10 +61,7 @@ export function entriesToMessages(entries: Entry[]): Message[] {
 	return entries.map(entryToMessage);
 }
 
-/** Strip @mention attached_context blocks from user message content to reduce token bloat in history. */
-export function stripAttachedContext(content: string): string {
-	return content.replace(/\n\n<attached_context>[\s\S]*<\/attached_context>$/, "");
-}
+export { stripAttachedContext } from "@/core/display.ts";
 
 // ---------------------------------------------------------------------------
 // SessionManager

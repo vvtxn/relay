@@ -13,6 +13,7 @@ import type {
 	ServerEvent,
 	SessionListResponse,
 	StatusResponse,
+	WorkspaceResponse,
 } from "./protocol.ts";
 import { readSSEStream } from "./sse.ts";
 
@@ -39,6 +40,14 @@ export interface RelayClientOptions {
  * dependencies, so the same client drives the CLI (Deno) and the web app
  * (browser).
  */
+
+export interface SubscribeOptions {
+	/** Aborts the subscription when fired. */
+	signal?: AbortSignal;
+	/** Called once the SSE response is established, before any events flow. */
+	onOpen?: () => void;
+}
+
 export class RelayClient {
 	private readonly baseUrl: string;
 	private readonly doFetch: typeof fetch;
@@ -54,6 +63,10 @@ export class RelayClient {
 
 	async me(): Promise<MeResponse> {
 		return await this.get("/api/me");
+	}
+
+	async workspace(): Promise<WorkspaceResponse> {
+		return await this.get("/api/workspace");
 	}
 
 	async listSessions(cwd: string): Promise<SessionListResponse> {
@@ -91,9 +104,11 @@ export class RelayClient {
 	 * Subscribe to a session's SSE event stream. The stream ends when the
 	 * server closes it (session idle shutdown) or the signal aborts.
 	 */
-	async *subscribe(sessionId: string, signal?: AbortSignal): AsyncIterable<ServerEvent> {
+	async *subscribe(sessionId: string, options: SubscribeOptions | AbortSignal = {}): AsyncIterable<ServerEvent> {
+		const { signal, onOpen } = options instanceof AbortSignal ? { signal: options, onOpen: undefined } : options;
 		const response = await this.doFetch(`${this.baseUrl}/api/sessions/${sessionId}/events`, { signal });
 		if (!response.ok) throw await this.toError(response);
+		onOpen?.();
 		yield* readSSEStream<ServerEvent>(response);
 	}
 

@@ -20,7 +20,7 @@
  */
 
 export { RelayApiError, RelayClient } from "./client.ts";
-export type { RelayClientOptions } from "./client.ts";
+export type { RelayClientOptions, SubscribeOptions } from "./client.ts";
 export { encodeSSEFrame, readSSEStream } from "./sse.ts";
 export type {
 	ApprovalDecision,
@@ -39,4 +39,5 @@ export type {
 	ServerEvent,
 	SessionListResponse,
 	StatusResponse,
+	WorkspaceResponse,
 } from "./protocol.ts";

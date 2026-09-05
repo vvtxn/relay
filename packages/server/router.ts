@@ -5,6 +5,7 @@ import { handleCreateSession, handleListSessions, handleMe, handleOpenSession, h
 import { handleEvents } from "./sse.ts";
 import { handleListFiles } from "./files.ts";
 import { handleApprove, handleCancel } from "./approvals.ts";
+import { handleWorkspace } from "./workspace.ts";
 import { serveStatic } from "./static.ts";
 
 const VERSION = "0.1.0";
@@ -26,6 +27,7 @@ export async function handleRequest(services: ServerServices, request: Request):
 			});
 		}
 		if (method === "GET" && path === "/api/me") return await handleMe(services);
+		if (method === "GET" && path === "/api/workspace") return handleWorkspace(services);
 
 		// Sessions collection
 		if (method === "GET" && path === "/api/sessions") return await handleListSessions(services, url);

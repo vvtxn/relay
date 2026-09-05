@@ -25,6 +25,11 @@ export interface MeResponse {
 	provider?: string;
 }
 
+/** The server's default workspace directory (used to scope sessions). */
+export interface WorkspaceResponse {
+	cwd: string;
+}
+
 export interface SessionListResponse {
 	sessions: SessionSummary[];
 }
