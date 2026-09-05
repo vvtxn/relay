@@ -1,7 +1,7 @@
 import { encodeSSEFrame } from "@vvtxn/client/sse.ts";
 import type { ServerEvent } from "@vvtxn/client/protocol.ts";
 import type { ServerServices } from "./services.ts";
-import { NotFoundError } from "./http.ts";
+import { openSessionHandle } from "./sessions.ts";
 
 const HEARTBEAT_INTERVAL_MS = 15_000;
 
@@ -12,12 +12,8 @@ const HEARTBEAT_INTERVAL_MS = 15_000;
  */
 export async function handleEvents(services: ServerServices, sessionId: string, request: Request): Promise<Response> {
 	// Verify the session exists and is owned by the user
-	try {
-		const handle = await services.sessionStore.open(sessionId, services.user.id);
-		services.runs.attachHandle(sessionId, handle);
-	} catch {
-		throw new NotFoundError(`Session not found: ${sessionId}`);
-	}
+	const handle = await openSessionHandle(services, sessionId);
+	services.runs.attachHandle(sessionId, handle);
 
 	const { runs } = services;
 	const encoder = new TextEncoder();

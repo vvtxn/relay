@@ -1,4 +1,5 @@
 import { getGitBranch } from "@vvtxn/relay/core/workspace.ts";
+import type { SessionHandle } from "@vvtxn/relay/core/sessions/index.ts";
 import type {
 	CreateSessionRequest,
 	CreateSessionResponse,
@@ -11,6 +12,21 @@ import type {
 import type { ServerServices } from "./services.ts";
 import { BadRequestError, error, json, NotFoundError, readJsonBody } from "./http.ts";
 import { RunConflictError } from "./run.ts";
+
+/**
+ * Opens a session by id, falling back to the live in-memory handle for
+ * sessions that were created in this process but not persisted yet (the
+ * database store inserts lazily on first append).
+ */
+export async function openSessionHandle(services: ServerServices, sessionId: string): Promise<SessionHandle> {
+	try {
+		return await services.sessionStore.open(sessionId, services.user.id);
+	} catch {
+		const handle = services.runs.getHandle(sessionId);
+		if (handle) return handle;
+		throw new NotFoundError(`Session not found: ${sessionId}`);
+	}
+}
 
 /** Resolve the workspace cwd from the query param or fall back to the server default. */
 function resolveCwd(services: ServerServices, url: URL): string {
@@ -47,12 +63,7 @@ export async function handleCreateSession(services: ServerServices, request: Req
 }
 
 export async function handleOpenSession(services: ServerServices, sessionId: string): Promise<Response> {
-	let handle;
-	try {
-		handle = await services.sessionStore.open(sessionId, services.user.id);
-	} catch {
-		throw new NotFoundError(`Session not found: ${sessionId}`);
-	}
+	const handle = await openSessionHandle(services, sessionId);
 
 	services.runs.attachHandle(sessionId, handle);
 	const branch = await getGitBranch(handle.getHeader().cwd);
@@ -81,12 +92,7 @@ export async function handleSendMessage(
 
 	// Ensure the handle is open (ownership check happens in open())
 	if (!services.runs.hasHandle(sessionId)) {
-		try {
-			const handle = await services.sessionStore.open(sessionId, services.user.id);
-			services.runs.attachHandle(sessionId, handle);
-		} catch {
-			throw new NotFoundError(`Session not found: ${sessionId}`);
-		}
+		services.runs.attachHandle(sessionId, await openSessionHandle(services, sessionId));
 	}
 
 	try {

@@ -131,6 +131,11 @@ export class RunManager {
 		return this.handles.has(sessionId);
 	}
 
+	/** The live handle for a session, when the server has one open (created or used this process). */
+	getHandle(sessionId: string): SessionHandle | null {
+		return this.handles.get(sessionId) ?? null;
+	}
+
 	/** Returns 202-style start; throws RunConflictError when a run is active. */
 	startMessage(sessionId: string, content: string): void {
 		if (this.activeRuns.has(sessionId)) throw new RunConflictError(sessionId);

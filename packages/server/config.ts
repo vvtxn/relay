@@ -1,5 +1,8 @@
 /** Server configuration — read once from the environment at startup. */
 
+import { join } from "@std/path/join";
+import { relayDir } from "@vvtxn/relay/core/paths.ts";
+
 export interface ServerConfig {
 	/** Port to listen on. */
 	port: number;
@@ -42,11 +45,33 @@ function required(env: Record<string, string | undefined>, key: string): string 
 	return value;
 }
 
-export function serverConfigFromEnv(env: Record<string, string | undefined> = Deno.env.toObject()): ServerConfig {
+/** Reads the API key from the CLI's auth file (~/.relay/auth.json). Returns null when absent. */
+function readApiKeyFromAuthFile(): string | null {
+	try {
+		const raw = Deno.readTextFileSync(join(relayDir(), "auth.json"));
+		const parsed = JSON.parse(raw) as { apiKey?: unknown };
+		return typeof parsed.apiKey === "string" && parsed.apiKey.length > 0 ? parsed.apiKey : null;
+	} catch {
+		return null;
+	}
+}
+
+function resolveApiKey(env: Record<string, string | undefined>, readApiKey: () => string | null): string {
+	const fromEnv = env.LLM_API_KEY;
+	if (fromEnv) return fromEnv;
+	const fromFile = readApiKey();
+	if (fromFile) return fromFile;
+	throw new Error("LLM_API_KEY is required (or run the CLI once to create ~/.relay/auth.json)");
+}
+
+export function serverConfigFromEnv(
+	env: Record<string, string | undefined> = Deno.env.toObject(),
+	readApiKey: () => string | null = readApiKeyFromAuthFile,
+): ServerConfig {
 	return {
 		port: Number(env.RELAY_PORT ?? DEFAULT_PORT),
 		hostname: env.RELAY_HOST ?? DEFAULT_HOSTNAME,
-		apiKey: required(env, "LLM_API_KEY"),
+		apiKey: resolveApiKey(env, readApiKey),
 		baseURL: env.LLM_BASE_URL ?? DEFAULT_BASE_URL,
 		model: env.LLM_MODEL ?? DEFAULT_MODEL,
 		temperature: Number(env.LLM_TEMPERATURE ?? 0.1),

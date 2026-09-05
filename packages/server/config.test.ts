@@ -37,10 +37,33 @@ Deno.test("serverConfigFromEnv - respects overrides", () => {
 Deno.test("serverConfigFromEnv - throws when required env is missing", () => {
 	let threw = false;
 	try {
-		serverConfigFromEnv({});
+		serverConfigFromEnv({ LLM_API_KEY: "test-key" }, () => null);
 	} catch (error) {
 		threw = true;
-		assertEquals((error as Error).message, "LLM_API_KEY is required");
+		assertEquals((error as Error).message, "TURSO_DB_URL is required");
 	}
 	assertEquals(threw, true);
+});
+
+Deno.test("serverConfigFromEnv - falls back to the CLI auth file for the API key", () => {
+	const config = serverConfigFromEnv(
+		{ ...REQUIRED_ENV, LLM_API_KEY: undefined },
+		() => "file-key",
+	);
+	assertEquals(config.apiKey, "file-key");
+});
+
+Deno.test("serverConfigFromEnv - prefers the env key over the auth file", () => {
+	const config = serverConfigFromEnv({ ...REQUIRED_ENV }, () => "file-key");
+	assertEquals(config.apiKey, "test-key");
+});
+
+Deno.test("serverConfigFromEnv - throws when no key source is available", () => {
+	let message = "";
+	try {
+		serverConfigFromEnv({ ...REQUIRED_ENV, LLM_API_KEY: undefined }, () => null);
+	} catch (error) {
+		message = (error as Error).message;
+	}
+	assertEquals(message, "LLM_API_KEY is required (or run the CLI once to create ~/.relay/auth.json)");
 });
