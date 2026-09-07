@@ -11,7 +11,6 @@ Terminal-based coding agent with custom TUI framework.
 │   │   └── core/           # Agent loop, runner, tools, sessions, context, display
 │   ├── client/             # Wire protocol + RelayClient (@vvtxn/client)
 │   ├── server/             # HTTP + SSE server hosting the runtime (@vvtxn/server)
-│   ├── web/                # Preact + Vite web client (@vvtxn/web)
 │   └── cli/                # TUI client + serve subcommand (@vvtxn/cli)
 │       ├── agent/          # App entry point, config, components, hooks
 │       └── tui/            # Terminal UI framework (JSX runtime, Yoga layout)
@@ -27,7 +26,6 @@ packages/relay  (leaf — no internal deps)
        ↑
 packages/client  (protocol + transport, type-only relay imports)
        ↑                    ↑
-packages/server        packages/web
        ↑
 packages/cli  (TUI client + serve subcommand)
 ```
@@ -43,8 +41,6 @@ in the server. `packages/relay` powers the server and provides display utilities
 - **Run tests**: `deno task test` (requires `--allow-read --allow-write --allow-env --allow-run`)
 - **Run agent**: `deno task agent` (requires a running server: `deno task serve`)
 - **Run server**: `deno task serve` (loads `.env`; requires Turso + auth env)
-- **Web dev**: `deno task web:dev` (Vite dev server, proxies /api to the local server)
-- **Web build**: `deno task web:build` (outputs `packages/web/dist`)
 - **Build binary**: `deno task build` (compiles to `dist/relay`, includes TUI + serve)
 
 ## Task Completion Checklist
@@ -126,7 +122,6 @@ Each sub-package has its own AGENTS.md with package-specific details:
 - `packages/relay/core/AGENTS.md` - Agent loop, runner, tools, sessions
 - `packages/client/AGENTS.md` - Wire protocol and HTTP/SSE client
 - `packages/server/AGENTS.md` - HTTP + SSE server hosting the agent runtime
-- `packages/web/AGENTS.md` - Preact web client
 - `packages/cli/agent/AGENTS.md` - CLI application and TUI components
 - `packages/cli/tui/AGENTS.md` - Terminal UI framework
 

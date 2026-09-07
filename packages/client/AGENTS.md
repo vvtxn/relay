@@ -1,6 +1,6 @@
 # AGENTS.md - Client
 
-Typed wire protocol + HTTP/SSE client shared by every Relay frontend (CLI in Deno, web app in the browser).
+Typed wire protocol + HTTP/SSE client used by the Relay terminal client (CLI in Deno).
 
 ## Architecture
 
@@ -50,7 +50,7 @@ After concluding that a task is complete, always run these commands from the rep
 
 ## Code Patterns
 
-- Protocol changes always land here first; server and both clients consume the same types
+- Protocol changes always land here first; server and client consume the same types
 - Keep protocol types JSON-serializable (no class instances, no functions)
 - Error bodies always use `{ error: string }` so clients can render them directly
 - New endpoints: add payload types to `protocol.ts`, a method to `RelayClient`, tests in `client.test.ts`

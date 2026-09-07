@@ -1,11 +1,10 @@
 # Relay v0.8.0
 
-A coding agent with a terminal UI and a web UI, built with Deno and TypeScript.
+A coding agent with a terminal UI, built with Deno and TypeScript.
 
 Relay is a monorepo (Deno workspace) containing a terminal UI framework powered by a custom JSX runtime and Yoga flexbox
 layout, an OpenAI-compatible LLM API layer with streaming support, and an agentic loop with built-in tools. One agent
-runtime is hosted by an HTTP + SSE server; both the terminal client and the browser client talk to it over the same wire
-protocol and share the same sessions.
+runtime is hosted by an HTTP + SSE server; the terminal client talks to it over the wire protocol.
 
 > **Note — Project Transition**
 >
@@ -20,21 +19,19 @@ protocol and share the same sessions.
 
 ## Features
 
-- **Terminal + web clients** — One server, two frontends, shared sessions; start a thread in the terminal, continue it
-  in the browser
+- **Terminal client** — TUI that connects to the server for shared sessions
 - **Custom JSX-based TUI framework** — Flexbox layout via Yoga, double-buffered rendering, reactive signals, vim-mode
   text input
-- **Preact web client** — Vite build, streaming chat, rendered diffs, markdown, @-mention file picker, approval dialogs
+- **Streaming chat** — Real-time message rendering with live drafts and tool call cards
 - **OpenAI-compatible API layer** — Works with any provider exposing `/v1/chat/completions` (OpenRouter, OpenAI, local
   models, etc.)
 - **Streaming agent loop** — Async generator that yields events for real-time UI updates as the LLM thinks and uses
   tools
 - **Built-in tools** — Bash, file read/write/edit, and grep for filesystem interaction
-- **Shared session storage** — Conversations persist in a Turso database so terminal and web clients share the same
-  session history
-- **Tool approval** — Side-effecting tools wait for an allow/deny decision in either client
+- **Shared session storage** — Conversations persist in a Turso database for shared session history
+- **Tool approval** — Side-effecting tools wait for an allow/deny decision
 - **Inline diffs** — File write and edit operations display colored unified diffs with line numbers
-- **Markdown rendering** — Inline markdown display in the terminal and the browser
+- **Markdown rendering** — Inline markdown display in the terminal
 - **Command palette** — Fuzzy-searchable command menu in the terminal
 
 ## Install
@@ -94,19 +91,10 @@ Start the server (hosts the agent runtime):
 deno task serve
 ```
 
-Then use either client:
+Then use the client:
 
 ```bash
 deno task agent        # terminal UI (another shell)
-deno task web:dev      # web UI at http://localhost:5173 (proxies /api to the server)
-```
-
-For production, build the web app and let the server serve it:
-
-```bash
-deno task web:build
-RELAY_STATIC_DIR=packages/web/dist deno task serve
-# open http://127.0.0.1:7433
 ```
 
 The compiled binary ships both: `relay serve` starts the server, `relay` starts the terminal UI.
@@ -120,7 +108,6 @@ The compiled binary ships both: `relay serve` starts the server, `relay` starts 
 │   │   └── core/           # Agent loop, runner, tools, sessions, context, display
 │   ├── client/             # Wire protocol + RelayClient (@vvtxn/client)
 │   ├── server/             # HTTP + SSE server hosting the runtime (@vvtxn/server)
-│   ├── web/                # Preact + Vite web client (@vvtxn/web)
 │   └── cli/                # TUI client + serve subcommand (@vvtxn/cli)
 │       ├── agent/          # App entry point, config, components, hooks
 │       └── tui/            # Terminal UI framework (JSX runtime, Yoga layout)
@@ -135,19 +122,19 @@ The compiled binary ships both: `relay serve` starts the server, `relay` starts 
 packages/relay  (leaf — no internal deps)
        ↑
 packages/client  (protocol + transport, type-only relay imports)
-       ↑                    ↑
-packages/server        packages/web
+       ↑
+packages/server  (HTTP + SSE runtime host)
        ↑
 packages/cli  (TUI client + serve subcommand)
 ```
 
-All clients talk to the server over the shared protocol in `packages/client`. The agent loop, tools, and session stores
-execute only in `packages/server`; `packages/relay` powers it and provides display utilities (message mapping, diffs) to
-both frontends.
+The terminal client talks to the server over the shared protocol in `packages/client`. The agent loop, tools, and session
+stores execute only in `packages/server`; `packages/relay` powers it and provides display utilities (message mapping,
+diffs) to the terminal client.
 
 ### `packages/client/` — Wire Protocol + Client
 
-The single source of truth for the server↔client contract, shared by the CLI (Deno) and the web app (browser):
+The single source of truth for the server↔client contract, used by the CLI (Deno):
 
 - `protocol.ts` — REST payloads + SSE `ServerEvent` union (plain JSON types)
 - `sse.ts` — fetch-based SSE parser (no EventSource; works in Deno and browsers) + server-side frame encoder
@@ -161,15 +148,9 @@ A dependency-free `Deno.serve` application:
   tools behind approval decisions that arrive over HTTP
 - **Sessions** — create/open/list against the shared Turso store; per-session workspace cwd (file tools are confined to
   it)
-- **Auth** — local dev auth (`DEV_AUTH_SUBJECT`) resolved through the shared user store, so CLI and web share
-  identities; GitHub OAuth slots in later behind the same contract
-- **Static serving** — serves the built web app with SPA fallback when `RELAY_STATIC_DIR` is set
-
-### `packages/web/` — Preact Client
-
-Vite-built SPA (`deno task web:build` / `web:dev`): streaming chat with live drafts, tool call cards with rendered
-diffs, safe vdom markdown, @-mention file picker, session sidebar with workspace switching, approval dialogs, and a
-token/cost status bar. State is `@preact/signals`; the SSE event folding mirrors the CLI's logic exactly.
+- **Auth** — local dev auth (`DEV_AUTH_SUBJECT`) resolved through the shared user store; GitHub OAuth slots in later
+  behind the same contract
+- **Static serving** — optional static file serving when `RELAY_STATIC_DIR` is set
 
 ### `packages/relay/api/` — LLM Provider Layer
 
@@ -202,14 +183,13 @@ The agent loop is an async generator (`run()`) that streams `AgentEvent`s:
 **Authentication** — Provider identities are resolved to internal user IDs before they reach application storage. Local
 development uses `DEV_AUTH_SUBJECT`; GitHub identity mapping is ready for a future OAuth flow.
 
-**Session persistence** — Conversations are stored in the shared Turso database and can be shared by the terminal and
-web clients. The server requires `TURSO_DB_URL`, `TURSO_DB_TOKEN`, and `DEV_AUTH_SUBJECT` while local auth is active:
+**Session persistence** — Conversations are stored in the shared Turso database and can be used by the terminal client. The server requires `TURSO_DB_URL`, `TURSO_DB_TOKEN`, and `DEV_AUTH_SUBJECT` while local auth is active:
 
 - **Create** — New sessions with unique IDs and timestamps
 - **Continue** — Resume the most recent session for a workspace
 - **Open** — Load a specific session by opaque session ID
 - **List** — Browse all sessions with summaries (first user message preview)
-- **Cross-client** — A session started in the terminal can be continued on the web, and vice versa
+- **Cross-client** — A session started in the terminal can be continued on another terminal, and vice versa
 - **Token tracking** — Per-session token and cost counts persisted in session metadata
 
 Sessions store metadata plus ordered entries: user/assistant messages and tool results. The workspace path is part of
@@ -269,8 +249,6 @@ deno task lint         # Lint
 deno task test         # Run tests
 deno task serve        # Run the server (loads .env)
 deno task agent        # Run the terminal client (requires a running server)
-deno task web:dev      # Web client dev server (proxies /api to the server)
-deno task web:build    # Build the web client (packages/web/dist)
 deno task build        # Build binary (dist/relay; includes TUI + serve)
 deno task version      # Show current version
 deno task version:bump <patch|minor|major>  # Bump version

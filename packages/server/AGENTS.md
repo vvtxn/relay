@@ -52,8 +52,8 @@ The database store inserts sessions lazily (on first append), so sessions create
 `store.open()`. All session routes go through `openSessionHandle()` (sessions.ts): try the store, fall back to the live
 RunManager handle.
 
-The per-session workspace cwd comes from the client (CLI sends its terminal cwd; web sends the sidebar value). File
-tools are confined to that cwd; bash is not (documented in relay core AGENTS.md).
+The per-session workspace cwd comes from the client (CLI sends its terminal cwd). File tools are confined to that cwd;
+bash is not (documented in relay core AGENTS.md).
 
 ### Auth
 
@@ -67,8 +67,8 @@ existing `AuthProvider` contract; no storage changes needed.
 
 ### Static serving
 
-`RELAY_STATIC_DIR` (e.g. `packages/web/dist`) enables serving the built web app with SPA fallback. Paths are confined to
-the static dir.
+`RELAY_STATIC_DIR` enables serving a static directory with SPA fallback (index.html for unknown paths). Paths are
+confined to the static dir.
 
 ## API Surface
 

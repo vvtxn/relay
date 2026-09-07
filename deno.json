@@ -1,5 +1,5 @@
 {
-	"workspace": ["packages/relay", "packages/cli", "packages/client", "packages/server", "packages/web"],
+	"workspace": ["packages/relay", "packages/cli", "packages/client", "packages/server"],
 	"nodeModulesDir": "auto",
 	"tasks": {
 		"fmt": "deno fmt",
@@ -8,8 +8,6 @@
 		"test": "deno test --unstable-raw-imports --allow-read --allow-write --allow-env --allow-run",
 		"agent": "deno run --env-file=.env --unstable-raw-imports --allow-all packages/cli/agent/index.ts",
 		"serve": "deno run --env-file=.env --unstable-raw-imports --allow-all packages/server/main.ts",
-		"web:dev": "cd packages/web && deno run -A npm:vite",
-		"web:build": "cd packages/web && deno run -A npm:vite build",
 		"playground:approval": "deno run --allow-all packages/cli/tui/playground/approval.tsx",
 		"playground:command-palette": "deno run --allow-all packages/cli/tui/playground/command-palette.tsx",
 		"playground:layout": "deno run --allow-all packages/cli/tui/playground/layout.tsx",
