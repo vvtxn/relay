@@ -25,6 +25,11 @@ export interface Theme {
 	textMuted: string;
 	textDim: string;
 
+	// Backgrounds — near-black canvas, subtle elevation steps
+	background: string;
+	surface: string;
+	surfaceElevated: string;
+
 	// UI chrome
 	border: string;
 	borderLabel: string;
@@ -57,6 +62,11 @@ export const theme: Theme = {
 	text: "#F2F2F2",
 	textMuted: "#C0C0C0",
 	textDim: "#808080",
+
+	// Backgrounds — near-black canvas, subtle elevation steps
+	background: "#0A0A0A",
+	surface: "#101010",
+	surfaceElevated: "#181818",
 
 	// UI chrome — thin graphite borders
 	border: "#303030",

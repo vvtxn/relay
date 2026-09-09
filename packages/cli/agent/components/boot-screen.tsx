@@ -4,7 +4,14 @@ import { theme } from "@/tui/theme.ts";
 /** Shown while authentication and the initial session are being resolved. */
 export function BootScreen() {
 	return (
-		<Box flex flexDirection="column" justifyContent="center" alignItems="center" gap={1}>
+		<Box
+			flex
+			flexDirection="column"
+			justifyContent="center"
+			alignItems="center"
+			gap={1}
+			bgColor={theme.background}
+		>
 			<Box flexDirection="row" gap={1}>
 				<Spinner color={theme.accent} />
 				<Text color={theme.textDim}>Signing in...</Text>
@@ -16,7 +23,14 @@ export function BootScreen() {
 /** Shown when authentication fails so startup errors never crash before render. */
 export function BootError({ message }: { message: string }) {
 	return (
-		<Box flex flexDirection="column" justifyContent="center" alignItems="center" gap={1}>
+		<Box
+			flex
+			flexDirection="column"
+			justifyContent="center"
+			alignItems="center"
+			gap={1}
+			bgColor={theme.background}
+		>
 			<Text color={theme.error} bold>Authentication failed</Text>
 			<Text color={theme.textMuted}>{message}</Text>
 			<Text color={theme.textDim} italic>

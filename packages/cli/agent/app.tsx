@@ -475,7 +475,7 @@ function App({ onQuit, user, initialSessionId, info }: AppProps) {
 	});
 
 	return (
-		<Box flex flexDirection="column" padding={1}>
+		<Box flex flexDirection="column" padding={1} bgColor={theme.background}>
 			<StatusBar
 				tokenCount={tokenCount.value}
 				totalCost={totalCost.value}
@@ -506,6 +506,7 @@ function App({ onQuit, user, initialSessionId, info }: AppProps) {
 				borderColor={theme.border}
 				borderLabel={mode.value}
 				borderLabelColor={theme.borderLabel}
+				bgColor={theme.surface}
 				padding={1}
 			>
 				<TextInput
