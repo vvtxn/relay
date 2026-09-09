@@ -2,11 +2,11 @@ import { assert, assertEquals } from "@std/assert";
 import { CLEAR_SCREEN, CURSOR_DEFAULT, CURSOR_SHOW, EXIT_ALT_SCREEN, RESET } from "../core/ansi.ts";
 import { Terminal } from "../core/terminal.ts";
 
-function fakeStdout(captured: string[]) {
+function fakeStdout(captured: string[], isTTY = true) {
 	return {
 		columns: 80,
 		rows: 24,
-		isTTY: true,
+		isTTY,
 		write: (data: string, callback?: (error?: Error | null) => void) => {
 			captured.push(data);
 			if (callback) queueMicrotask(() => callback(null));
@@ -47,4 +47,14 @@ Deno.test("Terminal.drain - resolves once queued writes flush", async () => {
 	terminal.dispose();
 	await terminal.drain();
 	assert(captured.join("").includes(EXIT_ALT_SCREEN));
+});
+
+Deno.test("Terminal.dispose - writes no escape bytes when piped", () => {
+	const captured: string[] = [];
+	const terminal = new Terminal(fakeStdout(captured, false));
+	captured.length = 0;
+
+	terminal.dispose();
+
+	assertEquals(captured, []);
 });

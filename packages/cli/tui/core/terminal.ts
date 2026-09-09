@@ -266,9 +266,12 @@ export class Terminal {
 		this.currentBuffer = this.createEmptyBuffer();
 		this.previousBuffer = this.createEmptyBuffer();
 		this.isFirstRender = true;
+		// Teardown mirrors setup: every write below is TTY-only, so piped
+		// output never gets escape bytes. Leaving the alternate screen must
+		// be the final byte written.
+		if (!this.isTTY()) return;
 		// Reset attributes and blank the alternate screen so no styled frame
-		// leaks if the terminal never processes the exit sequence. Leaving
-		// the alternate screen must be the final byte written.
+		// leaks if the terminal never processes the exit sequence.
 		this.write(RESET);
 		this.clearScreen();
 		this.write(CURSOR_DEFAULT);
