@@ -69,7 +69,7 @@ export function MessageView({ msg }: { key?: number; msg: UIMessage }) {
 	if (!hasText && !hasToolCalls) return null;
 
 	return (
-		<Box flexDirection="column" gap={1}>
+		<Box flexDirection="column" gap={1} bgColor={theme.surface} padding={1}>
 			{hasText && (
 				<Box flexDirection="row" gap={1}>
 					<Text color={theme.brand} bold>
