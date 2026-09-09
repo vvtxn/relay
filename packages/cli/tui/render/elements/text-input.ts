@@ -1,5 +1,6 @@
 import { RESET } from "@/tui/core/ansi.ts";
 import { toAnsi } from "@/tui/core/primitives/color.ts";
+import { theme } from "@/tui/theme.ts";
 import { findMentions, formatLineWithMentions } from "@/tui/core/primitives/mentions.ts";
 import { splitTextWithOffsets, wrapText, wrapTextWithOffsets } from "@/tui/core/primitives/wrap-text.ts";
 import type { ElementHandler, Position, TextInputInstance } from "../types/index.ts";
@@ -104,7 +105,7 @@ export const TextInputElement: ElementHandler<TextInputInstance> = (instance, co
 	const positions: Position[] = [];
 	const colorToUse = isPlaceholder ? instance.props.placeholderColor : instance.props.color;
 	const defaultAnsi = colorToUse ? toAnsi(colorToUse) : null;
-	const mentionAnsi = toAnsi("cyan") ?? "\x1b[36m";
+	const mentionAnsi = toAnsi(theme.accent) ?? "\x1b[36m";
 
 	for (let lineIdx = 0; lineIdx < displayEntries.length; lineIdx++) {
 		const entry = displayEntries[lineIdx];

@@ -24,6 +24,7 @@ export interface Theme {
 	text: string;
 	textMuted: string;
 	textDim: string;
+	textFaint: string;
 
 	// Backgrounds — near-black canvas, subtle elevation steps
 	background: string;
@@ -58,10 +59,11 @@ export const theme: Theme = {
 	error: "#B0A0A0",
 	info: "#A8A8B0",
 
-	// Text — primary / secondary / metadata
+	// Text — primary / secondary / metadata / faintest (git branch, comments)
 	text: "#F2F2F2",
 	textMuted: "#C0C0C0",
 	textDim: "#808080",
+	textFaint: "#606060",
 
 	// Backgrounds — near-black canvas, subtle elevation steps
 	background: "#0A0A0A",

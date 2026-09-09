@@ -1,5 +1,7 @@
 import Y from "yoga-layout";
 import { drawBox } from "@/tui/core/primitives/draw-box.ts";
+import { applyAnsi } from "@/tui/core/primitives/color.ts";
+import { theme } from "@/tui/theme.ts";
 import type { ElementHandler, Position, ScrollAreaInstance } from "../types/index.ts";
 import type { LayoutHandler } from "./index.ts";
 
@@ -122,7 +124,11 @@ export const ScrollAreaElement: ElementHandler<ScrollAreaInstance> = (instance, 
 
 		for (let row = clipTop; row <= clipBottom; row++) {
 			const isThumb = row >= thumbTop && row < thumbTop + thumbHeight;
-			scrollbarPositions.push({ x: barX, y: row, text: isThumb ? "█" : "░" });
+			scrollbarPositions.push({
+				x: barX,
+				y: row,
+				text: isThumb ? applyAnsi("█", { fg: theme.textDim }) : applyAnsi("░", { fg: theme.border }),
+			});
 		}
 	}
 

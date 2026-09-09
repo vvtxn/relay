@@ -505,7 +505,7 @@ function App({ onQuit, user, initialSessionId, info }: AppProps) {
 				border="round"
 				borderColor={theme.border}
 				borderLabel={mode.value}
-				borderLabelColor={theme.borderLabel}
+				borderLabelColor={theme.brand}
 				bgColor={theme.surface}
 				padding={1}
 			>
