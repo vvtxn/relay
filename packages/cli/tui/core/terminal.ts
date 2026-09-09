@@ -55,6 +55,25 @@ export class Terminal {
 		}
 	}
 
+	/**
+	 * Resolve once all queued stdout writes have been flushed to the
+	 * terminal. Await this before process exit — otherwise teardown bytes
+	 * (e.g. exit-alternate-screen) can be dropped and the terminal is left
+	 * showing the last frame.
+	 */
+	drain(): Promise<void> {
+		return new Promise((resolve, reject) => {
+			try {
+				this.stdout.write("", (error?: Error | null) => {
+					if (error) reject(error);
+					else resolve();
+				});
+			} catch (error) {
+				reject(error);
+			}
+		});
+	}
+
 	beginFrame() {
 		this.batching = true;
 		this.frameBuffer = SYNC_START;
@@ -247,6 +266,11 @@ export class Terminal {
 		this.currentBuffer = this.createEmptyBuffer();
 		this.previousBuffer = this.createEmptyBuffer();
 		this.isFirstRender = true;
+		// Reset attributes and blank the alternate screen so no styled frame
+		// leaks if the terminal never processes the exit sequence. Leaving
+		// the alternate screen must be the final byte written.
+		this.write(RESET);
+		this.clearScreen();
 		this.write(CURSOR_DEFAULT);
 		this.showCursor();
 		this.exitAlternateScreen();

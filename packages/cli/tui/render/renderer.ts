@@ -456,6 +456,9 @@ export function run(createVNode: (quit: () => void) => VNode, onBeforeQuit?: () 
 		cleanupKey();
 		inputManager.stop();
 		unmount();
+		// Flush teardown bytes (exit-alternate-screen) before killing the
+		// process — Deno.exit() drops queued stdout writes otherwise.
+		await terminal.drain().catch(() => {});
 		Deno.exit(0);
 	};
 
