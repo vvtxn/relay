@@ -53,7 +53,7 @@ export function StatusBar(
 					Relay
 				</Text>
 				<Text color={theme.textDim}>{model.split("/").pop()}</Text>
-				{branchName && <Text color={theme.warning}>on {branchName}</Text>}
+				{branchName && <Text color={theme.textDim}>on {branchName}</Text>}
 				{userName && <Text color={theme.textDim}>as {userName}</Text>}
 			</Box>
 			<Box flexDirection="row" gap={1}>

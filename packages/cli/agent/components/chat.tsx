@@ -16,7 +16,7 @@ function DiffView({ diff }: { diff: string }) {
 	return (
 		<Box flexDirection="column">
 			{lines.map((l, i) => (
-				<Text key={i} color={l.prefix === "+" ? theme.success : l.prefix === "-" ? "#ef4444" : theme.textDim}>
+				<Text key={i} color={l.prefix === "+" ? theme.success : l.prefix === "-" ? theme.error : theme.textDim}>
 					{`${String(l.lineNo).padStart(pad)} ${l.prefix}  ${l.content}`}
 				</Text>
 			))}
@@ -34,7 +34,7 @@ function ToolCallView({ tool }: { key?: number; tool: UIToolCall }) {
 	return (
 		<Box flexDirection="column">
 			<Box flexDirection="row" gap={1}>
-				<Text color={theme.warning} bold>{getToolDisplayName(tool.name)}</Text>
+				<Text color={theme.brand} bold>{getToolDisplayName(tool.name)}</Text>
 				<Text color={theme.textMuted}>{tool.input}</Text>
 			</Box>
 			{output && <Text color={theme.textMuted}>{output.trim()}</Text>}
@@ -52,7 +52,7 @@ export function MessageView({ msg }: { key?: number; msg: UIMessage }) {
 		return (
 			<Box flexDirection="column" gap={1}>
 				<Box flexDirection="row" gap={1}>
-					<Text color={theme.success} bold>
+					<Text color={theme.brand} bold>
 						❯
 					</Text>
 					<Text flex color={theme.text}>
@@ -72,7 +72,7 @@ export function MessageView({ msg }: { key?: number; msg: UIMessage }) {
 		<Box flexDirection="column" gap={1}>
 			{hasText && (
 				<Box flexDirection="row" gap={1}>
-					<Text color={theme.info} bold>
+					<Text color={theme.brand} bold>
 						●
 					</Text>
 					<Markdown flex>{msg.content.trim()}</Markdown>

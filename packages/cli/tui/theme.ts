@@ -1,16 +1,13 @@
 /**
- * Centralized color theme for the Relay UI.
+ * Graphite / Silver theme for the Relay CLI.
  *
- * Uses 24-bit hex colors for a modern, expressive look.
- * All UI components should reference these values instead of
- * hardcoding color names or hex codes.
+ * A dark, monochrome developer-tool theme:
+ * near-black canvas → silver primary information → graphite depth.
+ * See graphite-silver-coding-agent-theme.md for the full design tokens.
  *
- * Users can override any color by creating ~/.relay/theme.json
- * with a partial set of keys from this object.
+ * The theme is fixed — there is no runtime override. All UI components
+ * must reference these values instead of hardcoding colors.
  */
-
-import { join } from "@std/path/join";
-import { relayDir } from "@vvtxn/relay/core/paths.ts";
 
 export interface Theme {
 	// Brand / accent
@@ -45,52 +42,35 @@ export interface Theme {
 	hr: string;
 }
 
-const defaults: Theme = {
-	// Brand / accent
-	brand: "#6c63ff",
-	accent: "#22d3ee",
+export const theme: Theme = {
+	// Brand / accent — silver primary (#C0C0C0), highlight (#D8D8D8)
+	brand: "#C0C0C0",
+	accent: "#D8D8D8",
 
-	// Semantic
-	success: "#34d399",
-	warning: "#fbbf24",
-	error: "#f87171",
-	info: "#818cf8",
+	// Semantic — desaturated agent states, never neon
+	success: "#A8B0A8",
+	warning: "#B8B0A0",
+	error: "#B0A0A0",
+	info: "#A8A8B0",
 
-	// Text
-	text: "#e2e8f0",
-	textMuted: "#94a3b8",
-	textDim: "#64748b",
+	// Text — primary / secondary / metadata
+	text: "#F2F2F2",
+	textMuted: "#C0C0C0",
+	textDim: "#808080",
 
-	// UI chrome
-	border: "#a78bfa",
-	borderLabel: "#c4b5fd",
+	// UI chrome — thin graphite borders
+	border: "#303030",
+	borderLabel: "#808080",
 
-	// Markdown
-	heading1: "#c084fc",
-	heading2: "#818cf8",
-	heading3: "#22d3ee",
-	codeInline: "#94a3b8",
-	codeBlock: "#94a3b8",
-	link: "#22d3ee",
-	linkUrl: "#64748b",
-	blockquote: "#64748b",
-	listBullet: "#64748b",
-	hr: "#64748b",
+	// Markdown — grayscale luminance hierarchy
+	heading1: "#FFFFFF",
+	heading2: "#D8D8D8",
+	heading3: "#C0C0C0",
+	codeInline: "#B8B8B8",
+	codeBlock: "#C0C0C0",
+	link: "#D8D8D8",
+	linkUrl: "#808080",
+	blockquote: "#808080",
+	listBullet: "#808080",
+	hr: "#303030",
 };
-
-function loadUserTheme(): Partial<Theme> {
-	const path = join(relayDir(), "theme.json");
-	try {
-		const raw = Deno.readTextFileSync(path);
-		return JSON.parse(raw) as Partial<Theme>;
-	} catch {
-		try {
-			const dir = relayDir();
-			Deno.mkdirSync(dir, { recursive: true });
-			Deno.writeTextFileSync(path, JSON.stringify(defaults, null, "\t") + "\n");
-		} catch { /* ignore — read-only fs or similar */ }
-		return {};
-	}
-}
-
-export const theme: Theme = { ...defaults, ...loadUserTheme() };

@@ -1,14 +1,15 @@
 import { Box, Text } from "../components.tsx";
 import { theme } from "@/tui/theme.ts";
 
+// Monochrome brand mark — silver primary, no multicolor decoration.
 // Spaces use \u00A0 (non-breaking space) so wrapText doesn't collapse them
 const LOGO = [
 	{ text: "██████╗ ███████╗██╗      █████╗ ██╗   ██╗", color: theme.brand },
-	{ text: "██╔══██╗██╔════╝██║     ██╔══██╗╚██╗ ██╔╝", color: theme.heading1 },
-	{ text: "██████╔╝█████╗  ██║     ███████║ ╚████╔╝ ", color: theme.info },
-	{ text: "██╔══██╗██╔══╝  ██║     ██╔══██║  ╚██╔╝  ", color: theme.accent },
-	{ text: "██║  ██║███████╗███████╗██║  ██║   ██║   ", color: theme.success },
-	{ text: "╚═╝  ╚═╝╚══════╝╚══════╝╚═╝  ╚═╝   ╚═╝   ", color: theme.warning },
+	{ text: "██╔══██╗██╔════╝██║     ██╔══██╗╚██╗ ██╔╝", color: theme.brand },
+	{ text: "██████╔╝█████╗  ██║     ███████║ ╚████╔╝ ", color: theme.brand },
+	{ text: "██╔══██╗██╔══╝  ██║     ██╔══██║  ╚██╔╝  ", color: theme.brand },
+	{ text: "██║  ██║███████╗███████╗██║  ██║   ██║   ", color: theme.brand },
+	{ text: "╚═╝  ╚═╝╚══════╝╚══════╝╚═╝  ╚═╝   ╚═╝   ", color: theme.brand },
 ].map(({ text, color }) => ({ text: text.replace(/ /g, "\u00A0"), color }));
 
 export interface WelcomeScreenProps {
