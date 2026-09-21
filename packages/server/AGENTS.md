@@ -118,7 +118,8 @@ Payload types live in `@vvtxn/client/protocol.ts` — never redeclare them here.
 - GitHub App mode: `GITHUB_APP_CLIENT_ID`, `GITHUB_APP_CLIENT_SECRET` (`GITHUB_CLIENT_ID`/`GITHUB_CLIENT_SECRET` still
   accepted), `RELAY_PUBLIC_URL` (OAuth redirect base), `AUTH_SESSION_TTL_DAYS` (default 30), `AUTH_ALLOW_LOCAL` (CLI
   bridge; loopback-only; keep `false` in production)
-- Hardening: `AUTH_ALLOWED_GITHUB` (logins/ids allowed to sign in), `RELAY_WORKSPACE_ROOTS` (allowed session cwd roots)
+- Hardening: `AUTH_ALLOWED_GITHUB` (logins/ids allowed to sign in) and `RELAY_WORKSPACE_ROOTS` (allowed session cwd
+  roots); both required when `AUTH_PROVIDER=github` binds a non-loopback `RELAY_HOST`
 - `RELAY_PORT` (default 7433), `RELAY_HOST` (default 127.0.0.1), `RELAY_WORKSPACE`, `RELAY_STATIC_DIR`
 
 ## Running

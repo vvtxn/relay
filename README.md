@@ -147,7 +147,8 @@ The CLI can authenticate in GitHub mode either with a bearer session token or, w
 
 ### Hardening
 
-Before exposing the server, restrict who and where:
+These are user-specific, so put them in the gitignored `.env.<mode>.local` file. When `AUTH_PROVIDER=github` binds a
+non-loopback `RELAY_HOST`, **the server refuses to start unless both are set**; on loopback they are optional.
 
 - `AUTH_ALLOWED_GITHUB` — comma-separated GitHub logins or numeric ids allowed to sign in (empty = any GitHub account).
 - `RELAY_WORKSPACE_ROOTS` — comma-separated absolute directories a session workspace may use (empty = any directory).

@@ -27,10 +27,14 @@ Session tokens slide on use and are revoked on logout. Expired rows are pruned o
 
 - Every session-scoped route verifies the session belongs to the caller; the `RunManager` caches handles keyed by
   `(sessionId, ownerId)`.
-- `AUTH_ALLOWED_GITHUB` (comma-separated GitHub logins or numeric ids) restricts who may sign in. **Set this before
-  exposing the server**, otherwise any GitHub account can authenticate.
-- `RELAY_WORKSPACE_ROOTS` (comma-separated absolute paths) restricts where a session's workspace may be created. Without
-  it, an authenticated user can point the agent at any directory on the host (and `bash` is unconfined).
+- `AUTH_ALLOWED_GITHUB` (comma-separated GitHub logins or numeric ids) restricts who may sign in.
+- `RELAY_WORKSPACE_ROOTS` (comma-separated absolute paths) restricts where a session's workspace may be created; `bash`
+  is never confined by it.
+- **Exposure is gated.** Binding `AUTH_PROVIDER=github` to a non-loopback `RELAY_HOST` requires both
+  `AUTH_ALLOWED_GITHUB` and `RELAY_WORKSPACE_ROOTS` — the server refuses to start otherwise, so an unrestricted agent
+  cannot be exposed by accident. On loopback they are optional, so development needs no extra setup.
+- These are user/machine-specific, so they belong in the gitignored `.env.<mode>.local` files, not the committed
+  `.env.<mode>` defaults.
 - The CLI bridge header `X-Relay-Local-Subject` is honored only when `AUTH_ALLOW_LOCAL=true` **and** the request
   originates from loopback.
 
@@ -54,8 +58,8 @@ Agent output is rendered as markdown into Solid elements (no `innerHTML`). Link 
 
 ## Hardening checklist for exposure
 
-1. Keep `AUTH_PROVIDER=github` and set `AUTH_ALLOWED_GITHUB`.
-2. Set `RELAY_WORKSPACE_ROOTS` to the directories sessions may use.
+1. Keep `AUTH_PROVIDER=github`; set `AUTH_ALLOWED_GITHUB` (enforced when the host is non-loopback).
+2. Set `RELAY_WORKSPACE_ROOTS` (also enforced when the host is non-loopback).
 3. Keep `AUTH_ALLOW_LOCAL=false` (default in github mode).
 4. Terminate TLS and set `RELAY_PUBLIC_URL` to the https origin.
 5. Run the server as an unprivileged user, ideally in a container.

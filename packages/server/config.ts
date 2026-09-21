@@ -93,6 +93,11 @@ function positiveInt(value: string | undefined, fallback: number, name: string, 
 	return parsed;
 }
 
+/** True for hostnames that only accept local connections. */
+function isLoopbackHost(host: string): boolean {
+	return host === "localhost" || host === "::1" || host === "[::1]" || host.startsWith("127.");
+}
+
 /** Reads the API key from the CLI's auth file (~/.relay/auth.json). Returns null when absent. */
 function readApiKeyFromAuthFile(): string | null {
 	try {
@@ -124,6 +129,8 @@ export function serverConfigFromEnv(
 	// accepted as fallbacks for setups configured before the App switch.
 	const githubClientId = env.GITHUB_APP_CLIENT_ID ?? env.GITHUB_CLIENT_ID ?? null;
 	const githubClientSecret = env.GITHUB_APP_CLIENT_SECRET ?? env.GITHUB_CLIENT_SECRET ?? null;
+	const workspaceRoots = parseList(env.RELAY_WORKSPACE_ROOTS).map((root) => resolve(root));
+	const allowedGithub = parseList(env.AUTH_ALLOWED_GITHUB).map((entry) => entry.toLowerCase());
 
 	if (authProvider === "local" && !devAuthSubject) {
 		throw new Error("DEV_AUTH_SUBJECT is required when AUTH_PROVIDER=local");
@@ -131,6 +138,20 @@ export function serverConfigFromEnv(
 	if (authProvider === "github") {
 		if (!githubClientId) throw new Error("GITHUB_APP_CLIENT_ID is required when AUTH_PROVIDER=github");
 		if (!githubClientSecret) throw new Error("GITHUB_APP_CLIENT_SECRET is required when AUTH_PROVIDER=github");
+		// Exposing the server beyond loopback requires explicit allowlists, so an
+		// unrestricted agent can never be reachable by accident.
+		if (!isLoopbackHost(hostname)) {
+			if (allowedGithub.length === 0) {
+				throw new Error(
+					"AUTH_ALLOWED_GITHUB is required when AUTH_PROVIDER=github binds a non-loopback host",
+				);
+			}
+			if (workspaceRoots.length === 0) {
+				throw new Error(
+					"RELAY_WORKSPACE_ROOTS is required when AUTH_PROVIDER=github binds a non-loopback host",
+				);
+			}
+		}
 	}
 
 	return {
@@ -154,8 +175,8 @@ export function serverConfigFromEnv(
 		sessionTtlDays: positiveInt(env.AUTH_SESSION_TTL_DAYS, DEFAULT_SESSION_TTL_DAYS, "AUTH_SESSION_TTL_DAYS", 365),
 		allowLocalAuth: env.AUTH_ALLOW_LOCAL ? env.AUTH_ALLOW_LOCAL === "true" : authProvider === "local",
 		defaultCwd: env.RELAY_WORKSPACE ?? Deno.cwd(),
-		workspaceRoots: parseList(env.RELAY_WORKSPACE_ROOTS).map((root) => resolve(root)),
-		allowedGithub: parseList(env.AUTH_ALLOWED_GITHUB).map((entry) => entry.toLowerCase()),
+		workspaceRoots,
+		allowedGithub,
 		staticDir: env.RELAY_STATIC_DIR ?? null,
 	};
 }

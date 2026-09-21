@@ -148,10 +148,32 @@ Deno.test("serverConfigFromEnv - parses allowlists", () => {
 	assertEquals(config.allowedGithub, ["octocat", "12345"]);
 });
 
-Deno.test("serverConfigFromEnv - allowlists default to empty (allow any)", () => {
+Deno.test("serverConfigFromEnv - allowlists default to empty (allow any) on loopback", () => {
 	const config = serverConfigFromEnv({ ...GITHUB_ENV });
 	assertEquals(config.workspaceRoots, []);
 	assertEquals(config.allowedGithub, []);
+});
+
+Deno.test("serverConfigFromEnv - non-loopback github mode requires both allowlists", () => {
+	assertThrows(
+		() => serverConfigFromEnv({ ...GITHUB_ENV, RELAY_HOST: "0.0.0.0" }),
+		Error,
+		"AUTH_ALLOWED_GITHUB",
+	);
+	assertThrows(
+		() => serverConfigFromEnv({ ...GITHUB_ENV, RELAY_HOST: "0.0.0.0", AUTH_ALLOWED_GITHUB: "octocat" }),
+		Error,
+		"RELAY_WORKSPACE_ROOTS",
+	);
+	const config = serverConfigFromEnv({
+		...GITHUB_ENV,
+		RELAY_HOST: "0.0.0.0",
+		AUTH_ALLOWED_GITHUB: "octocat",
+		RELAY_WORKSPACE_ROOTS: "/srv/projects",
+	});
+	assertEquals(config.hostname, "0.0.0.0");
+	assertEquals(config.allowedGithub, ["octocat"]);
+	assertEquals(config.workspaceRoots, ["/srv/projects"]);
 });
 
 Deno.test("serverConfigFromEnv - rejects malformed numeric env", () => {
