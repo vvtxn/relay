@@ -10,9 +10,17 @@ core/
 ├── agent.ts              # Agent loop (async generator yielding AgentEvents)
 ├── runner.ts             # runAgentLoop() convenience wrapper with callbacks
 ├── display.ts            # Display utilities: UIMessage, UIToolCall, parseDiffLines, arg/output formatting
+├── theme.ts              # Graphite/Silver design tokens shared by terminal + web clients
 ├── paths.ts              # relayDir(), homeDir() helpers
 ├── context.ts            # Context trimming (token estimation, turn-based truncation)
 ├── database.ts           # Shared Turso client factory + env credentials (used by session and user stores)
+├── auth/                 # Identity + sessions
+│   ├── types.ts          # AuthIdentity, AuthenticatedUser, AuthProvider, UserStore, UserDirectory
+│   ├── local.ts          # LocalAuthProvider (dev subject)
+│   ├── github.ts         # GitHubAuthProvider (profile → identity)
+│   ├── db.ts             # DatabaseUserStore: provider identity → user, profile columns
+│   ├── sessions.ts       # DatabaseAuthSessionStore: opaque hashed session tokens
+│   └── service.ts        # authenticate(): provider + user store → AuthenticatedUser
 ├── system-prompt.ts      # Re-exports the default system prompt (raw .md import)
 ├── system-prompt.md      # Default system prompt for coding agents (shared across clients)
 ├── workspace.ts          # Workspace-rooted fs helpers: expandMentions, listProjectFiles, git metadata
@@ -109,6 +117,7 @@ Shared across all clients (TUI, web). Deliberately dependency-free so browser bu
 - `summarizeToolArgs()` — Converts JSON args to human-readable summary (path, pattern, command, etc.)
 - `getToolDisplayName()` — Maps internal tool names to display labels (e.g. `read_file` → "read")
 - `getToolDisplayOutput()` — Formats tool output as concise summaries for display
+- `abbreviateHome()` / `expandHome()` — Replace a home-directory prefix with `~` for display and back
 - `parseDiffLines()` — Parses unified diff into structured `DiffLine[]` (without color assignment)
 
 ### Tool System
@@ -170,7 +179,8 @@ After concluding that a task is complete, always run these commands from the rep
 
 1. `deno task fmt` — auto-format all code
 2. `deno task lint` — check for lint errors
-3. `deno task test` — run the test suite
+3. `deno task check` — strict type-check of every entrypoint
+4. `deno task test` — run the test suite
 
 If any command fails, fix the issues and re-run until all pass cleanly.
 

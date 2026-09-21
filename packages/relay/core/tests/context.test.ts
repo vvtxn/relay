@@ -95,7 +95,7 @@ Deno.test("trimContext - drops oldest droppable turns when still over budget", (
 	// Budget only enough for sys + first user + recent turns
 	const result = trimContext(messages, { maxTokens: 42 + 16_000, preserveRecentTurns: 2 });
 
-	assertEquals(result[0].role, "system");
+	assertEquals(result[0]!.role, "system");
 	assertEquals(result.some((m) => m.content === "old answer"), false);
 	assertEquals(result.some((m) => m.content === "new question"), true);
 	assertEquals(result.some((m) => m.content === "new answer"), true);
@@ -136,7 +136,7 @@ Deno.test("trimContext - preserves recent turns intact, drops old ones", () => {
 	const result = trimContext(messages, { maxTokens: 44 + 16_000, preserveRecentTurns: 2 });
 
 	// System survives
-	assertEquals(result[0].role, "system");
+	assertEquals(result[0]!.role, "system");
 	// Last 2 turns survive intact
 	assertEquals(result.some((m) => m.content === "recent2"), true);
 	assertEquals(result.some((m) => m.content === "recent r2"), true);

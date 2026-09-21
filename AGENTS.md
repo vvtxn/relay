@@ -11,9 +11,11 @@ Terminal-based coding agent with custom TUI framework.
 │   │   └── core/           # Agent loop, runner, tools, sessions, context, display
 │   ├── client/             # Wire protocol + RelayClient (@vvtxn/client)
 │   ├── server/             # HTTP + SSE server hosting the runtime (@vvtxn/server)
-│   └── cli/                # TUI client + serve subcommand (@vvtxn/cli)
-│       ├── agent/          # App entry point, config, components, hooks
-│       └── tui/            # Terminal UI framework (JSX runtime, Yoga layout)
+│   ├── cli/                # TUI client + serve subcommand (@vvtxn/cli)
+│   │   ├── agent/          # App entry point, config, components, hooks
+│   │   └── tui/            # Terminal UI framework (JSX runtime, Yoga layout)
+│   └── web/                # Solid + Vite SPA client (@vvtxn/web)
+│       └── src/            # Effect API layer, TanStack Query/Router, components
 ├── scripts/                # Build and version bump scripts
 ├── dist/                   # Compiled binary output
 └── deno.json               # Workspace configuration
@@ -24,24 +26,32 @@ Terminal-based coding agent with custom TUI framework.
 ```
 packages/relay  (leaf — no internal deps)
        ↑
-packages/client  (protocol + transport, type-only relay imports)
+packages/client  (protocol + transport + shared session-state reducer)
        ↑                    ↑
-       ↑
-packages/cli  (TUI client + serve subcommand)
+       ↑                    ↑
+packages/server       packages/cli / packages/web
+(HTTP + SSE runtime)  (clients — TUI and browser)
 ```
 
 All clients (CLI, web) talk to the server over the shared protocol in `packages/client`; the agent runtime executes only
-in the server. `packages/relay` powers the server and provides display utilities to clients.
+in the server. `packages/relay` powers the server and provides display + theme utilities to clients. Both clients fold
+`ServerEvent`s with the same reducer (`packages/client/session-state.ts`).
 
 ## Build/Run Commands
 
 - **Format code**: `deno task fmt`
 - **Check formatting**: `deno task fmt:check`
 - **Lint**: `deno task lint`
+- **Type-check**: `deno task check` (strict; checks every entrypoint)
 - **Run tests**: `deno task test` (requires `--allow-read --allow-write --allow-env --allow-run`)
-- **Run agent**: `deno task agent` (requires a running server: `deno task serve`)
-- **Run server**: `deno task serve` (loads `.env`; requires Turso + auth env)
-- **Build binary**: `deno task build` (compiles to `dist/relay`, includes TUI + serve)
+- **Run agent**: `deno task agent` (dev alias; requires a running server)
+- **Run server**: `deno task serve` (dev alias; loads mode env files)
+- **Run server (prod)**: `deno task serve:prod` (sets `RELAY_ENV=production`)
+- **Run agent (prod)**: `deno task agent:prod`
+- **Run web dev server**: `deno task web:dev` (Vite; proxies `/api` to `127.0.0.1:7433`)
+- **Build web app**: `deno task web:build` (Vite → `packages/web/dist`; serve with `RELAY_STATIC_DIR`)
+- **Build binary**: `deno task build` (release-safe: no env embedded)
+- **Build local binary**: `deno task build:local` (embeds dev env; may include secrets)
 
 ## Task Completion Checklist
 
@@ -49,10 +59,31 @@ After concluding that a task is complete, always run these commands in order:
 
 1. `deno task fmt` — auto-format all code
 2. `deno task lint` — check for lint errors
-3. `deno task test` — run the test suite
+3. `deno task check` — strict type-check of every entrypoint
+4. `deno task test` — run the test suite
 
-If any command fails, fix the issues and re-run until all pass cleanly. Do not report the task as done until all three
+If any command fails, fix the issues and re-run until all pass cleanly. Do not report the task as done until all four
 pass.
+
+### Type Checking
+
+The root `deno.json` `compilerOptions` apply to every workspace package and enable strict settings beyond Deno's
+defaults: `noUncheckedIndexedAccess`, `exactOptionalPropertyTypes`, `noImplicitOverride`, `noFallthroughCasesInSwitch`,
+`allowUnreachableCode: false`, and `allowUnusedLabels: false`. `deno lint` is a separate linter (configurable via the
+`lint` block); it does not type-check. Prefer real guards over `!`; use `!` only where an invariant is already
+guaranteed.
+
+### Environment & Modes
+
+`RELAY_ENV` selects `development` (default) or `production`. Tasks run through `scripts/run-env.ts`, which merges env
+files with explicit precedence — **process env > `.env.<mode>.local` > `.env.<mode>` > `.env.local` > `.env`** (Deno's
+own multi-file `--env-file` precedence is ambiguous and it has no "if exists" variant).
+
+- `.env.development` / `.env.production` — committed non-secret mode defaults.
+- `.env.local`, `.env.<mode>.local` — gitignored secrets (`TURSO_*`, `GITHUB_APP_*`, `LLM_API_KEY`, `DEV_AUTH_SUBJECT`).
+- `.env.example` — template for every key.
+
+`deno task build` never embeds env (release-safe); `deno task build:local` embeds the merged dev env and warns.
 
 ### Build & Version
 
@@ -104,6 +135,12 @@ import { RelayClient } from "@vvtxn/client/client.ts";
 
 // Display utilities (browser-pure)
 import { entriesToUIMessages } from "@vvtxn/relay/core/display.ts";
+
+// Shared session event reducer (browser-pure)
+import { applyServerEvent } from "@vvtxn/client/session-state.ts";
+
+// Shared Graphite/Silver design tokens (browser-pure)
+import { themeToCssVariables } from "@vvtxn/relay/core/theme.ts";
 ```
 
 ## Code Style Guidelines
@@ -124,6 +161,7 @@ Each sub-package has its own AGENTS.md with package-specific details:
 - `packages/server/AGENTS.md` - HTTP + SSE server hosting the agent runtime
 - `packages/cli/agent/AGENTS.md` - CLI application and TUI components
 - `packages/cli/tui/AGENTS.md` - Terminal UI framework
+- `packages/web/AGENTS.md` - Solid + Vite web client (TanStack Query/Router + Effect)
 
 ## Git Conventions
 

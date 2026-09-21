@@ -1,6 +1,7 @@
 import type {
 	ApprovalDecision,
 	ApprovalRequest,
+	AuthInfoResponse,
 	ConfigResponse,
 	CreateSessionRequest,
 	CreateSessionResponse,
@@ -74,6 +75,10 @@ export class RelayClient {
 		return await this.get("/api/config");
 	}
 
+	async getAuthInfo(): Promise<AuthInfoResponse> {
+		return await this.get("/api/auth/info");
+	}
+
 	async listSessions(cwd: string): Promise<SessionListResponse> {
 		return await this.get(`/api/sessions?cwd=${encodeURIComponent(cwd)}`);
 	}
@@ -111,7 +116,9 @@ export class RelayClient {
 	 */
 	async *subscribe(sessionId: string, options: SubscribeOptions | AbortSignal = {}): AsyncIterable<ServerEvent> {
 		const { signal, onOpen } = options instanceof AbortSignal ? { signal: options, onOpen: undefined } : options;
-		const response = await this.doFetch(`${this.baseUrl}/api/sessions/${sessionId}/events`, { signal });
+		const response = await this.doFetch(`${this.baseUrl}/api/sessions/${sessionId}/events`, {
+			signal: signal ?? null,
+		});
 		if (!response.ok) throw await this.toError(response);
 		onOpen?.();
 		yield* readSSEStream<ServerEvent>(response);

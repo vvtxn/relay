@@ -15,7 +15,7 @@ function mockProvider(responses: StreamChunk[][]): LLMProvider {
 			throw new Error("not implemented");
 		},
 		async *stream(_request: CompletionRequest) {
-			const chunks = responses[callCount++];
+			const chunks = responses[callCount++] ?? [];
 			for (const chunk of chunks) {
 				yield chunk;
 			}
@@ -100,8 +100,8 @@ Deno.test("text-only response yields text_delta and message_complete", async () 
 
 	assertEquals(events.length, 3);
 	assertEquals(events[0], { type: "text_delta", content: "Hello" });
-	assertEquals(events[1].type, "message_complete");
-	assertEquals(events[2].type, "turn_complete");
+	assertEquals(events[1]!.type, "message_complete");
+	assertEquals(events[2]!.type, "turn_complete");
 });
 
 Deno.test("accumulates multiple text deltas", async () => {
@@ -204,7 +204,7 @@ Deno.test("max tool rounds exceeded yields error", async () => {
 		{ provider, tools, model: "test", systemPrompt: "You are helpful.", maxToolRounds: 1 },
 	));
 
-	const lastEvent = events[events.length - 1];
+	const lastEvent = events[events.length - 1]!;
 	assertEquals(lastEvent.type, "error");
 	assertEquals(
 		(lastEvent as Extract<AgentEvent, { type: "error" }>).error.message.includes("Exceeded maximum tool rounds"),

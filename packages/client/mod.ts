@@ -22,9 +22,19 @@
 export { RelayApiError, RelayClient } from "./client.ts";
 export type { RelayClientOptions, SubscribeOptions } from "./client.ts";
 export { encodeSSEFrame, readSSEStream } from "./sse.ts";
+export {
+	applyServerEvent,
+	flushDraft,
+	hasDraft,
+	initialSessionStreamState,
+	resetSessionStreamState,
+	viewMessages,
+} from "./session-state.ts";
+export type { SessionStatus, SessionStreamState } from "./session-state.ts";
 export type {
 	ApprovalDecision,
 	ApprovalRequest,
+	AuthInfoResponse,
 	ConfigResponse,
 	CreateSessionRequest,
 	CreateSessionResponse,

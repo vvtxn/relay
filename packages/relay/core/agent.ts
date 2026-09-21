@@ -90,10 +90,10 @@ export async function* run(
 				const stream = config.provider.stream({
 					model: config.model,
 					messages: effectiveContext,
-					tools: useTools ? toolDefs : undefined,
-					temperature: config.temperature,
-					max_tokens: config.maxTokens,
-					signal: config.signal,
+					...(useTools ? { tools: toolDefs } : {}),
+					...(config.temperature !== undefined ? { temperature: config.temperature } : {}),
+					...(config.maxTokens !== undefined ? { max_tokens: config.maxTokens } : {}),
+					...(config.signal !== undefined ? { signal: config.signal } : {}),
 				});
 
 				for await (const chunk of withStreamTimeout(stream, STREAM_TIMEOUT_MS)) {
@@ -143,7 +143,11 @@ export async function* run(
 		};
 		context.push(assistantMessage);
 
-		yield { type: "message_complete", usage: lastUsage, generationId };
+		yield {
+			type: "message_complete",
+			...(lastUsage ? { usage: lastUsage } : {}),
+			...(generationId ? { generationId } : {}),
+		};
 
 		// If no tool calls, the LLM considers the task complete.
 		if (toolCalls.length === 0) {

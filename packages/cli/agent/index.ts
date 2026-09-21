@@ -4,7 +4,7 @@ const command = Deno.args[0];
 
 try {
 	if (command === "serve") {
-		await startServer();
+		startServer();
 	} else {
 		await import("./app.tsx");
 	}

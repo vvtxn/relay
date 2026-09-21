@@ -89,6 +89,7 @@ export function toggleCaseAt(state: TextState): string | null {
 	if (cursor >= value.value.length) return null;
 
 	const char = value.value[cursor];
+	if (char === undefined) return null;
 	const toggled = char === char.toUpperCase() ? char.toLowerCase() : char.toUpperCase();
 	const newValue = value.value.slice(0, cursor) + toggled + value.value.slice(cursor + 1);
 	value.value = newValue;

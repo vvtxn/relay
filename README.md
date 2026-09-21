@@ -3,8 +3,9 @@
 A coding agent with a terminal UI, built with Deno and TypeScript.
 
 Relay is a monorepo (Deno workspace) containing a terminal UI framework powered by a custom JSX runtime and Yoga flexbox
-layout, an OpenAI-compatible LLM API layer with streaming support, and an agentic loop with built-in tools. One agent
-runtime is hosted by an HTTP + SSE server; the terminal client talks to it over the wire protocol.
+layout, a browser client built with SolidJS, an OpenAI-compatible LLM API layer with streaming support, and an agentic
+loop with built-in tools. One agent runtime is hosted by an HTTP + SSE server; the terminal and web clients talk to it
+over the same wire protocol.
 
 > **Note — Project Transition**
 >
@@ -20,6 +21,7 @@ runtime is hosted by an HTTP + SSE server; the terminal client talks to it over 
 ## Features
 
 - **Terminal client** — TUI that connects to the server for shared sessions
+- **Web client** — SolidJS SPA (TanStack Query/Router + Effect) served by the same server
 - **Custom JSX-based TUI framework** — Flexbox layout via Yoga, double-buffered rendering, reactive signals, vim-mode
   text input
 - **Streaming chat** — Real-time message rendering with live drafts and tool call cards
@@ -73,31 +75,85 @@ git clone https://github.com/vvtxn/relay.git
 cd relay
 ```
 
-Set your environment:
+Environment is layered and mode-based (`RELAY_ENV=development|production`). Committed non-secret defaults live in
+`.env.development` / `.env.production`; put secrets in the gitignored `.env.development.local` / `.env.production.local`
+(see `.env.example`). Precedence: process env > `.env.<mode>.local` > `.env.<mode>` > `.env.local` > `.env`.
 
 ```bash
-export TURSO_DB_URL="your-database-url"
-export TURSO_DB_TOKEN="your-database-token"
-export DEV_AUTH_SUBJECT="your-local-user"
-# Optional — falls back to ~/.relay/auth.json written by the CLI:
-export LLM_API_KEY="your-api-key"
+cp .env.example .env.development.local
+# fill in TURSO_DB_URL / TURSO_DB_TOKEN (and GITHUB_APP_* when using GitHub auth)
 ```
 
 ### Run
 
-Start the server (hosts the agent runtime):
+Development (Vite serves the SPA and proxies `/api` to the server):
 
 ```bash
-deno task serve
-```
-
-Then use the client:
-
-```bash
+deno task serve:dev    # server
+deno task web:dev      # web UI at http://localhost:5173 (another shell)
 deno task agent        # terminal UI (another shell)
 ```
 
-The compiled binary ships both: `relay serve` starts the server, `relay` starts the terminal UI.
+Production (the server serves the built SPA and API from one origin):
+
+```bash
+deno task web:build
+deno task serve:prod
+```
+
+The compiled binary ships both: `relay serve` starts the server, `relay` starts the terminal UI. `deno task build` is
+release-safe (no env embedded); `deno task build:local` embeds the dev env for a self-contained local binary.
+
+## Authentication
+
+`AUTH_PROVIDER` selects how callers are authenticated:
+
+- **`local`** — every request maps to `DEV_AUTH_SUBJECT`. No login screen; the CLI works out of the box.
+- **`github`** — the browser completes a GitHub App user-authorization flow and receives an opaque session cookie. Each
+  GitHub account gets its own user, sessions, and workspaces. (`.env.development` / `.env.production` enable this by
+  default.)
+
+### GitHub App setup
+
+1. Create a **GitHub App** (Settings → Developer settings → GitHub Apps → New GitHub App).
+   - **Callback URLs** (up to 10 — add both):
+     - `http://localhost:5173/api/auth/callback` (development, via the Vite proxy)
+     - `http://127.0.0.1:7433/api/auth/callback` (production)
+   - Under **Permissions → Account permissions**, set **Email addresses** to _Read-only_ (used to resolve a verified
+     email; the profile itself needs no permission).
+   - Optionally enable **Request user authorization (OAuth) during installation**.
+   - GitHub Apps use fine-grained permissions, so no OAuth `scope` is requested.
+2. Put the App's **client ID** and **client secret** (not the App ID or private key) in the gitignored secrets file for
+   each environment:
+
+   ```dotenv
+   # .env.development.local  (dev GitHub App)
+   GITHUB_APP_CLIENT_ID="..."
+   GITHUB_APP_CLIENT_SECRET="..."
+
+   # .env.production.local   (prod GitHub App)
+   GITHUB_APP_CLIENT_ID="..."
+   GITHUB_APP_CLIENT_SECRET="..."
+   ```
+
+   `RELAY_PUBLIC_URL`, `AUTH_PROVIDER`, and `AUTH_ALLOW_LOCAL` already come from `.env.development` / `.env.production`;
+   `AUTH_SESSION_TTL_DAYS` defaults to 30 and can be overridden in a `.local` file.
+
+3. Start the matching mode (`deno task serve:dev` + `deno task web:dev`, or `deno task serve:prod` after
+   `deno task web:build`) and sign in with two accounts to verify isolation.
+
+The CLI can authenticate in GitHub mode either with a bearer session token or, while `AUTH_ALLOW_LOCAL=true`, by setting
+`RELAY_AUTH_SUBJECT` (the subject it should act as) in a `.local` file.
+
+### Hardening
+
+Before exposing the server, restrict who and where:
+
+- `AUTH_ALLOWED_GITHUB` — comma-separated GitHub logins or numeric ids allowed to sign in (empty = any GitHub account).
+- `RELAY_WORKSPACE_ROOTS` — comma-separated absolute directories a session workspace may use (empty = any directory).
+- Keep `AUTH_ALLOW_LOCAL=false` (the default in github mode).
+
+See [SECURITY.md](SECURITY.md) for the full threat model and checklist.
 
 ## Architecture
 
@@ -108,9 +164,11 @@ The compiled binary ships both: `relay serve` starts the server, `relay` starts 
 │   │   └── core/           # Agent loop, runner, tools, sessions, context, display
 │   ├── client/             # Wire protocol + RelayClient (@vvtxn/client)
 │   ├── server/             # HTTP + SSE server hosting the runtime (@vvtxn/server)
-│   └── cli/                # TUI client + serve subcommand (@vvtxn/cli)
-│       ├── agent/          # App entry point, config, components, hooks
-│       └── tui/            # Terminal UI framework (JSX runtime, Yoga layout)
+│   ├── cli/                # TUI client + serve subcommand (@vvtxn/cli)
+│   │   ├── agent/          # App entry point, config, components, hooks
+│   │   └── tui/            # Terminal UI framework (JSX runtime, Yoga layout)
+│   └── web/                # Solid + Vite SPA client (@vvtxn/web)
+│       └── src/            # Effect API layer, TanStack Query/Router, components
 ├── scripts/                # Build and version bump scripts
 ├── dist/                   # Compiled binary output
 └── deno.json               # Workspace configuration
@@ -121,24 +179,25 @@ The compiled binary ships both: `relay serve` starts the server, `relay` starts 
 ```
 packages/relay  (leaf — no internal deps)
        ↑
-packages/client  (protocol + transport, type-only relay imports)
+packages/client  (protocol + transport + shared session-state reducer)
        ↑
 packages/server  (HTTP + SSE runtime host)
        ↑
-packages/cli  (TUI client + serve subcommand)
+packages/cli  (TUI client + serve subcommand)   packages/web  (Solid SPA client)
 ```
 
-The terminal client talks to the server over the shared protocol in `packages/client`. The agent loop, tools, and session
-stores execute only in `packages/server`; `packages/relay` powers it and provides display utilities (message mapping,
-diffs) to the terminal client.
+The terminal and web clients talk to the server over the shared protocol in `packages/client`. The agent loop, tools,
+and session stores execute only in `packages/server`; `packages/relay` powers it and provides display utilities (message
+mapping, diffs) and the shared Graphite/Silver theme tokens to both clients.
 
 ### `packages/client/` — Wire Protocol + Client
 
-The single source of truth for the server↔client contract, used by the CLI (Deno):
+The single source of truth for the server↔client contract, used by the CLI (Deno) and web (browser):
 
 - `protocol.ts` — REST payloads + SSE `ServerEvent` union (plain JSON types)
 - `sse.ts` — fetch-based SSE parser (no EventSource; works in Deno and browsers) + server-side frame encoder
 - `client.ts` — `RelayClient` (typed methods for every endpoint, `subscribe()` for event streams)
+- `session-state.ts` — pure `applyServerEvent` reducer shared by both clients so run rendering cannot drift
 
 ### `packages/server/` — Agent Runtime Host
 
@@ -183,7 +242,8 @@ The agent loop is an async generator (`run()`) that streams `AgentEvent`s:
 **Authentication** — Provider identities are resolved to internal user IDs before they reach application storage. Local
 development uses `DEV_AUTH_SUBJECT`; GitHub identity mapping is ready for a future OAuth flow.
 
-**Session persistence** — Conversations are stored in the shared Turso database and can be used by the terminal client. The server requires `TURSO_DB_URL`, `TURSO_DB_TOKEN`, and `DEV_AUTH_SUBJECT` while local auth is active:
+**Session persistence** — Conversations are stored in the shared Turso database and can be used by the terminal client.
+The server requires `TURSO_DB_URL`, `TURSO_DB_TOKEN`, and `DEV_AUTH_SUBJECT` while local auth is active:
 
 - **Create** — New sessions with unique IDs and timestamps
 - **Continue** — Resume the most recent session for a workspace
@@ -240,16 +300,35 @@ A thin TUI client of the server:
 - Double Esc to cancel in-progress generation
 - `@` file mentions backed by the server's project file listing
 
+### `packages/web/` — Browser Application
+
+A SolidJS single-page app served by the server (set `RELAY_STATIC_DIR=packages/web/dist`):
+
+- **TanStack Query** owns REST server state (identity, workspace, sessions, files) and mutations
+- **TanStack Router** puts the active session in the URL (`/s/:sessionId`) for deep links and history
+- **Effect** owns the live run: `Api` + `SessionStream` services, a reconnect loop with exponential backoff, and typed
+  errors; events fold into Solid state via the shared `session-state.ts` reducer
+- Chat with live drafts and tool cards (rendered diffs), `@`-mention picker, session sidebar, approval dialog,
+  token/cost status bar, and cancel
+- Shares the Graphite/Silver theme tokens with the terminal client (applied as CSS variables)
+- Auth is written as an OAuth seam: credentialed fetches, 401 handling, and a login redirect — the current local auth
+  can be swapped server-side without client changes
+
 ## Development
 
 ```bash
 deno task fmt          # Format code
 deno task fmt:check    # Check formatting
 deno task lint         # Lint
+deno task check        # Strict type-check every entrypoint
 deno task test         # Run tests
-deno task serve        # Run the server (loads .env)
+deno task serve:dev    # Run the server with the development env
+deno task serve:prod   # Run the server with the production env
 deno task agent        # Run the terminal client (requires a running server)
-deno task build        # Build binary (dist/relay; includes TUI + serve)
+deno task web:dev      # Run the web client with Vite (proxies /api to the server)
+deno task web:build    # Build the web app to packages/web/dist
+deno task build        # Build binary (dist/relay; release-safe, no env embedded)
+deno task build:local  # Build binary embedding the dev env (may include secrets)
 deno task version      # Show current version
 deno task version:bump <patch|minor|major>  # Bump version
 ```

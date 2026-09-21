@@ -113,14 +113,16 @@ export class DatabaseSessionStore implements SessionStore {
 			sql: "SELECT data FROM session_entries WHERE session_id = ? ORDER BY seq ASC, entry_id ASC",
 			args: [reference],
 		});
+		const tokens = optionalNumber(row, "tokens");
+		const cost = optionalNumber(row, "cost");
 		const header = {
 			type: "session" as const,
 			version: optionalNumber(row, "version") ?? CURRENT_VERSION,
 			id: stringValue(row, "id"),
 			timestamp: stringValue(row, "created_at"),
 			cwd: stringValue(row, "cwd"),
-			tokens: optionalNumber(row, "tokens"),
-			cost: optionalNumber(row, "cost"),
+			...(tokens !== undefined ? { tokens } : {}),
+			...(cost !== undefined ? { cost } : {}),
 		};
 		return new DatabaseSessionHandle(
 			this,

@@ -38,9 +38,9 @@ The agent runtime is NOT in this package. `runAgentLoop`, tools, providers, and 
 
 1. `POST /api/sessions/:id/messages` with the raw text (the server expands `@mentions` and persists entries)
 2. The per-session SSE stream (subscribed in a `useSignalEffect` keyed by session id) delivers events
-3. Events fold into the same draft logic the TUI has always used: `text_delta`/`tool_call_*` accumulate a draft
-   (throttled 50ms sync), `turn_complete` finalizes it into `uiMessages`, `run_finished` refetches the session so
-   persisted entries are the source of truth
+3. Events fold through the shared `applyServerEvent` reducer (`@vvtxn/client/session-state.ts`): `text_delta` /
+   `tool_call_*` accumulate a draft, `turn_complete` flushes it into `uiMessages`, `run_finished` refetches the session
+   so persisted entries are the source of truth. The reducer output is committed to a signal on a 50ms throttle.
 4. `message_complete` events carry authoritative token/cost totals
 
 ### Approvals
@@ -86,7 +86,7 @@ never prompts for one.
 ## Running
 
 ```bash
-deno task serve          # start the server (required)
+deno task serve:dev      # start the server (development env; required)
 deno task agent          # start the TUI (another terminal)
 relay serve && relay     # compiled binary equivalents
 ```
@@ -97,7 +97,8 @@ After concluding that a task is complete, always run these commands from the rep
 
 1. `deno task fmt` — auto-format all code
 2. `deno task lint` — check for lint errors
-3. `deno task test` — run the test suite
+3. `deno task check` — strict type-check of every entrypoint
+4. `deno task test` — run the test suite
 
 ## Code Patterns
 

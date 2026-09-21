@@ -1,13 +1,20 @@
 {
-	"workspace": ["packages/relay", "packages/cli", "packages/client", "packages/server"],
+	"workspace": ["packages/relay", "packages/cli", "packages/client", "packages/server", "packages/web"],
 	"nodeModulesDir": "auto",
 	"tasks": {
 		"fmt": "deno fmt",
 		"fmt:check": "deno fmt --check",
 		"lint": "deno lint",
+		"check": "deno check --unstable-raw-imports packages/relay/mod.ts packages/client/mod.ts packages/server/main.ts packages/cli/agent/index.ts packages/web/src/main.tsx packages/cli/tui/playground/*.tsx scripts/*.ts",
 		"test": "deno test --unstable-raw-imports --allow-read --allow-write --allow-env --allow-run",
-		"agent": "deno run --env-file=.env --unstable-raw-imports --allow-all packages/cli/agent/index.ts",
-		"serve": "deno run --env-file=.env --unstable-raw-imports --allow-all packages/server/main.ts",
+		"agent": "deno task agent:dev",
+		"agent:dev": "deno run -A scripts/run-env.ts --unstable-raw-imports --allow-all packages/cli/agent/index.ts",
+		"agent:prod": "RELAY_ENV=production deno run -A scripts/run-env.ts --unstable-raw-imports --allow-all packages/cli/agent/index.ts",
+		"serve": "deno task serve:dev",
+		"serve:dev": "deno run -A scripts/run-env.ts --unstable-raw-imports --allow-all packages/server/main.ts",
+		"serve:prod": "RELAY_ENV=production deno run -A scripts/run-env.ts --unstable-raw-imports --allow-all packages/server/main.ts",
+		"web:dev": "cd packages/web && deno run -A npm:vite",
+		"web:build": "cd packages/web && deno run -A npm:vite build",
 		"playground:approval": "deno run --allow-all packages/cli/tui/playground/approval.tsx",
 		"playground:command-palette": "deno run --allow-all packages/cli/tui/playground/command-palette.tsx",
 		"playground:layout": "deno run --allow-all packages/cli/tui/playground/layout.tsx",
@@ -18,11 +25,13 @@
 		"playground:text-styling": "deno run --allow-all packages/cli/tui/playground/text-styling.tsx",
 		"playground:welcome": "deno run --allow-all packages/cli/tui/playground/welcome.tsx",
 		"build": "deno run --allow-all scripts/build.ts",
+		"build:local": "RELAY_ENV=development deno run --allow-all scripts/build.ts --embed-env",
 		"version": "deno eval \"import {VERSION} from './packages/cli/version.ts'; console.log(VERSION)\"",
 		"version:bump": "deno run --allow-write=packages/cli/version.ts,README.md --allow-read=README.md scripts/bump.ts"
 	},
 	"imports": {
 		"@std/assert": "jsr:@std/assert@^1",
+		"@std/dotenv": "jsr:@std/dotenv@^0.225.8",
 		"@std/path": "jsr:@std/path@^1"
 	},
 	"fmt": {
@@ -31,6 +40,14 @@
 		"indentWidth": 4,
 		"semiColons": true,
 		"singleQuote": false
+	},
+	"compilerOptions": {
+		"noUncheckedIndexedAccess": true,
+		"exactOptionalPropertyTypes": true,
+		"noImplicitOverride": true,
+		"noFallthroughCasesInSwitch": true,
+		"allowUnreachableCode": false,
+		"allowUnusedLabels": false
 	},
 	"lint": {
 		"rules": {

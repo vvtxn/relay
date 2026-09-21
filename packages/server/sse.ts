@@ -1,6 +1,6 @@
 import { encodeSSEFrame } from "@vvtxn/client/sse.ts";
 import type { ServerEvent } from "@vvtxn/client/protocol.ts";
-import type { ServerServices } from "./services.ts";
+import type { RequestServices } from "./services.ts";
 import { openSessionHandle } from "./sessions.ts";
 
 const HEARTBEAT_INTERVAL_MS = 15_000;
@@ -10,10 +10,10 @@ const HEARTBEAT_INTERVAL_MS = 15_000;
  * snapshot first when a run is in progress so late subscribers catch up,
  * then live events until the client disconnects.
  */
-export async function handleEvents(services: ServerServices, sessionId: string, request: Request): Promise<Response> {
+export async function handleEvents(services: RequestServices, sessionId: string, request: Request): Promise<Response> {
 	// Verify the session exists and is owned by the user
 	const handle = await openSessionHandle(services, sessionId);
-	services.runs.attachHandle(sessionId, handle);
+	services.runs.attachHandle(sessionId, handle, services.user.id);
 
 	const { runs } = services;
 	const encoder = new TextEncoder();
@@ -29,6 +29,14 @@ export async function handleEvents(services: ServerServices, sessionId: string, 
 					// Stream already closed
 				}
 			};
+
+			// Immediate comment frame flushes response headers through proxies
+			// (e.g. the Vite dev proxy) before the first real event arrives.
+			try {
+				controller.enqueue(encoder.encode(": connected\n\n"));
+			} catch {
+				// Stream already closed
+			}
 
 			// Catch-up snapshot for late subscribers
 			const snapshot = runs.getRunState(sessionId);

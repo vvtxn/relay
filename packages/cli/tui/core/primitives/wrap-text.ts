@@ -17,7 +17,7 @@ export function wrapTextWithOffsets(text: string, width: number): LineWithOffset
 	let lineStart = 0;
 
 	for (let wi = 0; wi < words.length; wi++) {
-		const word = words[wi];
+		const word = words[wi] ?? "";
 		if (word.length > width) {
 			if (currentLine) {
 				result.push({ line: currentLine, startIndex: lineStart });

@@ -1,4 +1,5 @@
-import { getGitBranch } from "@vvtxn/relay/core/workspace.ts";
+import { getGitBranch, resolveWithinRoot } from "@vvtxn/relay/core/workspace.ts";
+import { homeDir } from "@vvtxn/relay/core/paths.ts";
 import type { SessionHandle } from "@vvtxn/relay/core/sessions/index.ts";
 import type {
 	ConfigResponse,
@@ -10,8 +11,8 @@ import type {
 	SendMessageResponse,
 	SessionListResponse,
 } from "@vvtxn/client/protocol.ts";
-import type { ServerServices } from "./services.ts";
-import { BadRequestError, error, json, NotFoundError, readJsonBody } from "./http.ts";
+import type { RequestServices } from "./services.ts";
+import { BadRequestError, error, ForbiddenError, json, NotFoundError, readJsonBody } from "./http.ts";
 import { RunConflictError } from "./run.ts";
 
 /**
@@ -19,60 +20,71 @@ import { RunConflictError } from "./run.ts";
  * sessions that were created in this process but not persisted yet (the
  * database store inserts lazily on first append).
  */
-export async function openSessionHandle(services: ServerServices, sessionId: string): Promise<SessionHandle> {
+export async function openSessionHandle(services: RequestServices, sessionId: string): Promise<SessionHandle> {
 	try {
 		return await services.sessionStore.open(sessionId, services.user.id);
 	} catch {
-		const handle = services.runs.getHandle(sessionId);
+		const handle = services.runs.getHandle(sessionId, services.user.id);
 		if (handle) return handle;
 		throw new NotFoundError(`Session not found: ${sessionId}`);
 	}
 }
 
 /** Resolve the workspace cwd from the query param or fall back to the server default. */
-function resolveCwd(services: ServerServices, url: URL): string {
+function resolveCwd(services: RequestServices, url: URL): string {
 	return url.searchParams.get("cwd") ?? services.config.defaultCwd;
 }
 
-export function handleMe(services: ServerServices): Response {
+export function handleMe(services: RequestServices): Response {
 	const { user } = services;
 	return json(
 		{
 			id: user.id,
 			...(user.name && { name: user.name }),
 			...(user.provider && { provider: user.provider }),
+			...(user.avatarUrl && { avatarUrl: user.avatarUrl }),
 		} satisfies MeResponse,
 	);
 }
 
 /** Model + context info for client status displays. */
-export function handleConfig(services: ServerServices): Response {
+export function handleConfig(services: RequestServices): Response {
 	const { config } = services;
-	return json({ model: config.model, contextTokens: config.maxTokens } satisfies ConfigResponse);
+	return json(
+		{
+			model: config.model,
+			contextTokens: config.maxTokens,
+			home: homeDir() ?? "",
+		} satisfies ConfigResponse,
+	);
 }
 
-export async function handleListSessions(services: ServerServices, url: URL): Promise<Response> {
+export async function handleListSessions(services: RequestServices, url: URL): Promise<Response> {
 	const cwd = resolveCwd(services, url);
 	const sessions = await services.sessionStore.listSummaries({ ownerId: services.user.id, cwd });
 	return json({ sessions } satisfies SessionListResponse);
 }
 
-export async function handleCreateSession(services: ServerServices, request: Request): Promise<Response> {
+export async function handleCreateSession(services: RequestServices, request: Request): Promise<Response> {
 	const body = await readJsonBody<CreateSessionRequest>(request);
 	const cwd = typeof body.cwd === "string" && body.cwd ? body.cwd : services.config.defaultCwd;
+	if (services.config.workspaceRoots.length > 0) {
+		const allowed = services.config.workspaceRoots.some((root) => resolveWithinRoot(root, cwd) !== null);
+		if (!allowed) throw new ForbiddenError("Workspace is outside the allowed roots");
+	}
 	const scope = { ownerId: services.user.id, cwd };
 	const handle = services.sessionStore.create(scope);
-	services.runs.attachHandle(handle.getHeader().id, handle);
+	services.runs.attachHandle(handle.getHeader().id, handle, services.user.id);
 	return json(
 		{ id: handle.getHeader().id, header: handle.getHeader() } satisfies CreateSessionResponse,
 		201,
 	);
 }
 
-export async function handleOpenSession(services: ServerServices, sessionId: string): Promise<Response> {
+export async function handleOpenSession(services: RequestServices, sessionId: string): Promise<Response> {
 	const handle = await openSessionHandle(services, sessionId);
 
-	services.runs.attachHandle(sessionId, handle);
+	services.runs.attachHandle(sessionId, handle, services.user.id);
 	const branch = await getGitBranch(handle.getHeader().cwd);
 
 	return json(
@@ -88,7 +100,7 @@ export async function handleOpenSession(services: ServerServices, sessionId: str
 }
 
 export async function handleSendMessage(
-	services: ServerServices,
+	services: RequestServices,
 	sessionId: string,
 	request: Request,
 ): Promise<Response> {
@@ -97,9 +109,10 @@ export async function handleSendMessage(
 		throw new BadRequestError("Message content is required");
 	}
 
-	// Ensure the handle is open (ownership check happens in open())
-	if (!services.runs.hasHandle(sessionId)) {
-		services.runs.attachHandle(sessionId, await openSessionHandle(services, sessionId));
+	// Ensure the handle is open. `hasHandle` is owner-scoped, so a request from
+	// another user never skips the ownership check in `openSessionHandle`.
+	if (!services.runs.hasHandle(sessionId, services.user.id)) {
+		services.runs.attachHandle(sessionId, await openSessionHandle(services, sessionId), services.user.id);
 	}
 
 	try {

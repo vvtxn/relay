@@ -212,7 +212,9 @@ export class Renderer {
 
 		const oldKeyMap = new Map<string | number, number>();
 		for (let i = 0; i < oldChildren.length; i++) {
-			const key = oldChildren[i].props.key;
+			const child = oldChildren[i];
+			if (!child) continue;
+			const key = child.props.key;
 			if (key !== undefined && key !== null) {
 				oldKeyMap.set(key, i);
 			}
@@ -224,8 +226,9 @@ export class Renderer {
 		this.resolveAndReconcile(rawChildren.flat(Infinity), ctx, newChildren);
 
 		for (let i = 0; i < oldChildren.length; i++) {
-			if (!consumed.has(i)) {
-				this.freeYogaNodes(oldChildren[i]);
+			const child = oldChildren[i];
+			if (!consumed.has(i) && child) {
+				this.freeYogaNodes(child);
 			}
 		}
 
@@ -236,7 +239,8 @@ export class Renderer {
 			parentInstance.yogaNode.removeChild(parentInstance.yogaNode.getChild(i));
 		}
 		for (let i = 0; i < newChildren.length; i++) {
-			parentInstance.yogaNode.insertChild(newChildren[i].yogaNode, i);
+			const child = newChildren[i];
+			if (child) parentInstance.yogaNode.insertChild(child.yogaNode, i);
 		}
 	}
 
@@ -245,7 +249,7 @@ export class Renderer {
 			const idx = ctx.oldKeyMap.get(key)!;
 			if (!ctx.consumed.has(idx)) {
 				ctx.consumed.add(idx);
-				return ctx.oldChildren[idx];
+				return ctx.oldChildren[idx] ?? null;
 			}
 		}
 
@@ -256,7 +260,7 @@ export class Renderer {
 			const idx = ctx.nextIndex;
 			ctx.consumed.add(idx);
 			ctx.nextIndex++;
-			return ctx.oldChildren[idx];
+			return ctx.oldChildren[idx] ?? null;
 		}
 
 		return null;

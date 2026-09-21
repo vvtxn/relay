@@ -109,6 +109,7 @@ export const TextInputElement: ElementHandler<TextInputInstance> = (instance, co
 
 	for (let lineIdx = 0; lineIdx < displayEntries.length; lineIdx++) {
 		const entry = displayEntries[lineIdx];
+		if (!entry) continue;
 		const formattedText = mentions.length > 0
 			? formatLineWithMentions(entry.line, entry.startIndex, width, mentions, defaultAnsi, mentionAnsi)
 			: (() => {

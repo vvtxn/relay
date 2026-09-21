@@ -36,7 +36,7 @@ export const writeFileTool = defineTool({
 			const diff = generateDiff(original ?? "", content);
 
 			const message = isNew ? `Created ${path} (${lines} lines)` : `Wrote ${lines} lines to ${path}`;
-			return { content: message, meta: { diff } };
+			return { content: message, ...(diff ? { meta: { diff } } : {}) };
 		} catch (err) {
 			return {
 				content: `Failed to write file: ${err instanceof Error ? err.message : String(err)}`,

@@ -137,12 +137,36 @@ export function getToolDisplayOutput(tool: UIToolCall): string | null {
 			}`;
 		}
 		case "bash": {
-			const firstLine = tool.output.split("\n")[0];
+			const firstLine = tool.output.split("\n")[0] ?? "";
 			return firstLine.length > 120 ? firstLine.slice(0, 120) + "..." : firstLine;
 		}
 		default:
 			return tool.output.length > 120 ? tool.output.slice(0, 120) + "..." : tool.output;
 	}
+}
+
+// ---------------------------------------------------------------------------
+// Path abbreviation
+// ---------------------------------------------------------------------------
+
+/**
+ * Shorten a path for display by replacing the home directory with `~`.
+ * When `home` is unknown, common home prefixes (`/home/<user>`, `/Users/<user>`)
+ * are recognized heuristically.
+ */
+export function abbreviateHome(path: string, home?: string): string {
+	if (home && (path === home || path.startsWith(home + "/"))) {
+		return "~" + path.slice(home.length);
+	}
+	return path.replace(/^\/(?:home|Users)\/[^/]+/, "~");
+}
+
+/** Expand a leading `~` back to the home directory. */
+export function expandHome(path: string, home?: string): string {
+	if (!home) return path;
+	if (path === "~") return home;
+	if (path.startsWith("~/")) return home + path.slice(1);
+	return path;
 }
 
 // ---------------------------------------------------------------------------
@@ -161,8 +185,8 @@ export function parseDiffLines(raw: string): DiffLine[] {
 		if (line.startsWith("@@")) {
 			const m = line.match(/@@ -(\d+)(?:,\d+)? \+(\d+)/);
 			if (m) {
-				oldLine = parseInt(m[1]);
-				newLine = parseInt(m[2]);
+				oldLine = parseInt(m[1] ?? "0");
+				newLine = parseInt(m[2] ?? "0");
 			}
 			continue;
 		}

@@ -40,7 +40,7 @@ export class RunManager {
 	private readonly subscribers = new Map<string, Set<Subscriber>>();
 	private readonly pendingApprovals = new Map<string, Map<string, PendingApproval>>();
 	private readonly alwaysApproved = new Map<string, Set<string>>();
-	private readonly handles = new Map<string, SessionHandle>();
+	private readonly handles = new Map<string, { handle: SessionHandle; ownerId: string }>();
 
 	/** In-flight draft state for run_state snapshots (late subscribers). */
 	private readonly draftText = new Map<string, string>();
@@ -71,8 +71,20 @@ export class RunManager {
 		set.add(subscriber);
 		return () => {
 			set.delete(subscriber);
-			if (set.size === 0) this.subscribers.delete(sessionId);
+			if (set.size === 0) {
+				this.subscribers.delete(sessionId);
+				this.releaseIfIdle(sessionId);
+			}
 		};
+	}
+
+	/** Drop the cached handle and totals once a session is idle and unwatched. */
+	private releaseIfIdle(sessionId: string): void {
+		if (this.activeRuns.has(sessionId)) return;
+		if ((this.subscribers.get(sessionId)?.size ?? 0) > 0) return;
+		this.handles.delete(sessionId);
+		this.tokens.delete(sessionId);
+		this.cost.delete(sessionId);
 	}
 
 	private emit(sessionId: string, event: ServerEvent): void {
@@ -127,13 +139,18 @@ export class RunManager {
 	}
 
 	/** True when the manager holds a handle for this session (opened or created). */
-	hasHandle(sessionId: string): boolean {
-		return this.handles.has(sessionId);
+	hasHandle(sessionId: string, ownerId?: string): boolean {
+		const entry = this.handles.get(sessionId);
+		if (!entry) return false;
+		return ownerId === undefined || entry.ownerId === ownerId;
 	}
 
 	/** The live handle for a session, when the server has one open (created or used this process). */
-	getHandle(sessionId: string): SessionHandle | null {
-		return this.handles.get(sessionId) ?? null;
+	getHandle(sessionId: string, ownerId?: string): SessionHandle | null {
+		const entry = this.handles.get(sessionId);
+		if (!entry) return null;
+		if (ownerId !== undefined && entry.ownerId !== ownerId) return null;
+		return entry.handle;
 	}
 
 	/** Returns 202-style start; throws RunConflictError when a run is active. */
@@ -151,7 +168,7 @@ export class RunManager {
 
 		// Get or open the handle for this session. The handle stays cached so
 		// token/cost tracking persists across runs.
-		const handle = this.handles.get(sessionId);
+		const handle = this.handles.get(sessionId)?.handle;
 		if (!handle) {
 			this.activeRuns.delete(sessionId);
 			throw new Error(`No open session handle for ${sessionId}`);
@@ -177,8 +194,9 @@ export class RunManager {
 
 			// The LLM sees the expanded content for the latest user message
 			for (let i = messages.length - 1; i >= 0; i--) {
-				if (messages[i].role === "user") {
-					messages[i] = { ...messages[i], content: expanded };
+				const message = messages[i];
+				if (message?.role === "user") {
+					messages[i] = { ...message, content: expanded };
 					break;
 				}
 			}
@@ -225,7 +243,8 @@ export class RunManager {
 					const index = this.draftIndex.get(sessionId);
 					const at = index?.get(id);
 					if (calls && at !== undefined && at < calls.length) {
-						calls[at] = { ...calls[at], result };
+						const existing = calls[at];
+						if (existing) calls[at] = { ...existing, result };
 					}
 					this.emit(sessionId, { type: "tool_result", id, result });
 				},
@@ -240,7 +259,7 @@ export class RunManager {
 					}
 					this.emit(sessionId, {
 						type: "message_complete",
-						usage,
+						...(usage ? { usage } : {}),
 						tokens: this.tokens.get(sessionId) ?? 0,
 						cost: this.cost.get(sessionId) ?? 0,
 					});
@@ -300,12 +319,13 @@ export class RunManager {
 			this.draftIndex.delete(sessionId);
 			await handle.flush().catch(() => {});
 			this.emit(sessionId, finished);
+			this.releaseIfIdle(sessionId);
 		}
 	}
 
 	/** Attach an opened session handle so the run can persist to it. */
-	attachHandle(sessionId: string, handle: SessionHandle): void {
-		this.handles.set(sessionId, handle);
+	attachHandle(sessionId: string, handle: SessionHandle, ownerId: string): void {
+		this.handles.set(sessionId, { handle, ownerId });
 		this.tokens.set(sessionId, handle.getTokens());
 		this.cost.set(sessionId, handle.getCost());
 	}

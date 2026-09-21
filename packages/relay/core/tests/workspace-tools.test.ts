@@ -73,6 +73,24 @@ Deno.test("workspace tools reject paths escaping the root", async () => {
 	}
 });
 
+Deno.test("workspace tools reject symlinks that escape the root", async () => {
+	const parent = await Deno.makeTempDir();
+	try {
+		const root = `${parent}/project`;
+		await Deno.mkdir(root);
+		await Deno.writeTextFile(`${parent}/secret.txt`, "top secret");
+		await Deno.symlink(`${parent}/secret.txt`, `${root}/link.txt`);
+		const tools = registry(root);
+
+		const result = await tool(tools, "read_file").execute({ path: "link.txt" });
+
+		assertEquals(result.isError, true);
+		assert(result.content.includes("outside the workspace"));
+	} finally {
+		await Deno.remove(parent, { recursive: true });
+	}
+});
+
 Deno.test("workspace tools accept absolute paths inside the root", async () => {
 	const dir = await Deno.makeTempDir();
 	try {

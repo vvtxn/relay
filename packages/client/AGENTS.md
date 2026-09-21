@@ -6,12 +6,14 @@ Typed wire protocol + HTTP/SSE client used by the Relay terminal client (CLI in 
 
 ```
 client/
-├── deno.json        # @vvtxn/client, no runtime deps beyond @vvtxn/relay types
-├── mod.ts           # Public exports
-├── protocol.ts      # REST payloads + ServerEvent union (plain JSON types only)
-├── sse.ts           # readSSEStream (fetch-based parser), encodeSSEFrame (server side)
-├── client.ts        # RelayClient + RelayApiError
-└── client.test.ts   # Protocol + client tests (mock fetch)
+├── deno.json           # @vvtxn/client, relay display + theme deps
+├── mod.ts              # Public exports
+├── protocol.ts         # REST payloads + ServerEvent union (plain JSON types only)
+├── sse.ts              # readSSEStream (fetch-based parser), encodeSSEFrame (server side)
+├── client.ts           # RelayClient + RelayApiError
+├── session-state.ts    # Pure ServerEvent fold reducer shared by all clients
+├── client.test.ts      # Protocol + client tests (mock fetch)
+└── session-state.test.ts # Reducer tests (pure, no DOM)
 ```
 
 ## Key Concepts
@@ -19,8 +21,9 @@ client/
 ### Protocol (`protocol.ts`)
 
 The single source of truth for the server↔client contract. All types are plain JSON so any runtime can consume them.
-REST payloads cover health, identity, workspace, sessions CRUD, files, and approvals. `ServerEvent` mirrors the agent
-runner callbacks 1:1 plus server lifecycle events (`run_state` snapshot, `approval_required/resolved`, `run_finished`).
+REST payloads cover health, auth info, identity (`MeResponse` includes an optional `avatarUrl`), workspace, sessions
+CRUD, files, and approvals. `ServerEvent` mirrors the agent runner callbacks 1:1 plus server lifecycle events
+(`run_state` snapshot, `approval_required/resolved`, `run_finished`).
 
 ### SSE (`sse.ts`)
 
@@ -35,9 +38,16 @@ Pure fetch. Methods map 1:1 to endpoints. `subscribe(sessionId, { signal, onOpen
 fires when the stream response is established (clients use it to know events can flow). Non-2xx responses throw
 `RelayApiError` with the server's `error` message and status.
 
+### Session state (`session-state.ts`)
+
+The shared event fold: `applyServerEvent(state, event)` is a pure reducer over `ServerEvent` producing display-ready
+state (draft text, tool calls, running flag, status, tokens/cost, pending approval). `viewMessages()` merges the
+in-flight draft into the message list, and `flushDraft()` finalizes it. Both the CLI and web clients hold this state in
+their own reactive primitive, so their run rendering can never drift.
+
 ## Dependencies
 
-- `@vvtxn/relay` — type-only imports (Entry, SessionSummary, ToolResult, Usage)
+- `@vvtxn/relay` — protocol types (type-only) and `display.ts` runtime helpers used by the fold reducer
 - No npm/jsr runtime dependencies
 
 ## Task Completion Checklist
@@ -46,7 +56,8 @@ After concluding that a task is complete, always run these commands from the rep
 
 1. `deno task fmt` — auto-format all code
 2. `deno task lint` — check for lint errors
-3. `deno task test` — run the test suite
+3. `deno task check` — strict type-check of every entrypoint
+4. `deno task test` — run the test suite
 
 ## Code Patterns
 

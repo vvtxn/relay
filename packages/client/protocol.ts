@@ -23,6 +23,15 @@ export interface MeResponse {
 	id: string;
 	name?: string;
 	provider?: string;
+	/** Avatar URL from the identity provider, when available. */
+	avatarUrl?: string;
+}
+
+/** Public auth metadata for the login screen. */
+export interface AuthInfoResponse {
+	provider: "local" | "github";
+	/** Server endpoint that begins the login flow. */
+	loginUrl: string;
 }
 
 /** The server's default workspace directory (used to scope sessions). */
@@ -35,6 +44,8 @@ export interface ConfigResponse {
 	model: string;
 	/** Context window budget used for the token bar. */
 	contextTokens: number;
+	/** Server user's home directory, used to abbreviate/expand `~` paths. */
+	home: string;
 }
 
 export interface SessionListResponse {

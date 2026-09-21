@@ -44,12 +44,21 @@ export type { DatabaseClient, DatabaseCredentials } from "./database.ts";
 export { DatabaseUserStore } from "./auth/db.ts";
 export { GitHubAuthProvider } from "./auth/github.ts";
 export { LocalAuthProvider } from "./auth/local.ts";
+export { DatabaseAuthSessionStore } from "./auth/sessions.ts";
 export { authenticate } from "./auth/service.ts";
 export type { GitHubProfile } from "./auth/github.ts";
-export type { AuthenticatedUser, AuthIdentity, AuthProvider, UserStore } from "./auth/types.ts";
+export type { AuthSession, AuthSessionStore } from "./auth/sessions.ts";
+export type { AuthenticatedUser, AuthIdentity, AuthProvider, UserDirectory, UserStore } from "./auth/types.ts";
 
 export { homeDir, relayDir } from "./paths.ts";
 
 export { SYSTEM_PROMPT } from "./system-prompt.ts";
 
-export { expandMentions, getGitBranch, isGitRepo, listProjectFiles, resolveWithinRoot } from "./workspace.ts";
+export {
+	expandMentions,
+	getGitBranch,
+	isGitRepo,
+	listProjectFiles,
+	resolveRealWithinRoot,
+	resolveWithinRoot,
+} from "./workspace.ts";

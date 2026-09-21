@@ -63,7 +63,7 @@ export function defineTool(opts: {
 				parameters: opts.parameters,
 			},
 		},
-		readonly: opts.readonly,
+		...(opts.readonly !== undefined ? { readonly: opts.readonly } : {}),
 		execute: opts.execute,
 	};
 }

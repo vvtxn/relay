@@ -100,7 +100,7 @@ export class CompletionsProvider implements LLMProvider {
 						"Authorization": `Bearer ${this.apiKey}`,
 					},
 					body: JSON.stringify(body),
-					signal,
+					signal: signal ?? null,
 				}),
 				timeout,
 			]);

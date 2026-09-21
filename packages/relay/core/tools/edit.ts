@@ -71,7 +71,7 @@ export const editFileTool = defineTool({
 
 			const replaced = replace_all ? `${count} occurrence${count > 1 ? "s" : ""}` : "1 occurrence";
 			const diff = generateDiff(original, updated);
-			return { content: `Replaced ${replaced} in ${path}`, meta: { diff } };
+			return { content: `Replaced ${replaced} in ${path}`, ...(diff ? { meta: { diff } } : {}) };
 		} catch (err) {
 			return {
 				content: `Failed to edit file: ${err instanceof Error ? err.message : String(err)}`,

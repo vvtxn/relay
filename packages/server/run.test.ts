@@ -7,6 +7,7 @@ import type { ServerEvent } from "@vvtxn/client/protocol.ts";
 
 function fakeConfig(): ServerConfig {
 	return {
+		relayEnv: "development",
 		port: 0,
 		hostname: "127.0.0.1",
 		apiKey: "test",
@@ -18,8 +19,16 @@ function fakeConfig(): ServerConfig {
 		maxCompletionTokens: 1024,
 		tursoUrl: "turso://test",
 		tursoToken: "token",
+		authProvider: "local",
 		devAuthSubject: "dev",
+		githubClientId: null,
+		githubClientSecret: null,
+		publicUrl: "http://127.0.0.1:0",
+		sessionTtlDays: 30,
+		allowLocalAuth: true,
 		defaultCwd: "/tmp",
+		workspaceRoots: [],
+		allowedGithub: [],
 		staticDir: null,
 	};
 }
@@ -87,9 +96,44 @@ Deno.test("RunManager - isRunning is false before any run", () => {
 	assertEquals(runs.isRunning("s1"), false);
 });
 
+Deno.test("RunManager - handles are owner-scoped", () => {
+	const runs = makeManager();
+	runs.attachHandle("s1", fakeHandle(), "user-1");
+
+	assertEquals(runs.hasHandle("s1", "user-1"), true);
+	assertEquals(runs.hasHandle("s1", "user-2"), false);
+	assertEquals(runs.hasHandle("s1"), true);
+	assertEquals(runs.getHandle("s1", "user-1") !== null, true);
+	assertEquals(runs.getHandle("s1", "user-2"), null);
+});
+
+Deno.test("RunManager - releases an idle session when its last subscriber leaves", () => {
+	const runs = makeManager();
+	runs.attachHandle("s1", fakeHandle(), "user-1");
+	const unsubscribe = runs.subscribe("s1", () => {});
+	assertEquals(runs.hasHandle("s1", "user-1"), true);
+
+	unsubscribe();
+
+	assertEquals(runs.hasHandle("s1", "user-1"), false);
+});
+
+Deno.test("RunManager - releases the handle after a run finishes unwatched", async () => {
+	const runs = makeManager();
+	runs.attachHandle("s1", fakeHandle(), "user-1");
+
+	runs.startMessage("s1", "hi");
+	for (let i = 0; i < 100 && runs.isRunning("s1"); i++) {
+		await new Promise((resolve) => setTimeout(resolve, 5));
+	}
+
+	assertEquals(runs.isRunning("s1"), false);
+	assertEquals(runs.hasHandle("s1", "user-1"), false);
+});
+
 Deno.test("RunManager - subscribers receive events", async () => {
 	const runs = makeManager();
-	runs.attachHandle("s1", fakeHandle());
+	runs.attachHandle("s1", fakeHandle(), "user-1");
 
 	const events: ServerEvent[] = [];
 	const unsubscribe = runs.subscribe("s1", (event) => events.push(event));
@@ -121,7 +165,7 @@ Deno.test("RunManager - second message on a running session throws RunConflictEr
 		},
 	};
 	const runs = new RunManager({ config: fakeConfig(), sessionStore: fakeStore(), provider: slowProvider });
-	runs.attachHandle("s1", fakeHandle());
+	runs.attachHandle("s1", fakeHandle(), "user-1");
 
 	runs.startMessage("s1", "first");
 	assertEquals(runs.isRunning("s1"), true);
@@ -157,7 +201,7 @@ Deno.test("RunManager - cancel aborts the run and emits run_finished", async () 
 		},
 	};
 	const runs = new RunManager({ config: fakeConfig(), sessionStore: fakeStore(), provider: slowProvider });
-	runs.attachHandle("s1", fakeHandle());
+	runs.attachHandle("s1", fakeHandle(), "user-1");
 
 	const events: ServerEvent[] = [];
 	runs.subscribe("s1", (event) => events.push(event));

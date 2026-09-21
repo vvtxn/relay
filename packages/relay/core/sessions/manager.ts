@@ -29,7 +29,9 @@ function newId(): string {
 async function readSession(path: string): Promise<Session> {
 	const text = await Deno.readTextFile(path);
 	const lines = text.split("\n").filter((l) => l.trim() !== "");
-	const header = JSON.parse(lines[0]) as SessionHeader;
+	const headerLine = lines[0];
+	if (!headerLine) throw new Error(`Session file has no header: ${path}`);
+	const header = JSON.parse(headerLine) as SessionHeader;
 	const entries = lines.slice(1).map((l) => JSON.parse(l) as Entry);
 	return { header, entries };
 }
@@ -101,7 +103,8 @@ export class SessionManager {
 	static async continueRecent(cwd: string, ownerId?: string): Promise<SessionManager | null> {
 		const files = await SessionManager.list(cwd, ownerId);
 		if (files.length === 0) return null;
-		return SessionManager.open(files[0]);
+		const first = files[0];
+		return first ? SessionManager.open(first) : null;
 	}
 
 	/** Load a specific session file. */
@@ -158,9 +161,10 @@ export class SessionManager {
 					buf += new TextDecoder().decode(chunk);
 					const parts = buf.split("\n");
 					for (let i = 0; i < parts.length - 1; i++) {
-						if (parts[i].trim()) lines.push(parts[i]);
+						const part = parts[i];
+						if (part?.trim()) lines.push(part);
 					}
-					buf = parts[parts.length - 1];
+					buf = parts[parts.length - 1] ?? "";
 
 					// Header + first entry is enough in most cases
 					if (lines.length >= 2) break;
@@ -168,11 +172,15 @@ export class SessionManager {
 				if (buf.trim()) lines.push(buf);
 				if (lines.length === 0) continue;
 
-				const header = JSON.parse(lines[0]) as SessionHeader;
+				const headerLine = lines[0];
+				if (!headerLine) continue;
+				const header = JSON.parse(headerLine) as SessionHeader;
 				let firstUserMessage: string | null = null;
 
 				for (let i = 1; i < lines.length; i++) {
-					const entry = JSON.parse(lines[i]) as Entry;
+					const line = lines[i];
+					if (!line) continue;
+					const entry = JSON.parse(line) as Entry;
 					if (entry.type === "message" && entry.role === "user" && typeof entry.content === "string") {
 						firstUserMessage = entry.content;
 						break;

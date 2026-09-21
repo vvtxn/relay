@@ -1,4 +1,4 @@
-import { assertEquals } from "@std/assert";
+import { assertEquals, assertThrows } from "@std/assert";
 import { serverConfigFromEnv } from "./config.ts";
 
 const REQUIRED_ENV = {
@@ -6,6 +6,16 @@ const REQUIRED_ENV = {
 	TURSO_DB_URL: "turso://test",
 	TURSO_DB_TOKEN: "test-token",
 	DEV_AUTH_SUBJECT: "dev-user",
+};
+
+const GITHUB_ENV = {
+	LLM_API_KEY: "test-key",
+	TURSO_DB_URL: "turso://test",
+	TURSO_DB_TOKEN: "test-token",
+	AUTH_PROVIDER: "github",
+	GITHUB_APP_CLIENT_ID: "cid",
+	GITHUB_APP_CLIENT_SECRET: "csecret",
+	RELAY_PUBLIC_URL: "https://relay.example.com/",
 };
 
 Deno.test("serverConfigFromEnv - reads required values and applies defaults", () => {
@@ -37,7 +47,7 @@ Deno.test("serverConfigFromEnv - respects overrides", () => {
 Deno.test("serverConfigFromEnv - throws when required env is missing", () => {
 	let threw = false;
 	try {
-		serverConfigFromEnv({ LLM_API_KEY: "test-key" }, () => null);
+		serverConfigFromEnv({ LLM_API_KEY: "test-key", DEV_AUTH_SUBJECT: "dev-user" }, () => null);
 	} catch (error) {
 		threw = true;
 		assertEquals((error as Error).message, "TURSO_DB_URL is required");
@@ -66,4 +76,95 @@ Deno.test("serverConfigFromEnv - throws when no key source is available", () => 
 		message = (error as Error).message;
 	}
 	assertEquals(message, "LLM_API_KEY is required (or run the CLI once to create ~/.relay/auth.json)");
+});
+
+Deno.test("serverConfigFromEnv - local mode defaults", () => {
+	const config = serverConfigFromEnv({ ...REQUIRED_ENV });
+	assertEquals(config.authProvider, "local");
+	assertEquals(config.devAuthSubject, "dev-user");
+	assertEquals(config.allowLocalAuth, true);
+	assertEquals(config.publicUrl, "http://127.0.0.1:7433");
+	assertEquals(config.sessionTtlDays, 30);
+});
+
+Deno.test("serverConfigFromEnv - local mode requires a subject", () => {
+	assertThrows(
+		() => serverConfigFromEnv({ ...REQUIRED_ENV, DEV_AUTH_SUBJECT: undefined }),
+		Error,
+		"DEV_AUTH_SUBJECT",
+	);
+});
+
+Deno.test("serverConfigFromEnv - github mode reads oauth config and trims the public url", () => {
+	const config = serverConfigFromEnv(GITHUB_ENV);
+	assertEquals(config.authProvider, "github");
+	assertEquals(config.githubClientId, "cid");
+	assertEquals(config.githubClientSecret, "csecret");
+	assertEquals(config.publicUrl, "https://relay.example.com");
+	assertEquals(config.allowLocalAuth, false);
+	assertEquals(config.devAuthSubject, null);
+});
+
+Deno.test("serverConfigFromEnv - github mode requires client credentials", () => {
+	assertThrows(
+		() => serverConfigFromEnv({ ...GITHUB_ENV, GITHUB_APP_CLIENT_SECRET: undefined }),
+		Error,
+		"GITHUB_APP_CLIENT_SECRET",
+	);
+	assertThrows(
+		() => serverConfigFromEnv({ ...GITHUB_ENV, GITHUB_APP_CLIENT_ID: undefined }),
+		Error,
+		"GITHUB_APP_CLIENT_ID",
+	);
+});
+
+Deno.test("serverConfigFromEnv - github mode accepts legacy GITHUB_CLIENT_* names", () => {
+	const { GITHUB_APP_CLIENT_ID, GITHUB_APP_CLIENT_SECRET, ...rest } = GITHUB_ENV;
+	const config = serverConfigFromEnv({
+		...rest,
+		GITHUB_CLIENT_ID: GITHUB_APP_CLIENT_ID,
+		GITHUB_CLIENT_SECRET: GITHUB_APP_CLIENT_SECRET,
+	});
+	assertEquals(config.githubClientId, "cid");
+	assertEquals(config.githubClientSecret, "csecret");
+});
+
+Deno.test("serverConfigFromEnv - AUTH_ALLOW_LOCAL overrides the github default", () => {
+	const config = serverConfigFromEnv({ ...GITHUB_ENV, AUTH_ALLOW_LOCAL: "true" });
+	assertEquals(config.allowLocalAuth, true);
+});
+
+Deno.test("serverConfigFromEnv - rejects an unknown AUTH_PROVIDER", () => {
+	assertThrows(() => serverConfigFromEnv({ ...REQUIRED_ENV, AUTH_PROVIDER: "gitlab" }), Error, "AUTH_PROVIDER");
+});
+
+Deno.test("serverConfigFromEnv - parses allowlists", () => {
+	const config = serverConfigFromEnv({
+		...GITHUB_ENV,
+		RELAY_WORKSPACE_ROOTS: "/srv/projects, /srv/other",
+		AUTH_ALLOWED_GITHUB: "Octocat, 12345",
+	});
+	assertEquals(config.workspaceRoots, ["/srv/projects", "/srv/other"]);
+	assertEquals(config.allowedGithub, ["octocat", "12345"]);
+});
+
+Deno.test("serverConfigFromEnv - allowlists default to empty (allow any)", () => {
+	const config = serverConfigFromEnv({ ...GITHUB_ENV });
+	assertEquals(config.workspaceRoots, []);
+	assertEquals(config.allowedGithub, []);
+});
+
+Deno.test("serverConfigFromEnv - rejects malformed numeric env", () => {
+	assertThrows(() => serverConfigFromEnv({ ...REQUIRED_ENV, RELAY_PORT: "abc" }), Error, "RELAY_PORT");
+	assertThrows(() => serverConfigFromEnv({ ...REQUIRED_ENV, RELAY_PORT: "0" }), Error, "RELAY_PORT");
+	assertThrows(
+		() => serverConfigFromEnv({ ...REQUIRED_ENV, AUTH_SESSION_TTL_DAYS: "-5" }),
+		Error,
+		"AUTH_SESSION_TTL_DAYS",
+	);
+	assertThrows(
+		() => serverConfigFromEnv({ ...REQUIRED_ENV, AUTH_SESSION_TTL_DAYS: "9999" }),
+		Error,
+		"AUTH_SESSION_TTL_DAYS",
+	);
 });

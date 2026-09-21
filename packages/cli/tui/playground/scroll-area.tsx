@@ -16,8 +16,8 @@ const PHRASES = [
 
 function App() {
 	const lines = Array.from({ length: 50 }, (_, i) => ({
-		text: `Line ${i + 1}: ${PHRASES[i % PHRASES.length]}`,
-		color: COLORS[i % COLORS.length],
+		text: `Line ${i + 1}: ${PHRASES[i % PHRASES.length] ?? ""}`,
+		color: COLORS[i % COLORS.length] ?? "white",
 		bold: i % 10 === 0,
 		italic: i % 7 === 0,
 	}));

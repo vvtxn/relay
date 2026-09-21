@@ -1,6 +1,13 @@
-import { createUIToolCall, entriesToUIMessages, getToolDisplayName } from "@vvtxn/relay/core/display.ts";
-import type { UIMessage, UIToolCall } from "@vvtxn/relay/core/display.ts";
+import { entriesToUIMessages, getToolDisplayName } from "@vvtxn/relay/core/display.ts";
 import type { ConfigResponse, MeResponse, PendingApprovalInfo, ServerEvent } from "@vvtxn/client/protocol.ts";
+import {
+	applyServerEvent,
+	initialSessionStreamState,
+	resetSessionStreamState,
+	type SessionStatus,
+	type SessionStreamState,
+	viewMessages,
+} from "@vvtxn/client/session-state.ts";
 import { signal } from "@preact/signals-core";
 import { run } from "@/tui/render/index.ts";
 import {
@@ -45,13 +52,12 @@ const COMMANDS: CommandPaletteItem[] = [
 // Status
 // ---------------------------------------------------------------------------
 
-type AgentStatus =
-	| { kind: "thinking" }
-	| { kind: "writing" }
-	| { kind: "running_tool"; toolName: string };
+type AgentStatus = SessionStatus;
 
 function formatStatus(status: AgentStatus): string {
 	switch (status.kind) {
+		case "idle":
+			return "Ready";
 		case "thinking":
 			return "Thinking...";
 		case "writing":
@@ -79,64 +85,48 @@ function App({ onQuit, user, initialSessionId, info }: AppProps) {
 	const input = useSignal("");
 	const cursor = useSignal(0);
 	const mode = useSignal<VimMode>("INSERT");
-	const isLoading = useSignal(false);
-	const status = useSignal<AgentStatus>({ kind: "thinking" });
-	const tokenCount = useSignal(0);
-	const totalCost = useSignal(0);
 	const sessionId = useSignal<string | null>(initialSessionId);
 	const branchName = useSignal<string | null>(null);
-	const uiMessages = useSignal<UIMessage[]>([]);
+	const stream = useSignal<SessionStreamState>(initialSessionStreamState);
 	const escPrimed = useSignal(false);
 
-	// Streaming draft state (shared across the session's event stream)
-	const draft = { text: "", toolCalls: [] as UIToolCall[], msgIndex: -1 };
-	let toolCallIndex = new Map<string, number>();
-	let syncTimer: ReturnType<typeof setTimeout> | null = null;
-	let syncPending = false;
-	let currentAsk: { sessionId: string; toolCallId: string } | null = null;
-	const remotelyResolved = new Set<string>();
+	// The TUI re-invokes component functions on every render, so cross-render
+	// state lives in persisted signals. `sync.pending` accumulates events off
+	// the render signal; `stream` is flushed on a 50ms throttle for text deltas
+	// and immediately for structural events.
+	const sync = useSignal<
+		{ pending: SessionStreamState; timer: ReturnType<typeof setTimeout> | null; syncing: boolean }
+	>({
+		pending: initialSessionStreamState,
+		timer: null,
+		syncing: false,
+	});
+	const currentAsk = useSignal<{ sessionId: string; toolCallId: string } | null>(null);
+	const remotelyResolved = useSignal<Set<string>>(new Set());
 
-	const doSync = () => {
-		const msgs = [...uiMessages.value];
-		const entry: UIMessage = { role: "agent", content: draft.text, toolCalls: [...draft.toolCalls] };
-		if (draft.msgIndex >= 0 && draft.msgIndex < msgs.length) {
-			msgs[draft.msgIndex] = entry;
-		} else {
-			draft.msgIndex = msgs.length;
-			msgs.push(entry);
-		}
-		uiMessages.value = msgs;
-		syncPending = false;
+	const pushStream = () => {
+		stream.value = sync.value.pending;
+		sync.value.syncing = false;
 	};
 
-	const syncDraft = (force = false) => {
+	const syncStream = (force = false) => {
 		if (force) {
-			if (syncTimer) clearTimeout(syncTimer);
-			syncTimer = null;
-			doSync();
+			if (sync.value.timer) clearTimeout(sync.value.timer);
+			sync.value.timer = null;
+			pushStream();
 			return;
 		}
-		if (syncPending) return;
-		syncPending = true;
-		syncTimer = setTimeout(() => {
-			syncTimer = null;
-			doSync();
+		if (sync.value.syncing) return;
+		sync.value.syncing = true;
+		sync.value.timer = setTimeout(() => {
+			sync.value.timer = null;
+			pushStream();
 		}, 50);
 	};
 
-	const finalizeDraft = () => {
-		if (syncTimer) clearTimeout(syncTimer);
-		syncTimer = null;
-		syncPending = false;
-		if (draft.text || draft.toolCalls.length > 0) doSync();
-		draft.text = "";
-		draft.toolCalls = [];
-		draft.msgIndex = -1;
-		toolCallIndex = new Map();
-	};
-
 	const showError = (message: string) => {
-		uiMessages.value = [...uiMessages.value, { role: "agent", content: `**Error:** ${message}` }];
+		sync.value.pending = applyServerEvent(sync.value.pending, { type: "error", message });
+		syncStream(true);
 	};
 
 	const refreshSession = async () => {
@@ -145,9 +135,16 @@ function App({ onQuit, user, initialSessionId, info }: AppProps) {
 		try {
 			const response = await client.openSession(id);
 			if (sessionId.value !== id) return;
-			uiMessages.value = entriesToUIMessages(response.entries);
-			tokenCount.value = response.tokens;
-			totalCost.value = response.cost;
+			sync.value.pending = {
+				...sync.value.pending,
+				messages: entriesToUIMessages(response.entries),
+				draftText: "",
+				draftToolCalls: [],
+				toolCallIndex: {},
+				tokens: response.tokens,
+				cost: response.cost,
+			};
+			syncStream(true);
 			branchName.value = response.branch;
 		} catch {
 			// Keep the current view on transient failures
@@ -162,16 +159,16 @@ function App({ onQuit, user, initialSessionId, info }: AppProps) {
 		void (async () => {
 			const askSessionId = sessionId.value;
 			if (!askSessionId) return;
-			currentAsk = { sessionId: askSessionId, toolCallId: info.toolCallId };
+			currentAsk.value = { sessionId: askSessionId, toolCallId: info.toolCallId };
 			const decision = await approval.ask({
 				toolName: getToolDisplayName(info.toolName),
 				summary: info.summary,
 			});
-			const wasCurrent = currentAsk?.toolCallId === info.toolCallId;
-			currentAsk = null;
+			const wasCurrent = currentAsk.value?.toolCallId === info.toolCallId;
+			currentAsk.value = null;
 			if (!wasCurrent) return;
-			if (remotelyResolved.has(info.toolCallId)) {
-				remotelyResolved.delete(info.toolCallId);
+			if (remotelyResolved.value.has(info.toolCallId)) {
+				remotelyResolved.value.delete(info.toolCallId);
 				return;
 			}
 			if (sessionId.value !== askSessionId) return;
@@ -184,8 +181,8 @@ function App({ onQuit, user, initialSessionId, info }: AppProps) {
 	};
 
 	const dropPendingAsk = (denyOnServer: boolean) => {
-		const ask = currentAsk;
-		currentAsk = null;
+		const ask = currentAsk.value;
+		currentAsk.value = null;
 		if (!ask) return;
 		if (denyOnServer) void client.approve(ask.sessionId, ask.toolCallId, "deny").catch(() => {});
 		approval.cancel();
@@ -196,78 +193,18 @@ function App({ onQuit, user, initialSessionId, info }: AppProps) {
 	// -----------------------------------------------------------------------
 
 	const foldEvent = (event: ServerEvent) => {
-		switch (event.type) {
-			case "run_state": {
-				draft.text = event.draftText;
-				draft.toolCalls = event.toolCalls.map((tc) => ({
-					...createUIToolCall(tc.name, tc.args),
-					output: tc.result?.content ?? "",
-					diff: tc.result?.meta?.diff,
-				}));
-				toolCallIndex = new Map();
-				event.toolCalls.forEach((tc, i) => toolCallIndex.set(tc.id, i));
-				draft.msgIndex = -1;
-				tokenCount.value = event.tokens;
-				totalCost.value = event.cost;
-				isLoading.value = true;
-				if (event.pendingApproval) handleApprovalRequired(event.pendingApproval);
-				syncDraft(true);
-				break;
+		if (event.type === "run_state" && event.pendingApproval) handleApprovalRequired(event.pendingApproval);
+		if (event.type === "approval_required") handleApprovalRequired(event.approval);
+		if (event.type === "approval_resolved") {
+			remotelyResolved.value.add(event.toolCallId);
+			if (currentAsk.value?.toolCallId === event.toolCallId) {
+				currentAsk.value = null;
+				approval.cancel();
 			}
-			case "text_delta":
-				status.value = { kind: "writing" };
-				draft.text += event.content;
-				syncDraft();
-				break;
-			case "tool_call_start":
-				status.value = { kind: "running_tool", toolName: event.name };
-				break;
-			case "tool_call_end": {
-				toolCallIndex.set(event.id, draft.toolCalls.length);
-				draft.toolCalls.push(createUIToolCall(event.name, event.args));
-				syncDraft(true);
-				break;
-			}
-			case "tool_result": {
-				const idx = toolCallIndex.get(event.id);
-				if (idx !== undefined && idx < draft.toolCalls.length) {
-					draft.toolCalls[idx] = {
-						...draft.toolCalls[idx],
-						output: event.result.content,
-						diff: event.result.meta?.diff,
-					};
-				}
-				syncDraft(true);
-				break;
-			}
-			case "message_complete":
-				tokenCount.value = event.tokens;
-				totalCost.value = event.cost;
-				status.value = { kind: "thinking" };
-				break;
-			case "turn_complete":
-				finalizeDraft();
-				status.value = { kind: "thinking" };
-				break;
-			case "approval_required":
-				handleApprovalRequired(event.approval);
-				break;
-			case "approval_resolved":
-				remotelyResolved.add(event.toolCallId);
-				if (currentAsk?.toolCallId === event.toolCallId) {
-					currentAsk = null;
-					approval.cancel();
-				}
-				break;
-			case "error":
-				showError(event.message);
-				break;
-			case "run_finished":
-				finalizeDraft();
-				isLoading.value = false;
-				void refreshSession();
-				break;
 		}
+		sync.value.pending = applyServerEvent(sync.value.pending, event);
+		syncStream(event.type !== "text_delta");
+		if (event.type === "run_finished") void refreshSession();
 	};
 
 	// -----------------------------------------------------------------------
@@ -310,7 +247,7 @@ function App({ onQuit, user, initialSessionId, info }: AppProps) {
 		let lastEsc = 0;
 		let escTimer: ReturnType<typeof setTimeout> | null = null;
 		const cleanup = inputManager.onKeyGlobal((event) => {
-			if (event.key !== "escape" || !isLoading.value) return false;
+			if (event.key !== "escape" || !stream.value.running) return false;
 			const id = sessionId.value;
 			if (!id) return false;
 			const now = Date.now();
@@ -342,20 +279,24 @@ function App({ onQuit, user, initialSessionId, info }: AppProps) {
 
 	const handleSubmit = (value: string) => {
 		const id = sessionId.value;
-		if (!value.trim() || isLoading.value || !id) return;
+		if (!value.trim() || stream.value.running || !id) return;
 
-		uiMessages.value = [...uiMessages.value, { role: "user", content: value }];
+		sync.value.pending = {
+			...sync.value.pending,
+			messages: [...sync.value.pending.messages, { role: "user", content: value }],
+			running: true,
+			status: { kind: "thinking" },
+		};
+		syncStream(true);
 		input.value = "";
 		cursor.value = 0;
-		isLoading.value = true;
-		status.value = { kind: "thinking" };
 
 		void (async () => {
 			try {
 				await client.sendMessage(id, value);
 			} catch (error) {
-				isLoading.value = false;
-				status.value = { kind: "thinking" };
+				sync.value.pending = { ...sync.value.pending, running: false, status: { kind: "idle" } };
+				syncStream(true);
 				showError(error instanceof Error ? error.message : String(error));
 			}
 		})();
@@ -365,11 +306,9 @@ function App({ onQuit, user, initialSessionId, info }: AppProps) {
 		if (sessionId.value === id) return;
 		dropPendingAsk(true);
 		sessionId.value = id;
-		uiMessages.value = [];
-		tokenCount.value = 0;
-		totalCost.value = 0;
+		sync.value.pending = resetSessionStreamState();
+		syncStream(true);
 		branchName.value = null;
-		isLoading.value = false;
 		// History + stream arrive via the session effect (refresh + subscribe)
 	};
 
@@ -378,11 +317,9 @@ function App({ onQuit, user, initialSessionId, info }: AppProps) {
 		try {
 			const response = await client.createSession(Deno.cwd());
 			sessionId.value = response.id;
-			uiMessages.value = [];
-			tokenCount.value = 0;
-			totalCost.value = 0;
+			sync.value.pending = resetSessionStreamState();
+			syncStream(true);
 			branchName.value = null;
-			isLoading.value = false;
 		} catch (error) {
 			showError(error instanceof Error ? error.message : String(error));
 		}
@@ -402,7 +339,7 @@ function App({ onQuit, user, initialSessionId, info }: AppProps) {
 		openKey: null,
 		maxResults: 20,
 		onSelect: (item) => {
-			if (isLoading.value) return;
+			if (stream.value.running) return;
 			void openSessionById(item.id);
 		},
 	});
@@ -466,7 +403,7 @@ function App({ onQuit, user, initialSessionId, info }: AppProps) {
 		focused: true,
 		onSubmit: handleSubmit,
 		onCharInserted: (char, cursorPos) => {
-			if (char === "@" && !filePalette.open.value && !palette.open.value && !isLoading.value) {
+			if (char === "@" && !filePalette.open.value && !palette.open.value && !stream.value.running) {
 				fileMentionStart.value = cursorPos - 1;
 				projectFiles.startIndexing();
 				filePalette.openPalette();
@@ -474,18 +411,20 @@ function App({ onQuit, user, initialSessionId, info }: AppProps) {
 		},
 	});
 
+	const messages = viewMessages(stream.value);
+
 	return (
 		<Box flex flexDirection="column" padding={1} bgColor={theme.background}>
 			<StatusBar
-				tokenCount={tokenCount.value}
-				totalCost={totalCost.value}
+				tokenCount={stream.value.tokens}
+				totalCost={stream.value.cost}
 				branchName={branchName.value ?? ""}
 				userName={user.name}
 				contextWindow={info.contextTokens}
 				model={info.model}
 			/>
 
-			{uiMessages.value.length === 0
+			{messages.length === 0
 				? (
 					<WelcomeScreen
 						version={VERSION}
@@ -496,7 +435,7 @@ function App({ onQuit, user, initialSessionId, info }: AppProps) {
 				)
 				: (
 					<ScrollArea flex flexDirection="column" padding={1} gap={1} scrollbar focused autoScroll>
-						{uiMessages.value.map((msg, i) => <MessageView key={i} msg={msg} />)}
+						{messages.map((msg, i) => <MessageView key={i} msg={msg} />)}
 					</ScrollArea>
 				)}
 
@@ -518,12 +457,12 @@ function App({ onQuit, user, initialSessionId, info }: AppProps) {
 				/>
 			</Box>
 
-			{isLoading.value && (
+			{stream.value.running && (
 				<Box flexDirection="row" padding={1}>
 					<Box flexDirection="row" gap={1}>
 						<Spinner color={theme.accent} />
 						<Text color={theme.textMuted} bold italic>
-							{formatStatus(status.value)}
+							{formatStatus(stream.value.status)}
 						</Text>
 						{escPrimed.value
 							? (

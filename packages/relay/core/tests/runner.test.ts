@@ -14,7 +14,7 @@ function mockProvider(responses: StreamChunk[][]): LLMProvider {
 			throw new Error("not implemented");
 		},
 		async *stream(_request: CompletionRequest) {
-			const chunks = responses[callCount++];
+			const chunks = responses[callCount++] ?? [];
 			for (const chunk of chunks) {
 				yield chunk;
 			}

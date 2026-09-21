@@ -6,7 +6,7 @@
  * Every helper takes the root explicitly so the caller controls confinement.
  */
 
-import { resolve, SEPARATOR } from "@std/path";
+import { basename, dirname, join, resolve, SEPARATOR } from "@std/path";
 
 const IGNORE_DIRS = new Set([".git", "node_modules", "dist", "out", "build", "coverage", ".next", "target", ".cache"]);
 const MAX_FILES = 10_000;
@@ -169,6 +169,31 @@ async function realPathWithinRoot(root: string, absPath: string): Promise<string
 }
 
 /**
+ * Like {@link resolveWithinRoot}, but also resolves symlinks so a link inside
+ * the root cannot be used to reach outside it. For a path that does not exist
+ * yet (e.g. a new file), the parent directory is resolved and the basename is
+ * appended, so the check still applies.
+ */
+export async function resolveRealWithinRoot(root: string, rel: string): Promise<string | null> {
+	const abs = resolveWithinRoot(root, rel);
+	if (!abs) return null;
+
+	// If the path exists (including as a symlink), its realpath must stay in
+	// the root. `lstat` does not follow the final symlink, so an escaping link
+	// is detected rather than treated as a missing path.
+	let exists = true;
+	try {
+		await Deno.lstat(abs);
+	} catch {
+		exists = false;
+	}
+	if (exists) return await realPathWithinRoot(root, abs);
+
+	const realParent = await realPathWithinRoot(root, dirname(abs));
+	return realParent ? join(realParent, basename(abs)) : null;
+}
+
+/**
  * Expands `@path` mentions in `text` by appending file/directory contents as
  * an `<attached_context>` block. Paths are resolved within `root`; mentions
  * that escape the root or don't exist are left as-is.
@@ -178,7 +203,7 @@ export async function expandMentions(text: string, root: string): Promise<string
 	const mentions: string[] = [];
 
 	for (const match of text.matchAll(MENTION_RE)) {
-		const relPath = match[1].replace(/\/+$/, "");
+		const relPath = (match[1] ?? "").replace(/\/+$/, "");
 		if (!relPath) continue;
 		if (seen.has(relPath)) continue;
 		seen.add(relPath);

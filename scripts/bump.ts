@@ -7,7 +7,7 @@ if (!part || !["patch", "minor", "major"].includes(part)) {
 	Deno.exit(1);
 }
 
-const [major, minor, patch] = VERSION.split(".").map(Number);
+const [major = 0, minor = 0, patch = 0] = VERSION.split(".").map(Number);
 
 let next: string;
 switch (part) {

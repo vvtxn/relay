@@ -20,6 +20,7 @@ function App() {
 		const cleanup = inputManager.onKeyGlobal((event: KeyEvent) => {
 			if (event.key !== "t" || approval.pending.value) return false;
 			const request = DEMO_TOOLS[toolIndex.value % DEMO_TOOLS.length];
+			if (!request) return false;
 			toolIndex.value++;
 			void approval.ask(request).then((decision: ApprovalDecision) => {
 				lastDecision.value = `${decision} (${request.toolName})`;

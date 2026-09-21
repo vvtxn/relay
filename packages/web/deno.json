@@ -1,0 +1,24 @@
+{
+	"name": "@vvtxn/web",
+	"version": "0.1.0",
+	"exports": {
+		".": "./src/main.tsx"
+	},
+	"imports": {
+		"@/": "./src/",
+		"@vvtxn/relay/": "../relay/",
+		"@vvtxn/client/": "../client/",
+		"solid-js": "npm:solid-js@^1.9",
+		"@tanstack/solid-query": "npm:@tanstack/solid-query@^5",
+		"@tanstack/solid-router": "npm:@tanstack/solid-router@^1",
+		"effect": "npm:effect@^3",
+		"marked": "npm:marked@^18",
+		"vite": "npm:vite@^7",
+		"vite-plugin-solid": "npm:vite-plugin-solid@^2.11"
+	},
+	"compilerOptions": {
+		"jsx": "react-jsx",
+		"jsxImportSource": "solid-js",
+		"lib": ["deno.ns", "dom", "dom.iterable", "esnext"]
+	}
+}

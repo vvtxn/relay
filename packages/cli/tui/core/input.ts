@@ -11,6 +11,10 @@ export interface KeyEvent {
 
 export type KeyHandler = (event: KeyEvent) => boolean | void;
 
+function isDigit(char: string | undefined): boolean {
+	return char !== undefined && char >= "0" && char <= "9";
+}
+
 class InputManager {
 	private globalHandlers: Set<KeyHandler> = new Set();
 	private handlers: Set<KeyHandler> = new Set();
@@ -62,12 +66,12 @@ class InputManager {
 		while (i < data.length) {
 			if (data[i] === "\x1b" && data[i + 1] === "[") {
 				let end = i + 2;
-				while (end < data.length && data[end] >= "0" && data[end] <= "9") {
+				while (end < data.length && isDigit(data[end])) {
 					end++;
 				}
 				if (data[end] === ";") {
 					end++;
-					while (end < data.length && data[end] >= "0" && data[end] <= "9") {
+					while (end < data.length && isDigit(data[end])) {
 						end++;
 					}
 				}
@@ -77,7 +81,7 @@ class InputManager {
 				sequences.push(data.slice(i, end));
 				i = end;
 			} else {
-				sequences.push(data[i]);
+				sequences.push(data[i] ?? "");
 				i++;
 			}
 		}

@@ -14,11 +14,11 @@ const LOGO = [
 
 export interface WelcomeScreenProps {
 	version: string;
-	subtitle?: string;
-	hints?: string;
-	userName?: string;
+	subtitle?: string | undefined;
+	hints?: string | undefined;
+	userName?: string | undefined;
 	/** Active model identifier, when the client knows it. */
-	model?: string;
+	model?: string | undefined;
 }
 
 export function WelcomeScreen(

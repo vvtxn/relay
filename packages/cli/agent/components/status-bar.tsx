@@ -41,7 +41,7 @@ export function StatusBar(
 		tokenCount: number;
 		totalCost: number;
 		branchName: string;
-		userName?: string;
+		userName?: string | undefined;
 		contextWindow: number;
 		model: string;
 	},

@@ -81,10 +81,10 @@ function myersDiff(a: string[], b: string[]): Uint8Array {
 		trace.push(v.slice()); // snapshot
 		for (let k = -d; k <= d; k += 2) {
 			let x: number;
-			if (k === -d || (k !== d && v[k - 1 + off] < v[k + 1 + off])) {
-				x = v[k + 1 + off];
+			if (k === -d || (k !== d && v[k - 1 + off]! < v[k + 1 + off]!)) {
+				x = v[k + 1 + off]!;
 			} else {
-				x = v[k - 1 + off] + 1;
+				x = v[k - 1 + off]! + 1;
 			}
 			let y = x - k;
 			while (x < n && y < m && a[x] === b[y]) {
@@ -105,15 +105,15 @@ function myersDiff(a: string[], b: string[]): Uint8Array {
 	let y = m;
 
 	for (let d = finalD; d >= 0; d--) {
-		const snap = trace[d];
+		const snap = trace[d]!;
 		const k = x - y;
 		let prevK: number;
-		if (k === -d || (k !== d && snap[k - 1 + off] < snap[k + 1 + off])) {
+		if (k === -d || (k !== d && snap[k - 1 + off]! < snap[k + 1 + off]!)) {
 			prevK = k + 1;
 		} else {
 			prevK = k - 1;
 		}
-		const prevX = snap[prevK + off];
+		const prevX = snap[prevK + off]!;
 		const prevY = prevX - prevK;
 
 		while (x > prevX && y > prevY) {
@@ -154,12 +154,12 @@ function buildHunks(
 	const groups: [number, number][] = [];
 	let gStart = 0;
 	for (let i = 1; i < changeIdxs.length; i++) {
-		if (changeIdxs[i] - changeIdxs[i - 1] > ctx * 2 + 1) {
-			groups.push([changeIdxs[gStart], changeIdxs[i - 1]]);
+		if (changeIdxs[i]! - changeIdxs[i - 1]! > ctx * 2 + 1) {
+			groups.push([changeIdxs[gStart]!, changeIdxs[i - 1]!]);
 			gStart = i;
 		}
 	}
-	groups.push([changeIdxs[gStart], changeIdxs[changeIdxs.length - 1]]);
+	groups.push([changeIdxs[gStart]!, changeIdxs[changeIdxs.length - 1]!]);
 
 	// Build old/new index mapping along ops
 	// Pre-compute cumulative old/new indices for each op position
@@ -188,20 +188,20 @@ function buildHunks(
 
 		for (let i = start; i <= end; i++) {
 			if (ops[i] === EQUAL) {
-				lines.push(` ${oldSlice[oldIdx[i]]}`);
+				lines.push(` ${oldSlice[oldIdx[i]!]!}`);
 				oCount++;
 				nCount++;
 			} else if (ops[i] === DELETE) {
-				lines.push(`-${oldSlice[oldIdx[i]]}`);
+				lines.push(`-${oldSlice[oldIdx[i]!]!}`);
 				oCount++;
 			} else {
-				lines.push(`+${newSlice[newIdx[i]]}`);
+				lines.push(`+${newSlice[newIdx[i]!]!}`);
 				nCount++;
 			}
 		}
 
-		const oStart = oldIdx[start] + prefixLen + 1;
-		const nStart = newIdx[start] + prefixLen + 1;
+		const oStart = oldIdx[start]! + prefixLen + 1;
+		const nStart = newIdx[start]! + prefixLen + 1;
 		hunks.push(`@@ -${oStart},${oCount} +${nStart},${nCount} @@\n${lines.join("\n")}`);
 	}
 

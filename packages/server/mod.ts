@@ -10,7 +10,7 @@
 
 export { startServer } from "./main.ts";
 export { createServices } from "./services.ts";
-export type { ServerServices } from "./services.ts";
+export type { RequestServices, ServerServices } from "./services.ts";
 export { handleRequest } from "./router.ts";
 export { serverConfigFromEnv } from "./config.ts";
 export type { ServerConfig } from "./config.ts";

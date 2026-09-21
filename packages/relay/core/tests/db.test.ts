@@ -5,7 +5,7 @@ type Statement = { sql: string; args?: unknown[] };
 
 class FakeClient {
 	executed: (string | Statement)[] = [];
-	batches: { statements: Statement[]; mode?: string }[] = [];
+	batches: { statements: Statement[]; mode?: string | undefined }[] = [];
 
 	execute(statement: string | Statement): Promise<{ rows: Record<string, unknown>[] }> {
 		this.executed.push(statement);
@@ -37,12 +37,12 @@ Deno.test("DatabaseSessionStore creates schema lazily and appends an ordered ent
 	assert(id.length > 0);
 	assertEquals(fake.executed.length, 4);
 	assertEquals(fake.batches.length, 1);
-	assertEquals(fake.batches[0].mode, "write");
-	assertEquals(fake.batches[0].statements.length, 2);
-	assert(fake.batches[0].statements[0].sql.includes("INSERT INTO sessions"));
-	assert(fake.batches[0].statements[1].sql.includes("INSERT INTO session_entries"));
-	assertEquals(session.getEntries()[0].id, id);
-	assertEquals(session.getEntries()[0].timestamp.length > 0, true);
+	assertEquals(fake.batches[0]!.mode, "write");
+	assertEquals(fake.batches[0]!.statements.length, 2);
+	assert(fake.batches[0]!.statements[0]!.sql.includes("INSERT INTO sessions"));
+	assert(fake.batches[0]!.statements[1]!.sql.includes("INSERT INTO session_entries"));
+	assertEquals(session.getEntries()[0]!.id, id);
+	assertEquals(session.getEntries()[0]!.timestamp.length > 0, true);
 });
 
 Deno.test("DatabaseSessionStore gates missing credentials in fromEnv", () => {
