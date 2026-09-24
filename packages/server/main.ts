@@ -11,7 +11,9 @@ export function startServer(): void {
 	console.log(`Mode: ${config.relayEnv}`);
 	console.log(`Auth provider: ${config.authProvider}`);
 	if (config.authProvider === "github") {
-		console.log(`OAuth callback: ${config.publicUrl}/api/auth/callback`);
+		console.log(
+			`OAuth callback: ${config.publicUrl}/api/auth/callback (must match a GitHub App callback URL exactly)`,
+		);
 	}
 	if (config.staticDir) console.log(`Serving web app from ${config.staticDir}`);
 
