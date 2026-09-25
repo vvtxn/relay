@@ -31,6 +31,13 @@ is subject to the auth rules below — stop it when you are finished.
 
 Session tokens slide on use and are revoked on logout. Expired rows are pruned opportunistically.
 
+### CLI session handoff
+
+Browsers and the terminal don't share cookies. When a loopback-bound server completes a GitHub login it writes the
+issued session token to `~/.relay/session.json` (mode `0600`); the CLI reads it and authenticates with
+`Authorization: Bearer`, so both clients act as the same user. Logging out clears the file when it matches. Nothing is
+written when the server binds a non-loopback host.
+
 ### Access control
 
 - Every session-scoped route verifies the session belongs to the caller; the `RunManager` caches handles keyed by

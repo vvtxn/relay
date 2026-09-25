@@ -1,8 +1,16 @@
-import { authenticate, GitHubAuthProvider, type GitHubProfile } from "@vvtxn/relay/core/index.ts";
+import {
+	authenticate,
+	clearStoredSession,
+	GitHubAuthProvider,
+	type GitHubProfile,
+	readStoredSession,
+	writeStoredSession,
+} from "@vvtxn/relay/core/index.ts";
 import type { AuthInfoResponse, StatusResponse } from "@vvtxn/client/protocol.ts";
 import type { ServerServices } from "./services.ts";
 import { error, json } from "./http.ts";
 import { clearCookie, isSecureOrigin, parseCookies, serializeCookie } from "./cookies.ts";
+import { isLoopbackHost } from "./config.ts";
 import {
 	OAUTH_RETURN_COOKIE,
 	OAUTH_STATE_COOKIE,
@@ -121,6 +129,12 @@ export async function handleCallback(services: ServerServices, request: Request,
 		const user = await authenticate(new GitHubAuthProvider(), profile, services.userStore);
 		const { token } = await services.authSessions.create(user.id, sessionTtlMs(services));
 
+		// Hand the session to the local CLI so it acts as the same user (browsers
+		// and the terminal don't share cookies). Loopback-only.
+		if (isLoopbackHost(config.hostname)) {
+			writeStoredSession({ serverUrl: config.publicUrl, token, createdAt: new Date().toISOString() });
+		}
+
 		const response = redirect(returnTo);
 		response.headers.append(
 			"Set-Cookie",
@@ -140,7 +154,10 @@ export async function handleCallback(services: ServerServices, request: Request,
 
 export async function handleLogout(services: ServerServices, request: Request): Promise<Response> {
 	const token = readSessionToken(request);
-	if (token) await services.authSessions.revoke(token);
+	if (token) {
+		await services.authSessions.revoke(token);
+		if (readStoredSession()?.token === token) clearStoredSession();
+	}
 	const response = json({ status: "ok" } satisfies StatusResponse);
 	response.headers.append("Set-Cookie", clearCookie(SESSION_COOKIE));
 	return response;

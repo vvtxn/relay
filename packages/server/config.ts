@@ -94,7 +94,7 @@ function positiveInt(value: string | undefined, fallback: number, name: string, 
 }
 
 /** True for hostnames that only accept local connections. */
-function isLoopbackHost(host: string): boolean {
+export function isLoopbackHost(host: string): boolean {
 	return host === "localhost" || host === "::1" || host === "[::1]" || host.startsWith("127.");
 }
 

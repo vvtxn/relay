@@ -100,6 +100,9 @@ In development `relay web` opens Vite (`http://localhost:5173`) when it is runni
 server. In production (`RELAY_ENV=production`, e.g. `deno task relay:prod web`) the server serves the built SPA
 (`packages/web/dist`) itself.
 
+With GitHub auth, the first `deno task relay` opens the browser to sign in; the server hands the session to the CLI
+(loopback only), so the terminal and the browser act as the same user. Sign out only affects the current client.
+
 Lower-level tasks remain for running a server in the foreground:
 
 ```bash

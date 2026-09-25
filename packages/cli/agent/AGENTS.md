@@ -69,10 +69,12 @@ ask. Switching sessions denies any pending ask server-side so runs never hang.
 
 ### Boot Flow
 
-`index.ts` ensures a server exists (see above), then sets `RELAY_SERVER_URL` before importing `app.tsx`. `bootstrap()`
-health-checks it, fetches `/api/me` + `/api/config`, then creates a session for `Deno.cwd()`. `Root` renders
-`BootScreen` (loading) or `BootError` (friendly failure) and mounts `App` only once a user, session, and server info
-exist. `info.webUrl` powers the "Open in Browser" command.
+`index.ts` ensures a server exists (see above), then sets `RELAY_SERVER_URL` before importing `app.tsx`. In GitHub mode
+it then checks `/api/me` (using the token handed over by a browser login in `~/.relay/session.json`); if not signed in
+it opens the web client and waits for the sign-in to complete. `bootstrap()` then health-checks the server, fetches
+`/api/me` + `/api/config`, and creates a session for `Deno.cwd()`. `Root` renders `BootScreen` (loading) or `BootError`
+(friendly failure) and mounts `App` only once a user, session, and server info exist. `info.webUrl` powers the "Open in
+Browser" command.
 
 ### Cancellation
 

@@ -116,10 +116,13 @@ export type {
 // Authentication
 export {
 	authenticate,
+	clearStoredSession,
 	DatabaseAuthSessionStore,
 	DatabaseUserStore,
 	GitHubAuthProvider,
 	LocalAuthProvider,
+	readStoredSession,
+	writeStoredSession,
 } from "./core/index.ts";
 export type {
 	AuthenticatedUser,
@@ -128,6 +131,7 @@ export type {
 	AuthSession,
 	AuthSessionStore,
 	GitHubProfile,
+	StoredSession,
 	UserDirectory,
 	UserStore,
 } from "./core/index.ts";
