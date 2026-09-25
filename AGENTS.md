@@ -44,10 +44,11 @@ in the server. `packages/relay` powers the server and provides display + theme u
 - **Lint**: `deno task lint`
 - **Type-check**: `deno task check` (strict; checks every entrypoint)
 - **Run tests**: `deno task test` (requires `--allow-read --allow-write --allow-env --allow-run`)
-- **Run agent**: `deno task agent` (dev alias; requires a running server)
-- **Run server**: `deno task serve` (dev alias; loads mode env files)
+- **Run CLI**: `deno task relay` (starts/reuses the background server, then the TUI)
+- **Open web client**: `deno task relay web` (ensures the server, opens the browser)
+- **Stop/status the background server**: `deno task relay stop` / `deno task relay status`
+- **Run server (foreground)**: `deno task serve` (dev alias; loads mode env files)
 - **Run server (prod)**: `deno task serve:prod` (sets `RELAY_ENV=production`)
-- **Run agent (prod)**: `deno task agent:prod`
 - **Run web dev server**: `deno task web:dev` (Vite; proxies `/api` to `127.0.0.1:7433`)
 - **Build web app**: `deno task web:build` (Vite → `packages/web/dist`; serve with `RELAY_STATIC_DIR`)
 - **Build binary**: `deno task build` (release-safe: no env embedded)

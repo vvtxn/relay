@@ -24,7 +24,7 @@ web/
     │   ├── services.ts    # Effect Api + SessionStream services, RelayError, AppLayer
     │   ├── runtime.ts     # ManagedRuntime + runApi/fork/interrupt helpers
     │   ├── query-client.ts# QueryClient + query key helpers
-    │   ├── queries.ts     # queryOptions for me/config/workspace/sessions/session/files
+    │   ├── queries.ts     # queryOptions for me/config/workspace/workspaces/sessions/session/files
     │   ├── mutations.ts   # createSession/sendMessage/approve/cancel (Effect-backed)
     │   └── bootstrap.ts   # Effect program: health → me → config → workspace → session
     ├── auth/auth.ts       # OAuth seam: login/logout URLs, redirect helpers
@@ -35,7 +35,7 @@ web/
     │   ├── BootPage.tsx   # Runs bootstrap, seeds query cache, redirects to a session
     │   └── SessionPage.tsx# Hydrates session, starts stream, composes the shell
     └── components/
-        ├── Sidebar.tsx         # Workspace input, session list, new chat
+        ├── Sidebar.tsx         # Workspace switcher, session list, new chat
         ├── ChatView.tsx        # Message list + in-flight draft + auto-scroll
         ├── MessageView.tsx     # User bubble / agent markdown + tool calls
         ├── ToolCallView.tsx    # Tool card: name, args summary, output, diff
@@ -91,6 +91,13 @@ here calls `themeToCssVariables()` and applies `--relay-*` custom properties to 
 
 Typing `@` in the composer opens a picker backed by `GET /api/sessions/:id/files` (TanStack query). Selecting a file
 inserts `@path`; the server expands mentions into `<attached_context>` blocks before the run.
+
+### Workspaces
+
+A workspace is a project directory. `GET /api/workspaces` returns the distinct session `cwd`s (plus the server default)
+for the user; the sidebar lists them and selecting one scopes the session list and the "New chat" target. `cwd` lives in
+`state/workspace.ts` (persisted) and drives `sessionsQuery(cwd)`. "Add workspace" accepts a path, expanded with `~` when
+the server's home dir is known; the server rejects paths outside `RELAY_WORKSPACE_ROOTS`.
 
 ## Building & Running
 

@@ -83,6 +83,7 @@ Deno.test("RelayClient - builds correct request URLs", async () => {
 	await client.health();
 	await client.me();
 	await client.listSessions("/home/user/project");
+	await client.listWorkspaces();
 	await client.createSession("/home/user/project");
 	await client.openSession("abc123");
 	await client.listFiles("abc123");
@@ -94,6 +95,7 @@ Deno.test("RelayClient - builds correct request URLs", async () => {
 		{ url: "http://localhost:7433/api/health", method: "GET" },
 		{ url: "http://localhost:7433/api/me", method: "GET" },
 		{ url: "http://localhost:7433/api/sessions?cwd=%2Fhome%2Fuser%2Fproject", method: "GET" },
+		{ url: "http://localhost:7433/api/workspaces", method: "GET" },
 		{ url: "http://localhost:7433/api/sessions", method: "POST" },
 		{ url: "http://localhost:7433/api/sessions/abc123", method: "GET" },
 		{ url: "http://localhost:7433/api/sessions/abc123/files", method: "GET" },

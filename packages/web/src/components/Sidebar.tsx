@@ -1,8 +1,8 @@
-import { createEffect, createSignal, For, Show } from "solid-js";
+import { createMemo, createSignal, For, Show } from "solid-js";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/solid-query";
 import { abbreviateHome } from "@vvtxn/relay/core/display.ts";
-import type { SessionSummary } from "@vvtxn/relay/core/sessions/index.ts";
-import { sessionsQuery } from "@/api/queries.ts";
+import type { SessionSummary, WorkspaceSummary } from "@vvtxn/relay/core/sessions/index.ts";
+import { sessionsQuery, workspacesQuery } from "@/api/queries.ts";
 import { createSession } from "@/api/mutations.ts";
 import { queryKeys } from "@/api/query-client.ts";
 import { appendError } from "@/state/session.ts";
@@ -20,6 +20,16 @@ function preview(session: SessionSummary): string {
 		: session.firstUserMessage;
 }
 
+/** Last path segment, e.g. `/home/me/project` → `project`. */
+function workspaceName(path: string): string {
+	const parts = path.split(/[\\/]/).filter(Boolean);
+	return parts[parts.length - 1] ?? path;
+}
+
+function workspacePath(workspace: WorkspaceSummary): string {
+	return homeDir() ? abbreviateHome(workspace.cwd, homeDir()) : workspace.cwd;
+}
+
 export function Sidebar(props: {
 	userName?: string | undefined;
 	avatarUrl?: string | undefined;
@@ -27,32 +37,43 @@ export function Sidebar(props: {
 	onSelect: (id: string) => void;
 }) {
 	const queryClient = useQueryClient();
-	// Only abbreviate when the server told us the home dir, otherwise the input
-	// could show `~` that we cannot expand back into a real path.
-	const displayCwd = () => (homeDir() ? abbreviateHome(cwd(), homeDir()) : cwd());
-	const [draftCwd, setDraftCwd] = createSignal(displayCwd());
 	const sessions = useQuery(() => sessionsQuery(cwd()));
+	const workspaces = useQuery(() => workspacesQuery);
+	const [addOpen, setAddOpen] = createSignal(false);
+	const [draftCwd, setDraftCwd] = createSignal("");
 
-	createEffect(() => setDraftCwd(displayCwd()));
+	// Include the active workspace even when the server has no sessions for it.
+	const items = createMemo<WorkspaceSummary[]>(() => {
+		const list = workspaces.data ?? [];
+		if (cwd() && !list.some((workspace) => workspace.cwd === cwd())) {
+			return [{ cwd: cwd(), sessionCount: 0, lastActivity: "" }, ...list];
+		}
+		return list;
+	});
 
 	const create = useMutation(() => ({
 		mutationFn: () => createSession(cwd()),
 		onSuccess: async (response) => {
 			await queryClient.invalidateQueries({ queryKey: queryKeys.sessions(cwd()) });
+			await queryClient.invalidateQueries({ queryKey: queryKeys.workspaces });
 			props.onSelect(response.id);
 		},
 		onError: (error) => appendError(error instanceof Error ? error.message : String(error)),
 	}));
+
+	function selectWorkspace(next: string): void {
+		if (next !== cwd()) setCwd(next);
+	}
 
 	function applyCwd(event: SubmitEvent): void {
 		event.preventDefault();
 		const resolved = resolveWorkspaceInput(draftCwd());
 		if (resolved) {
 			setCwd(resolved);
+			setDraftCwd("");
+			setAddOpen(false);
 		} else {
-			// Unresolvable input (e.g. `~` without a known home) — keep the
-			// current workspace and restore the displayed value.
-			setDraftCwd(displayCwd());
+			setDraftCwd("");
 		}
 	}
 
@@ -70,21 +91,49 @@ export function Sidebar(props: {
 				</button>
 			</div>
 
-			<form class="workspace" onSubmit={applyCwd}>
-				<label class="workspace-label" for="cwd">Workspace</label>
-				<input
-					id="cwd"
-					class="input"
-					value={draftCwd()}
-					placeholder="/path/to/project"
-					title="Server-side directory that scopes sessions and confines file tools"
-					onInput={(event) => setDraftCwd(event.currentTarget.value)}
-				/>
-				<p class="workspace-hint">
-					Sessions live here; file tools (read, write, edit, grep) are confined to this folder.
-				</p>
-				<button type="submit" class="btn ghost block">Switch workspace</button>
-			</form>
+			<div class="workspace-list">
+				<div class="workspace-label">Workspaces</div>
+				<For each={items()}>
+					{(workspace) => (
+						<button
+							type="button"
+							class={workspace.cwd === cwd() ? "workspace-item active" : "workspace-item"}
+							title={workspace.cwd}
+							onClick={() => selectWorkspace(workspace.cwd)}
+						>
+							<span class="workspace-name">{workspaceName(workspace.cwd)}</span>
+							<span class="workspace-meta">
+								{workspace.sessionCount} session{workspace.sessionCount === 1 ? "" : "s"}
+							</span>
+						</button>
+					)}
+				</For>
+				<Show when={cwd()}>
+					<p class="workspace-hint">{workspacePath({ cwd: cwd(), sessionCount: 0, lastActivity: "" })}</p>
+				</Show>
+				<Show
+					when={addOpen()}
+					fallback={
+						<button type="button" class="workspace-add" onClick={() => setAddOpen(true)}>
+							+ Add workspace
+						</button>
+					}
+				>
+					<form class="workspace-add-form" onSubmit={applyCwd}>
+						<input
+							class="input"
+							value={draftCwd()}
+							placeholder="/path/to/project"
+							title="Server-side directory that scopes sessions and confines file tools"
+							onInput={(event) => setDraftCwd(event.currentTarget.value)}
+						/>
+						<div class="workspace-add-actions">
+							<button type="button" class="btn ghost" onClick={() => setAddOpen(false)}>Cancel</button>
+							<button type="submit" class="btn">Add</button>
+						</div>
+					</form>
+				</Show>
+			</div>
 
 			<div class="session-list">
 				<Show

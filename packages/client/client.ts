@@ -16,6 +16,7 @@ import type {
 	SessionListResponse,
 	StatusResponse,
 	WorkspaceResponse,
+	WorkspacesResponse,
 } from "./protocol.ts";
 import { readSSEStream } from "./sse.ts";
 
@@ -81,6 +82,10 @@ export class RelayClient {
 
 	async listSessions(cwd: string): Promise<SessionListResponse> {
 		return await this.get(`/api/sessions?cwd=${encodeURIComponent(cwd)}`);
+	}
+
+	async listWorkspaces(): Promise<WorkspacesResponse> {
+		return await this.get("/api/workspaces");
 	}
 
 	async createSession(cwd: string): Promise<CreateSessionResponse> {

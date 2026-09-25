@@ -36,6 +36,13 @@ export function sessionsQuery(cwd: string) {
 	});
 }
 
+/** Known workspaces (project directories) for the workspace picker. */
+export const workspacesQuery = queryOptions({
+	queryKey: queryKeys.workspaces,
+	queryFn: () => runApi((api) => Effect.map(api.listWorkspaces(), (response) => response.workspaces)),
+	staleTime: 10_000,
+});
+
 export function sessionQuery(id: string) {
 	return queryOptions({
 		queryKey: queryKeys.session(id),

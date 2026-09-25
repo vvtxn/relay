@@ -36,6 +36,7 @@ export type {
 	SessionStore,
 	SessionSummary,
 	ToolResultEntry,
+	WorkspaceSummary,
 } from "./sessions/index.ts";
 
 export { createDatabaseClient, databaseCredentialsFromEnv } from "./database.ts";

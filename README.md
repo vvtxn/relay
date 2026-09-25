@@ -86,23 +86,30 @@ cp .env.example .env.development.local
 
 ### Run
 
-Development (Vite serves the SPA and proxies `/api` to the server):
+The CLI is the entry point: it starts (or reuses) a background server, then runs the TUI. The server keeps running after
+the CLI exits, so you can hop into the browser anytime.
 
 ```bash
-deno task serve:dev    # server
-deno task web:dev      # web UI at http://localhost:5173 (another shell)
-deno task agent        # terminal UI (another shell)
+deno task relay          # start/reuse the server + terminal UI
+deno task relay web      # open the web client in the browser
+deno task relay status   # show the background server
+deno task relay stop     # stop the background server
 ```
 
-Production (the server serves the built SPA and API from one origin):
+In development `relay web` opens Vite (`http://localhost:5173`) when it is running, otherwise the web app bundled by the
+server. In production (`RELAY_ENV=production`, e.g. `deno task relay:prod web`) the server serves the built SPA
+(`packages/web/dist`) itself.
+
+Lower-level tasks remain for running a server in the foreground:
 
 ```bash
-deno task web:build
-deno task serve:prod
+deno task serve:dev      # foreground server, development env
+deno task serve:prod     # foreground server, production env
+deno task web:dev        # Vite dev server with HMR
 ```
 
-The compiled binary ships both: `relay serve` starts the server, `relay` starts the terminal UI. `deno task build` is
-release-safe (no env embedded); `deno task build:local` embeds the dev env for a self-contained local binary.
+The compiled binary ships the same commands: `relay`, `relay web`, `relay serve`, `relay stop`, `relay status`.
+`deno task build` builds and embeds the web app (release-safe, no env); `deno task build:local` also embeds the dev env.
 
 ## Authentication
 
@@ -296,24 +303,26 @@ A thin TUI client of the server:
 - Scrollable chat history with markdown rendering
 - Streaming tool call display
 - Vim-mode text input
-- Command palette (`/`) for actions like "New Chat", "Threads", and "Quit"
+- Command palette (`/`) for actions like "New Chat", "Threads", "Open in Browser", and "Quit"
 - Tool approval prompts (`y`/`a`/`n`) for side-effecting tools, with per-process "always allow" memory
 - Double Esc to cancel in-progress generation
 - `@` file mentions backed by the server's project file listing
+- Ensures (or reuses) the background server, so `relay` works without a separate `serve`
 
 ### `packages/web/` — Browser Application
 
-A SolidJS single-page app served by the server (set `RELAY_STATIC_DIR=packages/web/dist`):
+A SolidJS single-page app served by the server (bundled `packages/web/dist`, or `RELAY_STATIC_DIR`):
 
-- **TanStack Query** owns REST server state (identity, workspace, sessions, files) and mutations
+- **TanStack Query** owns REST server state (identity, workspaces, sessions, files) and mutations
 - **TanStack Router** puts the active session in the URL (`/s/:sessionId`) for deep links and history
 - **Effect** owns the live run: `Api` + `SessionStream` services, a reconnect loop with exponential backoff, and typed
   errors; events fold into Solid state via the shared `session-state.ts` reducer
-- Chat with live drafts and tool cards (rendered diffs), `@`-mention picker, session sidebar, approval dialog,
-  token/cost status bar, and cancel
+- Chat with live drafts and tool cards (rendered diffs), `@`-mention picker, approval dialog, token/cost status bar, and
+  cancel
+- **Workspaces** — the sidebar lists the project directories the server knows about (the ones you launched `relay` in);
+  selecting one filters its sessions and targets new chats. New projects are added from the CLI or via "Add workspace".
 - Shares the Graphite/Silver theme tokens with the terminal client (applied as CSS variables)
-- Auth is written as an OAuth seam: credentialed fetches, 401 handling, and a login redirect — the current local auth
-  can be swapped server-side without client changes
+- Auth uses GitHub App OAuth (or local mode): credentialed fetches, 401 handling, and a login redirect
 
 ## Development
 
@@ -323,12 +332,15 @@ deno task fmt:check    # Check formatting
 deno task lint         # Lint
 deno task check        # Strict type-check every entrypoint
 deno task test         # Run tests
-deno task serve:dev    # Run the server with the development env
-deno task serve:prod   # Run the server with the production env
-deno task agent        # Run the terminal client (requires a running server)
+deno task relay        # Start/reuse the server + terminal UI
+deno task relay web    # Open the web client (server starts in the background)
+deno task relay stop   # Stop the background server
+deno task relay status # Show the background server
+deno task serve:dev    # Run a foreground server with the development env
+deno task serve:prod   # Run a foreground server with the production env
 deno task web:dev      # Run the web client with Vite (proxies /api to the server)
 deno task web:build    # Build the web app to packages/web/dist
-deno task build        # Build binary (dist/relay; release-safe, no env embedded)
+deno task build        # Build binary (dist/relay; embeds web, release-safe, no env)
 deno task build:local  # Build binary embedding the dev env (may include secrets)
 deno task version      # Show current version
 deno task version:bump <patch|minor|major>  # Bump version

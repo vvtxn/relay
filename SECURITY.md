@@ -11,6 +11,14 @@ privileged service and keep it on a trusted, single-user machine unless you have
   drive the agent can run commands on the host.
 - **Clients are untrusted.** Markdown and tool output are rendered safely, and all API access is authenticated.
 
+## Background server
+
+`relay` and `relay web` start the server as a **background daemon** that outlives the CLI, so the browser stays
+available. It binds loopback and records its PID, port, and web URL in `~/.relay/server.json` (mode `0600`);
+`relay
+stop` signals that process and removes the file. While it runs, anything on the machine that can reach the port
+is subject to the auth rules below — stop it when you are finished.
+
 ## Authentication
 
 `AUTH_PROVIDER` selects the mode:
@@ -55,6 +63,11 @@ OS-level isolation (container, separate user, VM) for untrusted workloads.
 
 Agent output is rendered as markdown into Solid elements (no `innerHTML`). Link and image URLs are restricted to
 `http:`, `https:`, `mailto:`, and same-origin relative references, so `javascript:`/`data:` URLs cannot execute.
+
+## Static assets
+
+The SPA is served from the bundled `packages/web/dist` (embedded in the compiled binary) or `RELAY_STATIC_DIR`, confined
+to that root with an `index.html` fallback for SPA routing. Directory traversal and path escapes are rejected.
 
 ## Hardening checklist for exposure
 

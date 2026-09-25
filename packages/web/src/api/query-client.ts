@@ -20,6 +20,7 @@ export const queryKeys = {
 	config: ["config"] as const,
 	workspace: ["workspace"] as const,
 	sessions: (cwd: string) => ["sessions", cwd] as const,
+	workspaces: ["workspaces"] as const,
 	session: (id: string) => ["session", id] as const,
 	files: (sessionId: string) => ["files", sessionId] as const,
 };

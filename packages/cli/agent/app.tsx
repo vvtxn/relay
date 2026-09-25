@@ -27,6 +27,7 @@ import { type CommandPaletteItem, useCommandPalette } from "@/tui/render/hooks/c
 import { inputManager } from "@/tui/core/input.ts";
 import { useProjectFiles } from "./hooks/project-files.ts";
 import { client, serverUrl } from "./client.ts";
+import { openBrowser } from "./open.ts";
 import { theme } from "@/tui/theme.ts";
 import { VERSION } from "../version.ts";
 import { StatusBar } from "./components/status-bar.tsx";
@@ -44,6 +45,12 @@ const COMMANDS: CommandPaletteItem[] = [
 		title: "Threads",
 		description: "Switch to a previous session",
 		keywords: ["sessions", "history"],
+	},
+	{
+		id: "web",
+		title: "Open in Browser",
+		description: "Open this session in the web client",
+		keywords: ["browser", "web", "url"],
 	},
 	{ id: "quit", title: "Quit", description: "Exit the agent", keywords: ["exit", "close"] },
 ];
@@ -390,6 +397,9 @@ function App({ onQuit, user, initialSessionId, info }: AppProps) {
 				}).catch((error) => {
 					showError(error instanceof Error ? error.message : String(error));
 				});
+			} else if (item.id === "web") {
+				const id = sessionId.value;
+				openBrowser(id ? `${info.webUrl}/s/${id}` : info.webUrl);
 			} else if (item.id === "quit") {
 				onQuit();
 			}

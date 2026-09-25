@@ -7,6 +7,7 @@ import {
 	handleConfig,
 	handleCreateSession,
 	handleListSessions,
+	handleListWorkspaces,
 	handleMe,
 	handleOpenSession,
 	handleSendMessage,
@@ -80,8 +81,8 @@ export async function handleRequest(
 			return await routeApi({ ...services, user }, request, url, path, method);
 		}
 
-		// Static web app (production build) — falls through to 404 when absent
-		if (method === "GET" && services.config.staticDir) {
+		// Static web app (bundled dist or RELAY_STATIC_DIR) with SPA fallback.
+		if (method === "GET") {
 			return await serveStatic(services.config.staticDir, path);
 		}
 
@@ -105,6 +106,7 @@ async function routeApi(
 	if (method === "GET" && path === "/api/me") return handleMe(services);
 	if (method === "GET" && path === "/api/config") return handleConfig(services);
 	if (method === "GET" && path === "/api/workspace") return handleWorkspace(services);
+	if (method === "GET" && path === "/api/workspaces") return await handleListWorkspaces(services);
 
 	// Sessions collection
 	if (method === "GET" && path === "/api/sessions") return await handleListSessions(services, url);

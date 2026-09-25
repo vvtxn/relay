@@ -6,9 +6,13 @@ type Statement = { sql: string; args?: unknown[] };
 class FakeClient {
 	executed: (string | Statement)[] = [];
 	batches: { statements: Statement[]; mode?: string | undefined }[] = [];
+	workspaces: Record<string, unknown>[] = [];
 
 	execute(statement: string | Statement): Promise<{ rows: Record<string, unknown>[] }> {
 		this.executed.push(statement);
+		if (typeof statement !== "string" && statement.sql.includes("GROUP BY cwd")) {
+			return Promise.resolve({ rows: this.workspaces });
+		}
 		return Promise.resolve({ rows: [] });
 	}
 
@@ -43,6 +47,22 @@ Deno.test("DatabaseSessionStore creates schema lazily and appends an ordered ent
 	assert(fake.batches[0]!.statements[1]!.sql.includes("INSERT INTO session_entries"));
 	assertEquals(session.getEntries()[0]!.id, id);
 	assertEquals(session.getEntries()[0]!.timestamp.length > 0, true);
+});
+
+Deno.test("DatabaseSessionStore.listWorkspaces maps grouped rows", async () => {
+	const fake = new FakeClient();
+	fake.workspaces = [
+		{ cwd: "/a", session_count: 2, last_activity: "2026-01-02T00:00:00.000Z" },
+		{ cwd: "/b", session_count: 1, last_activity: "2026-01-01T00:00:00.000Z" },
+	];
+	const store = storeWithFake(fake);
+
+	const workspaces = await store.listWorkspaces("user-1");
+
+	assertEquals(workspaces, [
+		{ cwd: "/a", sessionCount: 2, lastActivity: "2026-01-02T00:00:00.000Z" },
+		{ cwd: "/b", sessionCount: 1, lastActivity: "2026-01-01T00:00:00.000Z" },
+	]);
 });
 
 Deno.test("DatabaseSessionStore gates missing credentials in fromEnv", () => {

@@ -51,4 +51,5 @@ export type {
 	SessionListResponse,
 	StatusResponse,
 	WorkspaceResponse,
+	WorkspacesResponse,
 } from "./protocol.ts";

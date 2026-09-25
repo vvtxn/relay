@@ -10,6 +10,7 @@ import type {
 	SendMessageRequest,
 	SendMessageResponse,
 	SessionListResponse,
+	WorkspacesResponse,
 } from "@vvtxn/client/protocol.ts";
 import type { RequestServices } from "./services.ts";
 import { BadRequestError, error, ForbiddenError, json, NotFoundError, readJsonBody } from "./http.ts";
@@ -55,6 +56,7 @@ export function handleConfig(services: RequestServices): Response {
 			model: config.model,
 			contextTokens: config.maxTokens,
 			home: homeDir() ?? "",
+			webUrl: config.publicUrl,
 		} satisfies ConfigResponse,
 	);
 }
@@ -63,6 +65,22 @@ export async function handleListSessions(services: RequestServices, url: URL): P
 	const cwd = resolveCwd(services, url);
 	const sessions = await services.sessionStore.listSummaries({ ownerId: services.user.id, cwd });
 	return json({ sessions } satisfies SessionListResponse);
+}
+
+/** Distinct workspaces for the user's workspace picker. */
+export async function handleListWorkspaces(services: RequestServices): Promise<Response> {
+	const summaries = await services.sessionStore.listWorkspaces(services.user.id);
+	const byCwd = new Map(summaries.map((summary) => [summary.cwd, summary]));
+	// Always surface the server's default workspace (the CLI's cwd) so a freshly
+	// launched project appears before its first session.
+	if (!byCwd.has(services.config.defaultCwd)) {
+		byCwd.set(services.config.defaultCwd, {
+			cwd: services.config.defaultCwd,
+			sessionCount: 0,
+			lastActivity: "",
+		});
+	}
+	return json({ workspaces: [...byCwd.values()] } satisfies WorkspacesResponse);
 }
 
 export async function handleCreateSession(services: RequestServices, request: Request): Promise<Response> {

@@ -1,13 +1,16 @@
 # AGENTS.md - Agent
 
 The CLI application: a TUI client of the Relay server. All agent execution (loop, tools, sessions, approvals, tokens)
-happens server-side; the CLI talks to it over the `@vvtxn/client` protocol (REST + SSE).
+happens server-side; the CLI talks to it over the `@vvtxn/client` protocol (REST + SSE). The CLI is the entry point: it
+starts (or reuses) a background server before running the TUI.
 
 ## Architecture
 
 ```
 agent/
-├── index.ts              # Entry point: `relay serve` → @vvtxn/server; default → app.tsx
+├── index.ts              # Entry: relay | relay web | serve | stop | status
+├── server.ts             # Background-server supervisor (ensureServer/stop/status)
+├── open.ts               # openBrowser(url) helper
 ├── app.tsx               # App component, signals, SSE event folding, command palettes
 ├── client.ts             # RelayClient singleton (server URL from config/env)
 ├── config.ts             # RelayConfig: serverUrl (env RELAY_SERVER_URL or ~/.relay/config.json)
@@ -18,6 +21,21 @@ agent/
 └── hooks/
     └── project-files.ts  # useProjectFiles hook (file listing from the server)
 ```
+
+### Server supervision (`server.ts`)
+
+`relay` (default) and `relay web` call `ensureServer({ cwd })`:
+
+1. An explicit `RELAY_SERVER_URL` is attached to, never managed.
+2. A healthy server recorded in `~/.relay/server.json` is reused.
+3. Otherwise a detached server is spawned (compiled: `relay serve`; source: `deno run … server/main.ts`) with
+   `RELAY_WORKSPACE=cwd`, and the CLI waits for `/api/health`.
+
+The server writes its own state file (`RELAY_STATE_FILE`) with its PID, port, and web URL; `relay stop` reads it and
+signals the process, `relay status` prints it. The server survives the CLI, so the browser stays available.
+
+`relay web` opens the browser (Vite origin in dev when reachable, else the server's bundled SPA) and returns unless
+`--foreground` is passed.
 
 ## Key Concepts
 
@@ -51,9 +69,10 @@ ask. Switching sessions denies any pending ask server-side so runs never hang.
 
 ### Boot Flow
 
-`bootstrap()` health-checks the server (`Cannot reach the Relay server at ... Start one with 'relay serve'.`), fetches
-`/api/me` + `/api/config` in parallel, then creates a session for `Deno.cwd()`. `Root` renders `BootScreen` (loading) or
-`BootError` (friendly failure) and mounts `App` only once a user, session, and server info exist.
+`index.ts` ensures a server exists (see above), then sets `RELAY_SERVER_URL` before importing `app.tsx`. `bootstrap()`
+health-checks it, fetches `/api/me` + `/api/config`, then creates a session for `Deno.cwd()`. `Root` renders
+`BootScreen` (loading) or `BootError` (friendly failure) and mounts `App` only once a user, session, and server info
+exist. `info.webUrl` powers the "Open in Browser" command.
 
 ### Cancellation
 
@@ -79,17 +98,20 @@ never prompts for one.
 ## Dependencies
 
 - `@vvtxn/client` — protocol types + RelayClient
-- `@vvtxn/server` — only for the `serve` subcommand entry
+- `@vvtxn/server` — the `serve` entry point the supervisor launches
 - `@vvtxn/relay` — display utilities only
 - `@/tui` — terminal UI framework
 
 ## Running
 
 ```bash
-deno task serve:dev      # start the server (development env; required)
-deno task agent          # start the TUI (another terminal)
-relay serve && relay     # compiled binary equivalents
+deno task relay          # start/reuse the server + TUI
+deno task relay web      # open the browser client
+deno task relay stop     # stop the background server
+deno task relay status   # show the background server
 ```
+
+The compiled binary uses the same commands: `relay`, `relay web`, `relay serve`, `relay stop`, `relay status`.
 
 ## Task Completion Checklist
 

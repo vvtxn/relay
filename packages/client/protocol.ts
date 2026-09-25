@@ -6,7 +6,7 @@
  * agent runner callbacks one-to-one, plus server-side lifecycle events.
  */
 
-import type { Entry, SessionHeader, SessionSummary } from "@vvtxn/relay/core/sessions/index.ts";
+import type { Entry, SessionHeader, SessionSummary, WorkspaceSummary } from "@vvtxn/relay/core/sessions/index.ts";
 import type { ToolResult } from "@vvtxn/relay/core/tools/index.ts";
 import type { Usage } from "@vvtxn/relay/api/types.ts";
 
@@ -46,10 +46,17 @@ export interface ConfigResponse {
 	contextTokens: number;
 	/** Server user's home directory, used to abbreviate/expand `~` paths. */
 	home: string;
+	/** Origin where the browser client is reachable (for "open in browser"). */
+	webUrl: string;
 }
 
 export interface SessionListResponse {
 	sessions: SessionSummary[];
+}
+
+/** Distinct workspaces (project directories) with sessions for the user. */
+export interface WorkspacesResponse {
+	workspaces: WorkspaceSummary[];
 }
 
 export interface CreateSessionRequest {

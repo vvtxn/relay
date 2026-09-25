@@ -110,6 +110,7 @@ export type {
 	SessionStore,
 	SessionSummary,
 	ToolResultEntry,
+	WorkspaceSummary,
 } from "./core/sessions/index.ts";
 
 // Authentication

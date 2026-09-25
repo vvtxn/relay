@@ -1,5 +1,13 @@
 import { createDatabaseClient, type DatabaseClient, databaseCredentialsFromEnv } from "../database.ts";
-import type { Entry, NewEntry, SessionHandle, SessionScope, SessionStore, SessionSummary } from "./types.ts";
+import type {
+	Entry,
+	NewEntry,
+	SessionHandle,
+	SessionScope,
+	SessionStore,
+	SessionSummary,
+	WorkspaceSummary,
+} from "./types.ts";
 import { CURRENT_VERSION } from "./types.ts";
 
 const SCHEMA = `
@@ -146,6 +154,23 @@ export class DatabaseSessionStore implements SessionStore {
 			reference: stringValue(row, "id"),
 			timestamp: stringValue(row, "created_at"),
 			firstUserMessage: typeof row.first_user_message === "string" ? row.first_user_message : null,
+		}));
+	}
+
+	/** Distinct workspaces (session cwds) for a user, most recently active first. */
+	async listWorkspaces(ownerId: string): Promise<WorkspaceSummary[]> {
+		const result = await this.execute({
+			sql: `SELECT cwd, COUNT(*) AS session_count, MAX(updated_at) AS last_activity
+				FROM sessions
+				WHERE owner_id = ?
+				GROUP BY cwd
+				ORDER BY MAX(updated_at) DESC`,
+			args: [ownerId],
+		});
+		return result.rows.map((row) => ({
+			cwd: stringValue(row, "cwd"),
+			sessionCount: Number(row.session_count ?? 0),
+			lastActivity: typeof row.last_activity === "string" ? row.last_activity : "",
 		}));
 	}
 

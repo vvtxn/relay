@@ -44,10 +44,20 @@ async function writeMergedEnvFile(): Promise<string | null> {
 	return path;
 }
 
+async function exists(path: string): Promise<boolean> {
+	try {
+		await Deno.stat(path);
+		return true;
+	} catch {
+		return false;
+	}
+}
+
 async function build() {
 	const hash = await getGitHash();
 	const fullVersion = `${VERSION}+${hash}`;
 	const embedEnv = Deno.args.includes("--embed-env");
+	const skipWeb = Deno.args.includes("--no-web");
 	const compileArgs = [
 		"deno",
 		"compile",
@@ -61,6 +71,17 @@ async function build() {
 		"dist/relay",
 		"packages/cli/agent/index.ts",
 	];
+
+	// Build and embed the web app so `relay web` works from the binary alone.
+	if (!skipWeb) {
+		console.log("Building web app...");
+		await run(["deno", "task", "web:build"]);
+	}
+	if (await exists("packages/web/dist")) {
+		compileArgs.splice(2, 0, "--include=packages/web/dist");
+	} else {
+		console.warn("Warning: packages/web/dist not found; the binary will not serve the web app.");
+	}
 
 	let envFilePath: string | null = null;
 	if (embedEnv) {

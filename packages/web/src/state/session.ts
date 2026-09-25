@@ -66,6 +66,7 @@ function handleEvent(sessionId: string, event: ServerEvent): void {
 	if (event.type !== "run_finished") return;
 	void queryClient.invalidateQueries({ queryKey: queryKeys.session(sessionId) });
 	void queryClient.invalidateQueries({ queryKey: ["sessions"] });
+	void queryClient.invalidateQueries({ queryKey: queryKeys.workspaces });
 }
 
 /**

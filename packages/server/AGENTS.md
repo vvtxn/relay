@@ -83,8 +83,16 @@ are the only new storage — sessions are already scoped by `ownerId`.
 
 ### Static serving
 
-`RELAY_STATIC_DIR` enables serving a static directory with SPA fallback (index.html for unknown paths). Paths are
-confined to the static dir.
+The server always serves a web app for non-API GET requests: `RELAY_STATIC_DIR` when set (a deployment override),
+otherwise the bundled `packages/web/dist` (embedded in the compiled binary via `--include`). Unknown paths fall back to
+`index.html` for SPA routing; paths are confined to the root.
+
+### Background state
+
+When the CLI supervisor starts the server it sets `RELAY_STATE_FILE`; the server writes
+`{ url, port, pid, cwd,
+webUrl }` (mode `0600`) so `relay stop`/`relay status` can find it. A plain `relay serve` leaves
+no state behind.
 
 ## API Surface
 
@@ -98,6 +106,7 @@ confined to the static dir.
 | `/api/me`                    | GET    | Authenticated user                                    |
 | `/api/config`                | GET    | Model + context window for status displays            |
 | `/api/workspace`             | GET    | Server default cwd                                    |
+| `/api/workspaces`            | GET    | Distinct workspaces (cwds) with session counts        |
 | `/api/sessions?cwd=`         | GET    | Session summaries for a workspace                     |
 | `/api/sessions`              | POST   | Create session                                        |
 | `/api/sessions/:id`          | GET    | Open (header, entries, tokens, cost, branch, running) |

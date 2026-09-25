@@ -14,6 +14,7 @@ import type {
 	SessionListResponse,
 	StatusResponse,
 	WorkspaceResponse,
+	WorkspacesResponse,
 } from "@vvtxn/client/protocol.ts";
 import { client } from "./client.ts";
 
@@ -51,6 +52,7 @@ export interface ApiShape {
 	getConfig(): Effect.Effect<ConfigResponse, RelayError>;
 	getAuthInfo(): Effect.Effect<AuthInfoResponse, RelayError>;
 	listSessions(cwd: string): Effect.Effect<SessionListResponse, RelayError>;
+	listWorkspaces(): Effect.Effect<WorkspacesResponse, RelayError>;
 	createSession(cwd: string): Effect.Effect<CreateSessionResponse, RelayError>;
 	openSession(id: string): Effect.Effect<OpenSessionResponse, RelayError>;
 	listFiles(sessionId: string): Effect.Effect<FileListResponse, RelayError>;
@@ -74,6 +76,7 @@ export const ApiLive = Layer.succeed(Api, {
 	getConfig: () => tryRelay(() => client.getConfig()),
 	getAuthInfo: () => tryRelay(() => client.getAuthInfo()),
 	listSessions: (cwd) => tryRelay(() => client.listSessions(cwd)),
+	listWorkspaces: () => tryRelay(() => client.listWorkspaces()),
 	createSession: (cwd) => tryRelay(() => client.createSession(cwd)),
 	openSession: (id) => tryRelay(() => client.openSession(id)),
 	listFiles: (sessionId) => tryRelay(() => client.listFiles(sessionId)),
