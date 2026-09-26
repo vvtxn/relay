@@ -4,7 +4,7 @@ import type { ServerServices } from "./services.ts";
 
 function services(): ServerServices {
 	return {
-		config: { publicUrl: "http://127.0.0.1:7433", authProvider: "github", allowLocalAuth: false },
+		config: { publicUrl: "http://127.0.0.1:7433" },
 		authSessions: { revoke: () => Promise.resolve() },
 	} as unknown as ServerServices;
 }

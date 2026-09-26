@@ -21,13 +21,6 @@ export const workspaceQuery = queryOptions({
 	staleTime: Infinity,
 });
 
-/** Public auth metadata (available before sign-in). */
-export const authInfoQuery = queryOptions({
-	queryKey: ["auth", "info"],
-	queryFn: () => runApi((api) => api.getAuthInfo()),
-	staleTime: Infinity,
-});
-
 export function sessionsQuery(cwd: string) {
 	return queryOptions({
 		queryKey: queryKeys.sessions(cwd),

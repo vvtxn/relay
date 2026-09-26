@@ -6,7 +6,7 @@ import {
 	readStoredSession,
 	writeStoredSession,
 } from "@vvtxn/relay/core/index.ts";
-import type { AuthInfoResponse, StatusResponse } from "@vvtxn/client/protocol.ts";
+import type { StatusResponse } from "@vvtxn/client/protocol.ts";
 import type { ServerServices } from "./services.ts";
 import { error, json } from "./http.ts";
 import { clearCookie, isSecureOrigin, parseCookies, serializeCookie } from "./cookies.ts";
@@ -59,22 +59,9 @@ export function isGithubAllowed(allowed: string[], profile: GitHubProfile): bool
 	return allowed.some((entry) => entry === id || entry === login);
 }
 
-export function handleAuthInfo(services: ServerServices): Response {
-	return json(
-		{
-			provider: services.config.authProvider,
-			loginUrl: "/api/auth/login",
-		} satisfies AuthInfoResponse,
-	);
-}
-
 export async function handleLogin(services: ServerServices, url: URL): Promise<Response> {
 	const { config } = services;
 	const returnTo = safeReturnTo(url.searchParams.get("returnTo"));
-
-	if (config.authProvider !== "github" || !config.githubClientId) {
-		return redirect(returnTo);
-	}
 
 	const { verifier, challenge } = await createPkce();
 	const state = createState();
@@ -96,9 +83,6 @@ export async function handleLogin(services: ServerServices, url: URL): Promise<R
 
 export async function handleCallback(services: ServerServices, request: Request, url: URL): Promise<Response> {
 	const { config } = services;
-	if (config.authProvider !== "github" || !config.githubClientId || !config.githubClientSecret) {
-		return error(404, "GitHub OAuth is not enabled");
-	}
 
 	const oauthError = url.searchParams.get("error");
 	if (oauthError) return error(400, url.searchParams.get("error_description") ?? oauthError);
@@ -170,7 +154,6 @@ export async function handleAuthRoutes(
 	url: URL,
 ): Promise<Response | null> {
 	const path = url.pathname;
-	if (path === "/api/auth/info" && request.method === "GET") return handleAuthInfo(services);
 	if (path === "/api/auth/login" && request.method === "GET") return await handleLogin(services, url);
 	if (path === "/api/auth/callback" && request.method === "GET") {
 		return await handleCallback(services, request, url);

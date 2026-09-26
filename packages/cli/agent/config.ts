@@ -31,12 +31,3 @@ export const config: RelayConfig = { ...defaults, ...loadUserConfig() };
 export function resolveServerUrl(): string {
 	return Deno.env.get("RELAY_SERVER_URL") ?? config.serverUrl;
 }
-
-/**
- * Local auth subject for the CLI bridge. When the server runs with
- * `AUTH_PROVIDER=github` and `AUTH_ALLOW_LOCAL=true`, the CLI authenticates by
- * sending this subject header instead of a browser session.
- */
-export function resolveAuthSubject(): string | null {
-	return Deno.env.get("RELAY_AUTH_SUBJECT") ?? null;
-}

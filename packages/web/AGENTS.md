@@ -70,11 +70,10 @@ via `createResource`, seeds the Query cache, and redirects to `/s/$sessionId`.
 ### Auth (GitHub OAuth)
 
 `api/client.ts` sends `credentials: "include"` on every request so the session cookie flows automatically. `bootstrap`
-treats a 401 as a first-class `{ kind: "unauthenticated" }` outcome; `BootPage` renders `LoginScreen`, which reads the
-public `/api/auth/info` query and links to `/api/auth/login` (label "Continue with GitHub"). `SessionPage` redirects to
-`/` on a 401 or a missing/foreign session. `auth/auth.ts` centralizes the login/logout URLs (`VITE_RELAY_LOGIN_URL` /
-`VITE_RELAY_LOGOUT_URL`, defaulting to `/api/auth/*`). `MeResponse.avatarUrl` is shown in the status bar and sidebar. No
-client changes are needed when the server switches between local and GitHub auth.
+treats a 401 as a first-class `{ kind: "unauthenticated" }` outcome; `BootPage` renders `LoginScreen`, a "Continue with
+GitHub" button linking to `/api/auth/login`. `SessionPage` redirects to `/` on a 401 or a missing/foreign session.
+`auth/auth.ts` centralizes the login/logout URLs (`VITE_RELAY_LOGIN_URL` / `VITE_RELAY_LOGOUT_URL`, defaulting to
+`/api/auth/*`). `MeResponse.avatarUrl` is shown in the status bar and sidebar.
 
 ### Theming
 

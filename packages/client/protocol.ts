@@ -27,13 +27,6 @@ export interface MeResponse {
 	avatarUrl?: string;
 }
 
-/** Public auth metadata for the login screen. */
-export interface AuthInfoResponse {
-	provider: "local" | "github";
-	/** Server endpoint that begins the login flow. */
-	loginUrl: string;
-}
-
 /** The server's default workspace directory (used to scope sessions). */
 export interface WorkspaceResponse {
 	cwd: string;

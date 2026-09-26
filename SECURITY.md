@@ -21,13 +21,10 @@ is subject to the auth rules below — stop it when you are finished.
 
 ## Authentication
 
-`AUTH_PROVIDER` selects the mode:
-
-- `local` — every request is the configured `DEV_AUTH_SUBJECT`. **No login and no CSRF protection for the dev
-  identity**; use it only on a trusted machine.
-- `github` — the browser completes a GitHub App user-authorization flow (PKCE + `state`). The server issues an opaque
-  session token (32 random bytes, SHA-256 hashed at rest) in an `HttpOnly; SameSite=Lax; Path=/` cookie, `Secure` when
-  `RELAY_PUBLIC_URL` is https.
+Relay authenticates with GitHub App OAuth only. The browser completes a user-authorization flow (PKCE + `state`). The
+server issues an opaque session token (32 random bytes, SHA-256 hashed at rest) in an `HttpOnly; SameSite=Lax; Path=/`
+cookie, `Secure` when `RELAY_PUBLIC_URL` is https. `GITHUB_APP_CLIENT_ID`/`GITHUB_APP_CLIENT_SECRET` are required at
+startup; there is no local or anonymous fallback.
 
 Session tokens slide on use and are revoked on logout. Expired rows are pruned opportunistically.
 
@@ -45,13 +42,11 @@ written when the server binds a non-loopback host.
 - `AUTH_ALLOWED_GITHUB` (comma-separated GitHub logins or numeric ids) restricts who may sign in.
 - `RELAY_WORKSPACE_ROOTS` (comma-separated absolute paths) restricts where a session's workspace may be created; `bash`
   is never confined by it.
-- **Exposure is gated.** Binding `AUTH_PROVIDER=github` to a non-loopback `RELAY_HOST` requires both
-  `AUTH_ALLOWED_GITHUB` and `RELAY_WORKSPACE_ROOTS` — the server refuses to start otherwise, so an unrestricted agent
-  cannot be exposed by accident. On loopback they are optional, so development needs no extra setup.
+- **Exposure is gated.** Binding a non-loopback `RELAY_HOST` requires both `AUTH_ALLOWED_GITHUB` and
+  `RELAY_WORKSPACE_ROOTS` — the server refuses to start otherwise, so an unrestricted agent cannot be exposed by
+  accident. On loopback they are optional, so development needs no extra setup.
 - These are user/machine-specific, so they belong in the gitignored `.env.<mode>.local` files, not the committed
   `.env.<mode>` defaults.
-- The CLI bridge header `X-Relay-Local-Subject` is honored only when `AUTH_ALLOW_LOCAL=true` **and** the request
-  originates from loopback.
 
 ## CSRF
 
@@ -78,12 +73,11 @@ to that root with an `index.html` fallback for SPA routing. Directory traversal 
 
 ## Hardening checklist for exposure
 
-1. Keep `AUTH_PROVIDER=github`; set `AUTH_ALLOWED_GITHUB` (enforced when the host is non-loopback).
+1. Set `AUTH_ALLOWED_GITHUB` (enforced when the host is non-loopback).
 2. Set `RELAY_WORKSPACE_ROOTS` (also enforced when the host is non-loopback).
-3. Keep `AUTH_ALLOW_LOCAL=false` (default in github mode).
-4. Terminate TLS and set `RELAY_PUBLIC_URL` to the https origin.
-5. Run the server as an unprivileged user, ideally in a container.
-6. Never commit `.env.*.local` files; `deno task build` does not embed env.
+3. Terminate TLS and set `RELAY_PUBLIC_URL` to the https origin.
+4. Run the server as an unprivileged user, ideally in a container.
+5. Never commit `.env.*.local` files; `deno task build` does not embed env.
 
 ## Reporting
 

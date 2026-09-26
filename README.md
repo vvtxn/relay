@@ -116,12 +116,10 @@ The compiled binary ships the same commands: `relay`, `relay web`, `relay serve`
 
 ## Authentication
 
-`AUTH_PROVIDER` selects how callers are authenticated:
-
-- **`local`** — every request maps to `DEV_AUTH_SUBJECT`. No login screen; the CLI works out of the box.
-- **`github`** — the browser completes a GitHub App user-authorization flow and receives an opaque session cookie. Each
-  GitHub account gets its own user, sessions, and workspaces. (`.env.development` / `.env.production` enable this by
-  default.)
+Relay is GitHub-OAuth-only. Callers authenticate by completing a GitHub App user-authorization flow and receiving an
+opaque session cookie (browser) or, for the CLI, a bearer session token handed over locally. Each GitHub account gets
+its own user, sessions, and workspaces. GitHub App credentials are **required** — the server refuses to start without
+them.
 
 ### GitHub App setup
 
@@ -146,23 +144,22 @@ The compiled binary ships the same commands: `relay`, `relay web`, `relay serve`
    GITHUB_APP_CLIENT_SECRET="..."
    ```
 
-   `RELAY_PUBLIC_URL`, `AUTH_PROVIDER`, and `AUTH_ALLOW_LOCAL` already come from `.env.development` / `.env.production`;
-   `AUTH_SESSION_TTL_DAYS` defaults to 30 and can be overridden in a `.local` file.
+   `RELAY_PUBLIC_URL` already comes from `.env.development` / `.env.production`; `AUTH_SESSION_TTL_DAYS` defaults to 30
+   and can be overridden in a `.local` file.
 
 3. Start the matching mode (`deno task serve:dev` + `deno task web:dev`, or `deno task serve:prod` after
    `deno task web:build`) and sign in with two accounts to verify isolation.
 
-The CLI can authenticate in GitHub mode either with a bearer session token or, while `AUTH_ALLOW_LOCAL=true`, by setting
-`RELAY_AUTH_SUBJECT` (the subject it should act as) in a `.local` file.
+The CLI authenticates with the bearer session token a loopback browser login hands over in `~/.relay/session.json`, so
+the terminal and the browser act as the same user without extra configuration.
 
 ### Hardening
 
-These are user-specific, so put them in the gitignored `.env.<mode>.local` file. When `AUTH_PROVIDER=github` binds a
-non-loopback `RELAY_HOST`, **the server refuses to start unless both are set**; on loopback they are optional.
+These are user-specific, so put them in the gitignored `.env.<mode>.local` file. When the server binds a non-loopback
+`RELAY_HOST`, **it refuses to start unless both are set**; on loopback they are optional.
 
 - `AUTH_ALLOWED_GITHUB` — comma-separated GitHub logins or numeric ids allowed to sign in (empty = any GitHub account).
 - `RELAY_WORKSPACE_ROOTS` — comma-separated absolute directories a session workspace may use (empty = any directory).
-- Keep `AUTH_ALLOW_LOCAL=false` (the default in github mode).
 
 See [SECURITY.md](SECURITY.md) for the full threat model and checklist.
 
@@ -218,8 +215,7 @@ A dependency-free `Deno.serve` application:
   tools behind approval decisions that arrive over HTTP
 - **Sessions** — create/open/list against the shared Turso store; per-session workspace cwd (file tools are confined to
   it)
-- **Auth** — local dev auth (`DEV_AUTH_SUBJECT`) resolved through the shared user store; GitHub OAuth slots in later
-  behind the same contract
+- **Auth** — GitHub App OAuth with per-request identity resolution, opaque hashed sessions, and an optional allowlist
 - **Static serving** — optional static file serving when `RELAY_STATIC_DIR` is set
 
 ### `packages/relay/api/` — LLM Provider Layer
@@ -250,11 +246,12 @@ The agent loop is an async generator (`run()`) that streams `AgentEvent`s:
 | `edit_file`     | Edit         | Edit files with diff output      |
 | `grep`          | Grep         | Search files with regex patterns |
 
-**Authentication** — Provider identities are resolved to internal user IDs before they reach application storage. Local
-development uses `DEV_AUTH_SUBJECT`; GitHub identity mapping is ready for a future OAuth flow.
+**Authentication** — Provider identities are resolved to internal user IDs before they reach application storage. GitHub
+profiles are mapped through `GitHubAuthProvider` on first sign-in; every request then resolves the session token to that
+user.
 
 **Session persistence** — Conversations are stored in the shared Turso database and can be used by the terminal client.
-The server requires `TURSO_DB_URL`, `TURSO_DB_TOKEN`, and `DEV_AUTH_SUBJECT` while local auth is active:
+The server requires `TURSO_DB_URL`, `TURSO_DB_TOKEN`, `GITHUB_APP_CLIENT_ID`, and `GITHUB_APP_CLIENT_SECRET`:
 
 - **Create** — New sessions with unique IDs and timestamps
 - **Continue** — Resume the most recent session for a workspace
@@ -325,7 +322,7 @@ A SolidJS single-page app served by the server (bundled `packages/web/dist`, or 
 - **Workspaces** — the sidebar lists the project directories the server knows about (the ones you launched `relay` in);
   selecting one filters its sessions and targets new chats. New projects are added from the CLI or via "Add workspace".
 - Shares the Graphite/Silver theme tokens with the terminal client (applied as CSS variables)
-- Auth uses GitHub App OAuth (or local mode): credentialed fetches, 401 handling, and a login redirect
+- Auth uses GitHub App OAuth: credentialed fetches, 401 handling, and a login redirect
 
 ## Development
 
@@ -376,9 +373,9 @@ Tag-based releases via GitHub Actions (`.github/workflows/release.yml`):
 3. `git tag v<version> && git push --tags`
 4. CI builds the Linux binary without embedding environment files and creates the GitHub Release
 
-The released binary reads `LLM_API_KEY` (or falls back to `~/.relay/auth.json`), `TURSO_DB_URL`, `TURSO_DB_TOKEN`, and
-`DEV_AUTH_SUBJECT` from its runtime environment. Local `deno task build` builds may load `.env` automatically, but
-release builds should not include secrets in the executable.
+The released binary reads `LLM_API_KEY` (or falls back to `~/.relay/auth.json`), `TURSO_DB_URL`, `TURSO_DB_TOKEN`,
+`GITHUB_APP_CLIENT_ID`, and `GITHUB_APP_CLIENT_SECRET` from its runtime environment. Local `deno task build` builds may
+load `.env` automatically, but release builds should not include secrets in the executable.
 
 ## License
 

@@ -4,9 +4,6 @@ import { join } from "@std/path/join";
 import { resolve } from "@std/path/resolve";
 import { relayDir } from "@vvtxn/relay/core/paths.ts";
 
-/** How callers are authenticated. */
-export type AuthProviderKind = "local" | "github";
-
 /** Deployment mode selected by `RELAY_ENV`. */
 export type RelayEnv = "development" | "production";
 
@@ -35,20 +32,14 @@ export interface ServerConfig {
 	tursoUrl: string;
 	/** Turso database auth token. */
 	tursoToken: string;
-	/** Authentication mode. */
-	authProvider: AuthProviderKind;
-	/** Local development auth subject (required when authProvider is "local"). */
-	devAuthSubject: string | null;
-	/** GitHub App client id (required when authProvider is "github"). */
-	githubClientId: string | null;
-	/** GitHub App client secret (required when authProvider is "github"). */
-	githubClientSecret: string | null;
+	/** GitHub App client id. */
+	githubClientId: string;
+	/** GitHub App client secret. */
+	githubClientSecret: string;
 	/** Public base URL of this server, used to build the OAuth redirect URI. */
 	publicUrl: string;
 	/** Session lifetime in days (sliding). */
 	sessionTtlDays: number;
-	/** Allow CLI/local requests to authenticate with a local subject header. */
-	allowLocalAuth: boolean;
 	/** Default workspace cwd when a client doesn't specify one (server's cwd). */
 	defaultCwd: string;
 	/** Absolute roots a session workspace must sit within (empty = allow any). */
@@ -69,12 +60,6 @@ function required(env: Record<string, string | undefined>, key: string): string 
 	const value = env[key];
 	if (!value) throw new Error(`${key} is required`);
 	return value;
-}
-
-function parseAuthProvider(value: string | undefined): AuthProviderKind {
-	if (!value) return "local";
-	if (value === "local" || value === "github") return value;
-	throw new Error(`AUTH_PROVIDER must be "local" or "github" (got "${value}")`);
 }
 
 /** Comma-separated list, trimmed and without empties. */
@@ -123,8 +108,6 @@ export function serverConfigFromEnv(
 ): ServerConfig {
 	const port = positiveInt(env.RELAY_PORT, DEFAULT_PORT, "RELAY_PORT", 65_535);
 	const hostname = env.RELAY_HOST ?? DEFAULT_HOSTNAME;
-	const authProvider = parseAuthProvider(env.AUTH_PROVIDER);
-	const devAuthSubject = env.DEV_AUTH_SUBJECT ?? null;
 	// GitHub App credentials. `GITHUB_CLIENT_ID`/`GITHUB_CLIENT_SECRET` are
 	// accepted as fallbacks for setups configured before the App switch.
 	const githubClientId = env.GITHUB_APP_CLIENT_ID ?? env.GITHUB_CLIENT_ID ?? null;
@@ -132,25 +115,17 @@ export function serverConfigFromEnv(
 	const workspaceRoots = parseList(env.RELAY_WORKSPACE_ROOTS).map((root) => resolve(root));
 	const allowedGithub = parseList(env.AUTH_ALLOWED_GITHUB).map((entry) => entry.toLowerCase());
 
-	if (authProvider === "local" && !devAuthSubject) {
-		throw new Error("DEV_AUTH_SUBJECT is required when AUTH_PROVIDER=local");
-	}
-	if (authProvider === "github") {
-		if (!githubClientId) throw new Error("GITHUB_APP_CLIENT_ID is required when AUTH_PROVIDER=github");
-		if (!githubClientSecret) throw new Error("GITHUB_APP_CLIENT_SECRET is required when AUTH_PROVIDER=github");
-		// Exposing the server beyond loopback requires explicit allowlists, so an
-		// unrestricted agent can never be reachable by accident.
-		if (!isLoopbackHost(hostname)) {
-			if (allowedGithub.length === 0) {
-				throw new Error(
-					"AUTH_ALLOWED_GITHUB is required when AUTH_PROVIDER=github binds a non-loopback host",
-				);
-			}
-			if (workspaceRoots.length === 0) {
-				throw new Error(
-					"RELAY_WORKSPACE_ROOTS is required when AUTH_PROVIDER=github binds a non-loopback host",
-				);
-			}
+	// GitHub OAuth is the only auth transport.
+	if (!githubClientId) throw new Error("GITHUB_APP_CLIENT_ID is required");
+	if (!githubClientSecret) throw new Error("GITHUB_APP_CLIENT_SECRET is required");
+	// Exposing the server beyond loopback requires explicit allowlists, so an
+	// unrestricted agent can never be reachable by accident.
+	if (!isLoopbackHost(hostname)) {
+		if (allowedGithub.length === 0) {
+			throw new Error("AUTH_ALLOWED_GITHUB is required when binding a non-loopback host");
+		}
+		if (workspaceRoots.length === 0) {
+			throw new Error("RELAY_WORKSPACE_ROOTS is required when binding a non-loopback host");
 		}
 	}
 
@@ -167,13 +142,10 @@ export function serverConfigFromEnv(
 		maxCompletionTokens: Number(env.LLM_MAX_COMPLETION_TOKENS ?? 16_384),
 		tursoUrl: required(env, "TURSO_DB_URL"),
 		tursoToken: required(env, "TURSO_DB_TOKEN"),
-		authProvider,
-		devAuthSubject,
 		githubClientId,
 		githubClientSecret,
 		publicUrl: (env.RELAY_PUBLIC_URL ?? `http://${hostname}:${port}`).replace(/\/+$/, ""),
 		sessionTtlDays: positiveInt(env.AUTH_SESSION_TTL_DAYS, DEFAULT_SESSION_TTL_DAYS, "AUTH_SESSION_TTL_DAYS", 365),
-		allowLocalAuth: env.AUTH_ALLOW_LOCAL ? env.AUTH_ALLOW_LOCAL === "true" : authProvider === "local",
 		defaultCwd: env.RELAY_WORKSPACE ?? Deno.cwd(),
 		workspaceRoots,
 		allowedGithub,

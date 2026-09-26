@@ -120,7 +120,6 @@ export {
 	DatabaseAuthSessionStore,
 	DatabaseUserStore,
 	GitHubAuthProvider,
-	LocalAuthProvider,
 	readStoredSession,
 	writeStoredSession,
 } from "./core/index.ts";

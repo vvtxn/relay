@@ -1,6 +1,3 @@
-import { useQuery } from "@tanstack/solid-query";
-import { authInfoQuery } from "@/api/queries.ts";
-
 function BrandMark() {
 	return (
 		<div class="boot-brand">
@@ -52,9 +49,6 @@ export function BootError(props: { message: string; onRetry?: () => void }) {
 }
 
 export function LoginScreen(props: { onLogin: () => void }) {
-	const info = useQuery(() => authInfoQuery);
-	const label = () => (info.data?.provider === "github" ? "Continue with GitHub" : "Continue");
-
 	return (
 		<div class="boot">
 			<div class="boot-card">
@@ -62,7 +56,7 @@ export function LoginScreen(props: { onLogin: () => void }) {
 				<div class="boot-error-title">Sign in required</div>
 				<div class="boot-error-message">Your session is not authenticated. Continue to sign in.</div>
 				<div class="boot-actions">
-					<button type="button" class="btn primary" onClick={props.onLogin}>{label()}</button>
+					<button type="button" class="btn primary" onClick={props.onLogin}>Continue with GitHub</button>
 				</div>
 			</div>
 		</div>

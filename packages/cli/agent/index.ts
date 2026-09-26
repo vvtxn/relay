@@ -6,19 +6,6 @@ import { openBrowser } from "./open.ts";
 const command = Deno.args[0];
 const SIGN_IN_TIMEOUT_MS = 10 * 60_000;
 
-async function fetchJson<T>(url: string, headers?: HeadersInit): Promise<T | null> {
-	try {
-		const response = await fetch(url, {
-			...(headers ? { headers } : {}),
-			signal: AbortSignal.timeout(2_000),
-		});
-		if (!response.ok) return null;
-		return await response.json() as T;
-	} catch {
-		return null;
-	}
-}
-
 /** True when this CLI currently has valid credentials for the server. */
 async function isAuthorized(serverUrl: string): Promise<boolean> {
 	const token = readStoredSession()?.token;
@@ -34,13 +21,11 @@ async function isAuthorized(serverUrl: string): Promise<boolean> {
 }
 
 /**
- * In GitHub mode the CLI has no session until a browser login. Open the web
- * client and wait for the token handoff (`~/.relay/session.json`), so the
- * terminal and the browser act as the same user.
+ * The CLI has no session until a browser login. Open the web client and wait
+ * for the token handoff (`~/.relay/session.json`), so the terminal and the
+ * browser act as the same user.
  */
 async function ensureAuthenticated(state: ServerState): Promise<void> {
-	const info = await fetchJson<{ provider?: string }>(`${state.url}/api/auth/info`);
-	if (info?.provider !== "github") return;
 	if (await isAuthorized(state.url)) return;
 
 	const webUrl = state.webUrl || state.url;

@@ -34,7 +34,6 @@ export type { SessionStatus, SessionStreamState } from "./session-state.ts";
 export type {
 	ApprovalDecision,
 	ApprovalRequest,
-	AuthInfoResponse,
 	ConfigResponse,
 	CreateSessionRequest,
 	CreateSessionResponse,

@@ -34,7 +34,8 @@ export function BootError({ message }: { message: string }) {
 			<Text color={theme.error} bold>Authentication failed</Text>
 			<Text color={theme.textMuted}>{message}</Text>
 			<Text color={theme.textDim} italic>
-				Check DEV_AUTH_SUBJECT, TURSO_DB_URL and TURSO_DB_TOKEN, then restart with Ctrl+C.
+				Check GITHUB_APP_CLIENT_ID, GITHUB_APP_CLIENT_SECRET, TURSO_DB_URL and TURSO_DB_TOKEN, then restart with
+				Ctrl+C.
 			</Text>
 		</Box>
 	);

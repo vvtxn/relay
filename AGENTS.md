@@ -81,7 +81,7 @@ files with explicit precedence — **process env > `.env.<mode>.local` > `.env.<
 own multi-file `--env-file` precedence is ambiguous and it has no "if exists" variant).
 
 - `.env.development` / `.env.production` — committed non-secret mode defaults.
-- `.env.local`, `.env.<mode>.local` — gitignored secrets (`TURSO_*`, `GITHUB_APP_*`, `LLM_API_KEY`, `DEV_AUTH_SUBJECT`).
+- `.env.local`, `.env.<mode>.local` — gitignored secrets (`TURSO_*`, `GITHUB_APP_*`, `LLM_API_KEY`).
 - `.env.example` — template for every key.
 
 `deno task build` never embeds env (release-safe); `deno task build:local` embeds the merged dev env and warns.

@@ -2,7 +2,6 @@ import { Context, Data, Effect, Layer, Stream } from "effect";
 import { RelayApiError, type SubscribeOptions } from "@vvtxn/client/client.ts";
 import type {
 	ApprovalDecision,
-	AuthInfoResponse,
 	ConfigResponse,
 	CreateSessionResponse,
 	FileListResponse,
@@ -50,7 +49,6 @@ export interface ApiShape {
 	me(): Effect.Effect<MeResponse, RelayError>;
 	workspace(): Effect.Effect<WorkspaceResponse, RelayError>;
 	getConfig(): Effect.Effect<ConfigResponse, RelayError>;
-	getAuthInfo(): Effect.Effect<AuthInfoResponse, RelayError>;
 	listSessions(cwd: string): Effect.Effect<SessionListResponse, RelayError>;
 	listWorkspaces(): Effect.Effect<WorkspacesResponse, RelayError>;
 	createSession(cwd: string): Effect.Effect<CreateSessionResponse, RelayError>;
@@ -74,7 +72,6 @@ export const ApiLive = Layer.succeed(Api, {
 	me: () => tryRelay(() => client.me()),
 	workspace: () => tryRelay(() => client.workspace()),
 	getConfig: () => tryRelay(() => client.getConfig()),
-	getAuthInfo: () => tryRelay(() => client.getAuthInfo()),
 	listSessions: (cwd) => tryRelay(() => client.listSessions(cwd)),
 	listWorkspaces: () => tryRelay(() => client.listWorkspaces()),
 	createSession: (cwd) => tryRelay(() => client.createSession(cwd)),

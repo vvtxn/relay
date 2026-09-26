@@ -1,7 +1,6 @@
 import type {
 	ApprovalDecision,
 	ApprovalRequest,
-	AuthInfoResponse,
 	ConfigResponse,
 	CreateSessionRequest,
 	CreateSessionResponse,
@@ -74,10 +73,6 @@ export class RelayClient {
 
 	async getConfig(): Promise<ConfigResponse> {
 		return await this.get("/api/config");
-	}
-
-	async getAuthInfo(): Promise<AuthInfoResponse> {
-		return await this.get("/api/auth/info");
 	}
 
 	async listSessions(cwd: string): Promise<SessionListResponse> {

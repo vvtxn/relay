@@ -36,17 +36,14 @@ export function startServer(): void {
 
 	console.log(`Relay server listening on http://${config.hostname}:${config.port}`);
 	console.log(`Mode: ${config.relayEnv}`);
-	console.log(`Auth provider: ${config.authProvider}`);
-	if (config.authProvider === "github") {
-		console.log(
-			`OAuth callback: ${config.publicUrl}/api/auth/callback (must match a GitHub App callback URL exactly)`,
-		);
-	}
+	console.log(
+		`OAuth callback: ${config.publicUrl}/api/auth/callback (must match a GitHub App callback URL exactly)`,
+	);
 	if (config.staticDir) console.log(`Serving web app from ${config.staticDir}`);
 
 	const server = Deno.serve(
 		{ port: config.port, hostname: config.hostname },
-		(request, info) => handleRequest(services, request, info),
+		(request) => handleRequest(services, request),
 	);
 	writeServerState(config, server);
 }

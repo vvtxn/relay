@@ -1,14 +1,8 @@
 import { assertEquals, assertRejects, assertThrows } from "@std/assert";
 import { DatabaseUserStore, type DatabaseUserStoreOptions } from "@/core/auth/db.ts";
 import { GitHubAuthProvider } from "@/core/auth/github.ts";
-import { LocalAuthProvider } from "@/core/auth/local.ts";
 import { authenticate } from "@/core/auth/service.ts";
 import type { AuthIdentity } from "@/core/auth/types.ts";
-
-Deno.test("LocalAuthProvider returns a local identity", async () => {
-	const provider = new LocalAuthProvider("dev-user");
-	assertEquals(await provider.authenticate(), { provider: "local", subject: "dev-user" });
-});
 
 Deno.test("GitHubAuthProvider uses the stable GitHub profile ID", async () => {
 	const provider = new GitHubAuthProvider();
@@ -47,14 +41,17 @@ Deno.test("GitHubAuthProvider rejects a missing profile ID", () => {
 
 Deno.test("authenticate resolves an identity through the user store", async () => {
 	let received: AuthIdentity | undefined;
-	const user = await authenticate(new LocalAuthProvider("dev-user"), undefined, {
+	const provider = {
+		authenticate: () => Promise.resolve({ provider: "github", subject: "12345", email: "dev@example.com" }),
+	};
+	const user = await authenticate(provider, undefined, {
 		resolve(identity) {
 			received = identity;
 			return Promise.resolve({ id: "internal-user-id" });
 		},
 	});
-	assertEquals(received, { provider: "local", subject: "dev-user" });
-	assertEquals(user, { id: "internal-user-id", name: "dev-user", provider: "local" });
+	assertEquals(received, { provider: "github", subject: "12345", email: "dev@example.com" });
+	assertEquals(user, { id: "internal-user-id", name: "dev@example.com", provider: "github" });
 });
 
 Deno.test("authenticate prefers the identity email as the display name", async () => {
@@ -89,14 +86,10 @@ Deno.test("authenticate prefers the name stored on the user record", async () =>
 });
 
 Deno.test("authenticate treats an empty stored name as missing", async () => {
-	const user = await authenticate(new LocalAuthProvider("dev-user"), undefined, {
+	const user = await authenticate(new GitHubAuthProvider(), { id: 12345 }, {
 		resolve: () => Promise.resolve({ id: "internal-user-id", name: "" }),
 	});
-	assertEquals(user.name, "dev-user");
-});
-
-Deno.test("LocalAuthProvider rejects an empty subject", () => {
-	assertThrows(() => new LocalAuthProvider(""), Error, "local auth subject");
+	assertEquals(user.name, "12345");
 });
 
 type Statement = { sql: string; args?: unknown[] };

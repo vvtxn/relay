@@ -57,7 +57,6 @@ function originAllowed(services: ServerServices, request: Request): boolean {
 export async function handleRequest(
 	services: ServerServices,
 	request: Request,
-	info?: Deno.ServeHandlerInfo,
 ): Promise<Response> {
 	const url = new URL(request.url);
 	const path = url.pathname;
@@ -76,7 +75,7 @@ export async function handleRequest(
 		}
 
 		if (path.startsWith("/api/")) {
-			const user = await resolveRequestUser(services, request, info);
+			const user = await resolveRequestUser(services, request);
 			if (!user) return error(401, "Unauthorized");
 			return await routeApi({ ...services, user }, request, url, path, method);
 		}

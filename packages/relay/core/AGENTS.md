@@ -16,7 +16,6 @@ core/
 ├── database.ts           # Shared Turso client factory + env credentials (used by session and user stores)
 ├── auth/                 # Identity + sessions
 │   ├── types.ts          # AuthIdentity, AuthenticatedUser, AuthProvider, UserStore, UserDirectory
-│   ├── local.ts          # LocalAuthProvider (dev subject)
 │   ├── github.ts         # GitHubAuthProvider (profile → identity)
 │   ├── db.ts             # DatabaseUserStore: provider identity → user, profile columns
 │   ├── sessions.ts       # DatabaseAuthSessionStore: opaque hashed session tokens
