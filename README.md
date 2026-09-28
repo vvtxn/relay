@@ -96,6 +96,10 @@ deno task relay status   # show the background server
 deno task relay stop     # stop the background server
 ```
 
+The terminal and the browser use the same font. The browser loads it automatically; for the terminal run
+`relay fonts install` (or `deno task relay fonts install`) and select the printed family in your terminal settings.
+`relay fonts status` reports whether it is installed.
+
 In development `relay web` opens Vite (`http://localhost:5173`) when it is running, otherwise the web app bundled by the
 server. In production (`RELAY_ENV=production`, e.g. `deno task relay:prod web`) the server serves the built SPA
 (`packages/web/dist`) itself.
@@ -111,8 +115,9 @@ deno task serve:prod     # foreground server, production env
 deno task web:dev        # Vite dev server with HMR
 ```
 
-The compiled binary ships the same commands: `relay`, `relay web`, `relay serve`, `relay stop`, `relay status`.
-`deno task build` builds and embeds the web app (release-safe, no env); `deno task build:local` also embeds the dev env.
+The compiled binary ships the same commands: `relay`, `relay web`, `relay serve`, `relay stop`, `relay status`,
+`relay fonts`. `deno task build` builds and embeds the web app (release-safe, no env); `deno task build:local` also
+embeds the dev env.
 
 ## Authentication
 
@@ -336,6 +341,7 @@ deno task relay        # Start/reuse the server + terminal UI
 deno task relay web    # Open the web client (server starts in the background)
 deno task relay stop   # Stop the background server
 deno task relay status # Show the background server
+deno task relay fonts status  # Check whether the shared terminal font is installed
 deno task serve:dev    # Run a foreground server with the development env
 deno task serve:prod   # Run a foreground server with the production env
 deno task web:dev      # Run the web client with Vite (proxies /api to the server)

@@ -80,6 +80,10 @@ export type { DiffLine, UIMessage, UIToolCall } from "./core/display.ts";
 export { theme, themeToCssVariables } from "./core/theme.ts";
 export type { Theme } from "./core/theme.ts";
 
+// Typography (shared font identity for terminal and web clients)
+export { font } from "./core/fonts.ts";
+export type { FontWeight, RelayFont, WebFontFace } from "./core/fonts.ts";
+
 // Context trimming
 export { estimateMessageTokens, estimateTokens, trimContext } from "./core/context.ts";
 export type { TrimOptions } from "./core/context.ts";

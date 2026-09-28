@@ -83,6 +83,13 @@ async function build() {
 		console.warn("Warning: packages/web/dist not found; the binary will not serve the web app.");
 	}
 
+	// Embed the shared font assets so `relay fonts install` works from the binary.
+	if (await exists("packages/relay/assets")) {
+		compileArgs.splice(2, 0, "--include=packages/relay/assets");
+	} else {
+		console.warn("Warning: packages/relay/assets not found; `relay fonts install` will not work from the binary.");
+	}
+
 	let envFilePath: string | null = null;
 	if (embedEnv) {
 		envFilePath = await writeMergedEnvFile();

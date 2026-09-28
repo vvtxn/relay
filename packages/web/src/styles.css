@@ -1,6 +1,36 @@
 :root {
 	color-scheme: dark;
+	/* No-JS fallback; applyTheme() overrides this with the shared font stack. */
 	--relay-font-mono: "SF Mono", ui-monospace, Menlo, Consolas, "Liberation Mono", monospace;
+}
+
+/*
+ * Shared Relay font — files live in @vvtxn/relay/assets/fonts and are copied
+ * into the bundle by Vite. Family names must match `font.family` in
+ * packages/relay/core/fonts.ts.
+ */
+@font-face {
+	font-family: "JetBrains Mono";
+	font-style: normal;
+	font-weight: 400;
+	font-display: swap;
+	src: url("../../relay/assets/fonts/relay-mono-regular.woff2") format("woff2");
+}
+
+@font-face {
+	font-family: "JetBrains Mono";
+	font-style: normal;
+	font-weight: 700;
+	font-display: swap;
+	src: url("../../relay/assets/fonts/relay-mono-bold.woff2") format("woff2");
+}
+
+@font-face {
+	font-family: "JetBrains Mono";
+	font-style: italic;
+	font-weight: 400;
+	font-display: swap;
+	src: url("../../relay/assets/fonts/relay-mono-italic.woff2") format("woff2");
 }
 
 * {

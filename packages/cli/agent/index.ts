@@ -2,6 +2,7 @@ import { startServer } from "@vvtxn/server/main.ts";
 import { readStoredSession } from "@vvtxn/relay/core/auth/session-file.ts";
 import { ensureServer, printStatus, runWeb, type ServerState, stopServer } from "./server.ts";
 import { openBrowser } from "./open.ts";
+import { runFontsCommand } from "./fonts.ts";
 
 const command = Deno.args[0];
 const SIGN_IN_TIMEOUT_MS = 10 * 60_000;
@@ -56,6 +57,9 @@ try {
 			break;
 		case "status":
 			await printStatus();
+			break;
+		case "fonts":
+			await runFontsCommand(Deno.args.slice(1));
 			break;
 		default: {
 			// The CLI is the entry point: guarantee a server, ensure a session,

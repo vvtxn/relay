@@ -11,6 +11,8 @@ core/
 ├── runner.ts             # runAgentLoop() convenience wrapper with callbacks
 ├── display.ts            # Display utilities: UIMessage, UIToolCall, parseDiffLines, arg/output formatting
 ├── theme.ts              # Graphite/Silver design tokens shared by terminal + web clients
+├── fonts.ts              # Shared font identity: web faces, CSS stack, terminal install files
+├── assets/fonts/         # Bundled font files + license (see its README for the swap procedure)
 ├── paths.ts              # relayDir(), homeDir() helpers
 ├── context.ts            # Context trimming (token estimation, turn-based truncation)
 ├── database.ts           # Shared Turso client factory + env credentials (used by session and user stores)

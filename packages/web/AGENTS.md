@@ -81,6 +81,11 @@ GitHub" button linking to `/api/auth/login`. `SessionPage` redirects to `/` on a
 here calls `themeToCssVariables()` and applies `--relay-*` custom properties to `document.documentElement` at startup.
 `styles.css` only references those variables — never hardcode colors.
 
+Typography is shared too: `packages/relay/core/fonts.ts` names the family and CSS stack, and `styles.css` declares
+`@font-face` rules for the woff2 files under `packages/relay/assets/fonts` (Vite copies them into the bundle). Startup
+sets `--relay-font-mono` from `font.cssStack`; the value in `:root` is only a no-JS fallback. The terminal installs the
+same font via `relay fonts install` — see `packages/relay/assets/fonts/README.md` before swapping it.
+
 ### Markdown
 
 `Markdown.tsx` lexes with `marked` and renders tokens to Solid elements. Raw HTML is rendered as text and links use

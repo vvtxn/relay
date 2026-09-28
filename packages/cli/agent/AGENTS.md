@@ -8,9 +8,10 @@ starts (or reuses) a background server before running the TUI.
 
 ```
 agent/
-├── index.ts              # Entry: relay | relay web | serve | stop | status
+├── index.ts              # Entry: relay | relay web | serve | stop | status | fonts
 ├── server.ts             # Background-server supervisor (ensureServer/stop/status)
 ├── open.ts               # openBrowser(url) helper
+├── fonts.ts              # relay fonts install|status|path (shared font for the terminal)
 ├── app.tsx               # App component, signals, SSE event folding, command palettes
 ├── client.ts             # RelayClient singleton (server URL from config/env)
 ├── config.ts             # RelayConfig: serverUrl (env RELAY_SERVER_URL or ~/.relay/config.json)
@@ -97,23 +98,34 @@ never prompts for one.
 - `MessageView` / `ToolCallView` / `DiffView` (components/chat.tsx) — Shared display contract from
   `@vvtxn/relay/core/display.ts`; `UIMessage` is re-exported from there (single definition)
 
+### Fonts (`fonts.ts`)
+
+A terminal owns its font, so the CLI cannot load one at runtime. `relay fonts install` copies the ttf/otf files from
+`@vvtxn/relay/assets/fonts` (embedded in the compiled binary via `scripts/build.ts`) into the platform user font
+directory (`~/.local/share/fonts`, `~/Library/Fonts`, `%LOCALAPPDATA%\Microsoft\Windows\Fonts`), refreshes fontconfig on
+Linux, and prints the family to select in the terminal settings. `status` reports which files are installed; `path`
+prints the bundled directory. The web client loads the same font automatically, so both clients render the same
+typeface.
+
 ## Dependencies
 
 - `@vvtxn/client` — protocol types + RelayClient
 - `@vvtxn/server` — the `serve` entry point the supervisor launches
-- `@vvtxn/relay` — display utilities only
+- `@vvtxn/relay` — display utilities, theme tokens, and the shared font manifest
 - `@/tui` — terminal UI framework
 
 ## Running
 
 ```bash
-deno task relay          # start/reuse the server + TUI
-deno task relay web      # open the browser client
-deno task relay stop     # stop the background server
-deno task relay status   # show the background server
+deno task relay           # start/reuse the server + TUI
+deno task relay web       # open the browser client
+deno task relay stop      # stop the background server
+deno task relay status    # show the background server
+deno task relay fonts status  # check whether the shared font is installed
 ```
 
-The compiled binary uses the same commands: `relay`, `relay web`, `relay serve`, `relay stop`, `relay status`.
+The compiled binary uses the same commands: `relay`, `relay web`, `relay serve`, `relay stop`, `relay status`,
+`relay fonts`.
 
 ## Task Completion Checklist
 
