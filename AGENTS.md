@@ -209,4 +209,6 @@ Avoid vague names like `dev`, `temp`, or `wip-description` — use the category 
 - Use [Semantic Versioning](https://semver.org/): `MAJOR.MINOR.PATCH`
 - Tag releases with a `v` prefix: `git tag v0.5.0`
 - Version bumps are separate commits: `chore: version bump`
+- `packages/relay/version.ts` is the single source; `packages/cli/version.ts` and `packages/web/src/version.ts`
+  re-export it, and `scripts/bump.ts` updates it
 - After bumping, commit to `main`, then tag and push tags to trigger the release CI

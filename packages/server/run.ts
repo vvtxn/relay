@@ -85,6 +85,7 @@ export class RunManager {
 		this.handles.delete(sessionId);
 		this.tokens.delete(sessionId);
 		this.cost.delete(sessionId);
+		this.alwaysApproved.delete(sessionId);
 	}
 
 	private emit(sessionId: string, event: ServerEvent): void {
@@ -232,8 +233,9 @@ export class RunManager {
 					this.emit(sessionId, { type: "tool_call_args_delta", id, args });
 				},
 				onToolCallEnd: (id, name, args) => {
-					const calls = this.draftToolCalls.get(sessionId)!;
-					const index = this.draftIndex.get(sessionId)!;
+					const calls = this.draftToolCalls.get(sessionId);
+					const index = this.draftIndex.get(sessionId);
+					if (!calls || !index) return;
 					index.set(id, calls.length);
 					calls.push({ id, name, args });
 					this.emit(sessionId, { type: "tool_call_end", id, name, args });
@@ -250,11 +252,14 @@ export class RunManager {
 				},
 				onMessageComplete: (usage?: Usage) => {
 					if (usage) {
+						// `tokens` is the current context-window usage (this call's
+						// prompt + completion), not a running total: clients render it
+						// against the model's context limit. `cost` does accumulate.
 						this.tokens.set(sessionId, usage.prompt_tokens + usage.completion_tokens);
 						if (usage.cost) {
 							this.cost.set(sessionId, (this.cost.get(sessionId) ?? 0) + usage.cost);
 						}
-						handle.setTokens(this.tokens.get(sessionId)!);
+						handle.setTokens(this.tokens.get(sessionId) ?? 0);
 						handle.setCost(this.cost.get(sessionId) ?? 0);
 					}
 					this.emit(sessionId, {

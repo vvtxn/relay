@@ -163,6 +163,10 @@ function App({ onQuit, user, initialSessionId, info }: AppProps) {
 	// -----------------------------------------------------------------------
 
 	const handleApprovalRequired = (info: PendingApprovalInfo) => {
+		// The server keeps at most one approval pending per session (side-effect
+		// tools run sequentially), so never replace an open prompt: doing so would
+		// drop its decision and leave the server waiting forever.
+		if (currentAsk.value) return;
 		void (async () => {
 			const askSessionId = sessionId.value;
 			if (!askSessionId) return;

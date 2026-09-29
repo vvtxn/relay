@@ -78,6 +78,11 @@ export class DatabaseUserStore implements UserStore, UserDirectory {
 		this.schemaReady = this.initialize();
 	}
 
+	/** Resolves once the store's schema has been initialized. */
+	get ready(): Promise<void> {
+		return this.schemaReady;
+	}
+
 	static fromEnv(options: Omit<DatabaseUserStoreOptions, "url" | "authToken" | "client"> = {}): DatabaseUserStore {
 		return new DatabaseUserStore({ ...databaseCredentialsFromEnv(), ...options });
 	}

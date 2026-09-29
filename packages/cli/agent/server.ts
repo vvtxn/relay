@@ -130,22 +130,43 @@ function spawnServer(port: number, cwd: string): void {
 	if (!env.RELAY_PUBLIC_URL) env.RELAY_PUBLIC_URL = `http://127.0.0.1:${port}`;
 
 	const args = serverArgs();
-	const command = Deno.build.os === "windows"
-		? new Deno.Command(Deno.execPath(), {
+	const child = detachCommand(env, args).spawn();
+	child.unref();
+}
+
+/**
+ * A command that outlives the CLI. `setsid` moves the server into a new
+ * session (so it survives the terminal closing) on Linux/BSD; macOS has no
+ * `setsid`, so it uses `nohup`, whose ignored-SIGHUP disposition survives the
+ * `exec`. Windows has neither — `unref()` alone is enough there.
+ */
+function detachCommand(env: Record<string, string>, args: string[]): Deno.Command {
+	if (Deno.build.os === "windows") {
+		return new Deno.Command(Deno.execPath(), {
 			args,
 			env,
 			stdin: "null",
 			stdout: "null",
 			stderr: "null",
-		})
-		: new Deno.Command("setsid", {
-			args: ["sh", "-c", 'exec "$@" >>"$RELAY_SERVER_LOG" 2>&1', "sh", Deno.execPath(), ...args],
-			env: { ...env, RELAY_SERVER_LOG: logPath() },
-			stdin: "null",
 		});
+	}
 
-	const child = command.spawn();
-	child.unref();
+	const script = 'exec "$@" >>"$RELAY_SERVER_LOG" 2>&1';
+	const logEnv = { ...env, RELAY_SERVER_LOG: logPath() };
+	if (Deno.build.os === "darwin") {
+		return new Deno.Command("nohup", {
+			args: ["sh", "-c", script, "sh", Deno.execPath(), ...args],
+			env: logEnv,
+			stdin: "null",
+			stdout: "null",
+			stderr: "null",
+		});
+	}
+	return new Deno.Command("setsid", {
+		args: ["sh", "-c", script, "sh", Deno.execPath(), ...args],
+		env: logEnv,
+		stdin: "null",
+	});
 }
 
 async function waitForHealth(url: string, timeoutMs: number): Promise<boolean> {

@@ -30,9 +30,9 @@ function writeServerState(config: ServerConfig, server: Deno.HttpServer): void {
 }
 
 /** Entry point for `relay serve`. */
-export function startServer(): void {
+export async function startServer(): Promise<void> {
 	const config = serverConfigFromEnv();
-	const services = createServices(config);
+	const services = await createServices(config);
 
 	console.log(`Relay server listening on http://${config.hostname}:${config.port}`);
 	console.log(`Mode: ${config.relayEnv}`);
@@ -50,5 +50,5 @@ export function startServer(): void {
 
 // Run when executed directly (deno run packages/server/main.ts)
 if (import.meta.main) {
-	startServer();
+	await startServer();
 }

@@ -47,7 +47,7 @@ async function ensureAuthenticated(state: ServerState): Promise<void> {
 try {
 	switch (command) {
 		case "serve":
-			startServer();
+			await startServer();
 			break;
 		case "web":
 			await runWeb(Deno.args.slice(1));

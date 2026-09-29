@@ -20,6 +20,10 @@ export function safeUrl(raw: string | null | undefined): string | null {
 	const value = raw.replace(CONTROL_CHARS, "").trim();
 	if (!value) return null;
 
+	// Protocol-relative forms (`//host`, `\/host`) resolve against the current
+	// scheme to a *different* origin, so they are not same-origin references.
+	if (/^[\\/]{2}/.test(value)) return null;
+
 	// Same-origin relative forms: "#frag", "?query", "/path", "./x", "../x".
 	if (/^[#/?]/.test(value) || /^\.{1,2}\//.test(value)) return value;
 

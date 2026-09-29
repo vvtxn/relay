@@ -214,6 +214,42 @@ Deno.test("RunManager - cancel aborts the run and emits run_finished", async () 
 	assertEquals(events.some((e) => e.type === "run_finished"), true);
 });
 
+Deno.test("RunManager - cancel immediately after startMessage aborts the run", async () => {
+	const slowProvider: LLMProvider = {
+		complete() {
+			throw new Error("not implemented");
+		},
+		async *stream(request) {
+			yield {
+				id: "gen-1",
+				object: "chat.completion.chunk",
+				created: 0,
+				model: "test",
+				choices: [{ index: 0, delta: { content: "hi" }, finish_reason: null }],
+			};
+			await new Promise<void>((resolve) => {
+				if (request.signal?.aborted) return resolve();
+				request.signal?.addEventListener("abort", () => resolve(), { once: true });
+			});
+			throw new Error("aborted");
+		},
+	};
+	const runs = new RunManager({ config: fakeConfig(), sessionStore: fakeStore(), provider: slowProvider });
+	runs.attachHandle("s1", fakeHandle(), "user-1");
+
+	const events: ServerEvent[] = [];
+	runs.subscribe("s1", (event) => events.push(event));
+
+	runs.startMessage("s1", "hello");
+	// No await: startMessage registers the AbortController synchronously, so a
+	// cancel in the same tick must already find it.
+	assertEquals(runs.cancel("s1"), true);
+
+	await new Promise((resolve) => setTimeout(resolve, 200));
+	assertEquals(runs.isRunning("s1"), false);
+	assertEquals(events.some((e) => e.type === "run_finished" && e.reason === "cancelled"), true);
+});
+
 Deno.test("RunManager - getRunState returns null when no run is active", () => {
 	const runs = makeManager();
 	assertEquals(runs.getRunState("s1"), null);

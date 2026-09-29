@@ -4,10 +4,8 @@ import { readStoredServerUrl } from "./storage.ts";
 /**
  * Fetch wrapper that always sends cookies.
  *
- * Today the server runs single-user local auth, but the client is written for
- * the upcoming OAuth transport: session cookies (or any credential-bearing
- * scheme) flow without changing call sites. When OAuth lands, only the server
- * auth provider changes — this stays the same.
+ * Auth is GitHub OAuth: the server issues an opaque `HttpOnly` session cookie,
+ * so credential-bearing requests flow without changing API call sites.
  */
 function browserFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
 	return fetch(input, { ...init, credentials: "include" });

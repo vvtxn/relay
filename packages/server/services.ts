@@ -30,15 +30,22 @@ export interface RequestServices extends ServerServices {
 	user: AuthenticatedUser;
 }
 
-export function createServices(config: ServerConfig): ServerServices {
+export async function createServices(config: ServerConfig): Promise<ServerServices> {
 	const db = createDatabaseClient({ url: config.tursoUrl, authToken: config.tursoToken });
-	const sessionStore = new DatabaseSessionStore({ url: config.tursoUrl, authToken: config.tursoToken, client: db });
+
+	// Initialize schemas sequentially on the shared client: `users` backs the
+	// `auth_sessions` foreign key, and concurrent DDL is best avoided.
 	const userStore = new DatabaseUserStore({ url: config.tursoUrl, authToken: config.tursoToken, client: db });
+	await userStore.ready;
 	const authSessions = new DatabaseAuthSessionStore({
 		url: config.tursoUrl,
 		authToken: config.tursoToken,
 		client: db,
 	});
+	await authSessions.ready;
+	const sessionStore = new DatabaseSessionStore({ url: config.tursoUrl, authToken: config.tursoToken, client: db });
+	await sessionStore.ready;
+
 	const provider = new CompletionsProvider({ apiKey: config.apiKey, baseURL: config.baseURL });
 	const runs = new RunManager({ config, sessionStore, provider });
 	return { config, db, userStore, authSessions, sessionStore, provider, runs };

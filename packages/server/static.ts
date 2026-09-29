@@ -1,4 +1,4 @@
-import { extname, join, normalize } from "@std/path";
+import { extname, isAbsolute, join, normalize, relative } from "@std/path";
 import { error } from "./http.ts";
 
 const MIME_TYPES: Record<string, string> = {
@@ -42,12 +42,12 @@ export async function serveStatic(staticDir: string | null, pathname: string): P
 
 async function serveFromDisk(staticDir: string, pathname: string): Promise<Response> {
 	const rel = normalize(pathname).replace(/^([/\\])+/, "");
-	const filePath = join(staticDir, rel);
+	const normalizedPath = normalize(join(staticDir, rel));
 
-	// Confinement check
-	const normalizedRoot = normalize(staticDir);
-	const normalizedPath = normalize(filePath);
-	if (normalizedPath !== normalizedRoot && !normalizedPath.startsWith(normalizedRoot + "/")) {
+	// Confinement check. `relative` is separator-aware, so this works on Windows
+	// too (where `normalize` yields backslashes).
+	const within = relative(normalize(staticDir), normalizedPath);
+	if (within.startsWith("..") || isAbsolute(within)) {
 		return error(403, "Forbidden");
 	}
 

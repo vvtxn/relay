@@ -91,6 +91,16 @@ Deno.test("session-state - approval lifecycle", () => {
 	assertEquals(resolved.pendingApproval, null);
 });
 
+Deno.test("session-state - a second approval does not replace an open one", () => {
+	const first = { toolCallId: "t1", toolName: "bash", summary: "first" };
+	const second = { toolCallId: "t2", toolName: "bash", summary: "second" };
+	const state = fold([
+		{ type: "approval_required", approval: first },
+		{ type: "approval_required", approval: second },
+	]);
+	assertEquals(state.pendingApproval, first);
+});
+
 Deno.test("session-state - run_finished flushes, stops running, and clears approval", () => {
 	const state = fold([
 		{ type: "text_delta", content: "bye" },

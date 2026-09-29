@@ -152,7 +152,9 @@ export function applyServerEvent(state: SessionStreamState, event: ServerEvent):
 		case "turn_complete":
 			return { ...flushDraft(state), status: { kind: "thinking" } };
 		case "approval_required":
-			return { ...state, pendingApproval: event.approval };
+			// At most one approval is pending per session; keep an open one rather
+			// than overwrite it (its decision would otherwise be lost).
+			return state.pendingApproval ? state : { ...state, pendingApproval: event.approval };
 		case "approval_resolved":
 			if (state.pendingApproval?.toolCallId !== event.toolCallId) return state;
 			return { ...state, pendingApproval: null };

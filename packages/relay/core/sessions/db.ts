@@ -75,6 +75,11 @@ export class DatabaseSessionStore implements SessionStore {
 		this.schemaReady = this.initialize();
 	}
 
+	/** Resolves once the store's schema has been initialized. */
+	get ready(): Promise<void> {
+		return this.schemaReady;
+	}
+
 	static fromEnv(
 		options: Omit<DatabaseSessionStoreOptions, "url" | "authToken" | "client"> = {},
 	): DatabaseSessionStore {

@@ -1,6 +1,7 @@
+import { VERSION } from "@vvtxn/relay/version.ts";
 import type { HealthResponse } from "@vvtxn/client/protocol.ts";
 import type { RequestServices, ServerServices } from "./services.ts";
-import { BadRequestError, error, ForbiddenError, NotFoundError } from "./http.ts";
+import { BadRequestError, error, ForbiddenError, NotFoundError, PayloadTooLargeError } from "./http.ts";
 import { handleAuthRoutes } from "./auth-routes.ts";
 import { resolveRequestUser } from "./identity.ts";
 import {
@@ -17,8 +18,6 @@ import { handleListFiles } from "./files.ts";
 import { handleApprove, handleCancel } from "./approvals.ts";
 import { handleWorkspace } from "./workspace.ts";
 import { serveStatic } from "./static.ts";
-
-const VERSION = "0.1.0";
 
 function health(): Response {
 	return new Response(JSON.stringify({ status: "ok", version: VERSION } satisfies HealthResponse), {
@@ -90,6 +89,7 @@ export async function handleRequest(
 		if (err instanceof BadRequestError) return error(400, err.message);
 		if (err instanceof ForbiddenError) return error(403, err.message);
 		if (err instanceof NotFoundError) return error(404, err.message);
+		if (err instanceof PayloadTooLargeError) return error(413, err.message);
 		console.error("Unhandled server error:", err);
 		return error(500, "Internal server error");
 	}

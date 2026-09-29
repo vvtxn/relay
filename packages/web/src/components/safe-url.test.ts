@@ -26,6 +26,15 @@ Deno.test("safeUrl - allows relative and same-origin references", () => {
 	assertEquals(safeUrl("no-scheme/path"), "no-scheme/path");
 });
 
+Deno.test("safeUrl - rejects protocol-relative and backslash URLs", () => {
+	assertEquals(safeUrl("//evil.com"), null);
+	assertEquals(safeUrl("//evil.com/path"), null);
+	assertEquals(safeUrl("/\\evil.com"), null);
+	assertEquals(safeUrl("\\\\evil.com"), null);
+	// A single leading slash is still a same-origin path.
+	assertEquals(safeUrl("/s/abc"), "/s/abc");
+});
+
 Deno.test("safeUrl - rejects empty input", () => {
 	assertEquals(safeUrl(undefined), null);
 	assertEquals(safeUrl(null), null);
