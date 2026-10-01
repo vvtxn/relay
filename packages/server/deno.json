@@ -1,0 +1,13 @@
+{
+	"name": "@vvtxn/server",
+	"version": "0.1.0",
+	"exports": {
+		".": "./mod.ts",
+		"./main": "./main.ts"
+	},
+	"imports": {
+		"@/": "./",
+		"@vvtxn/relay/": "../relay/",
+		"@vvtxn/client/": "../client/"
+	}
+}

@@ -93,10 +93,10 @@ export const grepTool = defineTool({
 function buildRgArgs(opts: {
 	pattern: string;
 	searchPath: string;
-	glob?: string;
-	fixed_strings?: boolean;
-	case_sensitive?: boolean;
-	max_results?: number;
+	glob?: string | undefined;
+	fixed_strings?: boolean | undefined;
+	case_sensitive?: boolean | undefined;
+	max_results?: number | undefined;
 }): string[] {
 	const args = ["--line-number", "--no-heading", "--color=never"];
 	if (opts.fixed_strings) args.push("--fixed-strings");

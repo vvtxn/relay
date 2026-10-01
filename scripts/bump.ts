@@ -1,4 +1,4 @@
-import { VERSION } from "../packages/cli/version.ts";
+import { VERSION } from "../packages/relay/version.ts";
 
 const part = Deno.args[0] as "patch" | "minor" | "major" | undefined;
 
@@ -7,7 +7,7 @@ if (!part || !["patch", "minor", "major"].includes(part)) {
 	Deno.exit(1);
 }
 
-const [major, minor, patch] = VERSION.split(".").map(Number);
+const [major = 0, minor = 0, patch = 0] = VERSION.split(".").map(Number);
 
 let next: string;
 switch (part) {
@@ -22,9 +22,16 @@ switch (part) {
 		break;
 }
 
-// Update version.ts
-const content = `export const VERSION = "${next}";\n`;
-await Deno.writeTextFile("packages/cli/version.ts", content);
+// Update the canonical version file (clients re-export it)
+const content = `/**
+ * Relay version — the single source for every client and the server.
+ *
+ * Lives in \`@vvtxn/relay\` (the leaf package) so the CLI, web app, and server
+ * can all import it without a dependency cycle. \`scripts/bump.ts\` writes here.
+ */
+export const VERSION = "${next}";
+`;
+await Deno.writeTextFile("packages/relay/version.ts", content);
 
 // Update README.md
 const readme = await Deno.readTextFile("README.md");

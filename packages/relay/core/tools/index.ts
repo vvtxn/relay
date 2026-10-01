@@ -2,7 +2,7 @@ export { createToolRegistry, defineTool, getDefinitions } from "./types.ts";
 export type { Tool, ToolRegistry, ToolResult } from "./types.ts";
 export { type ApprovalHandler, type ApprovalOptions, withApproval } from "./approval.ts";
 
-import { resolveWithinRoot } from "@/core/workspace.ts";
+import { resolveRealWithinRoot } from "@/core/workspace.ts";
 import { bashTool, createBashTool } from "./bash.ts";
 import { editFileTool } from "./edit.ts";
 import { grepTool } from "./grep.ts";
@@ -21,23 +21,23 @@ export const defaultTools: Tool[] = [
 
 /**
  * Rewrites a tool's `path` argument to an absolute path inside `root`,
- * rejecting paths that escape it. Tools without a path argument (only grep,
- * which defaults to ".") search the root itself.
+ * rejecting paths that escape it (including via symlinks). Tools without a
+ * path argument (only grep, which defaults to ".") search the root itself.
  */
 function confinePathArg(tool: Tool, root: string): Tool {
 	return {
 		...tool,
-		execute: (input) => {
+		execute: async (input) => {
 			const obj = (input ?? {}) as Record<string, unknown>;
 			const rel = typeof obj.path === "string" ? obj.path : ".";
-			const abs = resolveWithinRoot(root, rel);
+			const abs = await resolveRealWithinRoot(root, rel);
 			if (!abs) {
-				return Promise.resolve({
+				return {
 					content: `Path "${rel}" is outside the workspace. Use a path inside the workspace directory.`,
 					isError: true,
-				});
+				};
 			}
-			return tool.execute({ ...obj, path: abs });
+			return await tool.execute({ ...obj, path: abs });
 		},
 	};
 }

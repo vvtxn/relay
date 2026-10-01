@@ -23,7 +23,7 @@ export function CommandPalette(props: CommandPaletteProps) {
 				borderColor={theme.border}
 				borderLabel={borderLabel}
 				borderLabelColor={theme.borderLabel}
-				bgColor="default"
+				bgColor={theme.surfaceElevated}
 				flexDirection="column"
 				padding={1}
 				gap={1}

@@ -13,4 +13,5 @@ export type {
 	SessionStore,
 	SessionSummary,
 	ToolResultEntry,
+	WorkspaceSummary,
 } from "./types.ts";

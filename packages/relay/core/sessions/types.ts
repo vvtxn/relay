@@ -63,6 +63,13 @@ export interface SessionSummary {
 	firstUserMessage: string | null;
 }
 
+/** Aggregated per-workspace info for a client's workspace picker. */
+export interface WorkspaceSummary {
+	cwd: string;
+	sessionCount: number;
+	lastActivity: string;
+}
+
 export interface SessionScope {
 	ownerId: string;
 	cwd: string;

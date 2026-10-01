@@ -38,8 +38,8 @@ Deno.test(
 		const summaries = await store.listSummaries(scope);
 
 		assertEquals(summaries.length, 1);
-		assertEquals(summaries[0].id, session.getHeader().id);
-		assertEquals(session.getEntries()[0].type, "message");
+		assertEquals(summaries[0]!.id, session.getHeader().id);
+		assertEquals(session.getEntries()[0]!.type, "message");
 	}),
 );
 
@@ -112,7 +112,7 @@ Deno.test(
 
 		await sm.append({ type: "message", role: "user", content: "test" });
 
-		const entry = sm.getEntries()[0];
+		const entry = sm.getEntries()[0]!;
 		assertExists(entry.id);
 		assertEquals(typeof entry.id, "string");
 		assertEquals(entry.id.length > 0, true);
@@ -293,9 +293,9 @@ Deno.test(
 
 		const summaries = await SessionManager.listSummaries("/tmp");
 		assertEquals(summaries.length, 1);
-		assertEquals(summaries[0].id, "sum123");
-		assertEquals(summaries[0].timestamp, "2025-06-15T12:00:00.000Z");
-		assertEquals(summaries[0].firstUserMessage, "What is Deno?");
-		assertEquals(summaries[0].reference, filePath);
+		assertEquals(summaries[0]!.id, "sum123");
+		assertEquals(summaries[0]!.timestamp, "2025-06-15T12:00:00.000Z");
+		assertEquals(summaries[0]!.firstUserMessage, "What is Deno?");
+		assertEquals(summaries[0]!.reference, filePath);
 	}),
 );

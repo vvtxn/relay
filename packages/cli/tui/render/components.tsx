@@ -93,7 +93,12 @@ export function Markdown(props: MarkdownProps) {
 	const lines = parseMarkdown(content);
 
 	return (
-		<Box flexDirection="column" width={props.width} height={props.height} flex={props.flex}>
+		<Box
+			flexDirection="column"
+			{...(props.width !== undefined ? { width: props.width } : {})}
+			{...(props.height !== undefined ? { height: props.height } : {})}
+			{...(props.flex !== undefined ? { flex: props.flex } : {})}
+		>
 			{lines.map((line, i) => {
 				const formattedLine = line.segments.map(formatSegment).join("");
 				return <Text key={i}>{formattedLine}</Text>;

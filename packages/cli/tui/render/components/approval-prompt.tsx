@@ -21,7 +21,7 @@ export function ApprovalPrompt(props: ApprovalPromptProps) {
 				borderColor={theme.warning}
 				borderLabel="Approval required"
 				borderLabelColor={theme.warning}
-				bgColor="default"
+				bgColor={theme.surfaceElevated}
 				flexDirection="column"
 				padding={1}
 				gap={1}

@@ -34,7 +34,7 @@ export function createBashTool(cwd?: string): Tool {
 			try {
 				const process = new Deno.Command("bash", {
 					args: ["-c", command],
-					cwd,
+					...(cwd ? { cwd } : {}),
 					stdout: "piped",
 					stderr: "piped",
 				});

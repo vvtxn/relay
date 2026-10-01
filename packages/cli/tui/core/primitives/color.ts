@@ -40,7 +40,7 @@ const BRIGHT_COLORS: Record<string, string> = {
 function hexToRgb(hex: string): [number, number, number] | null {
 	const match = hex.match(/^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i);
 	if (!match) return null;
-	return [parseInt(match[1], 16), parseInt(match[2], 16), parseInt(match[3], 16)];
+	return [parseInt(match[1] ?? "0", 16), parseInt(match[2] ?? "0", 16), parseInt(match[3] ?? "0", 16)];
 }
 
 export function toAnsi(color: string): string | null {
@@ -112,12 +112,12 @@ export function toBgAnsi(color: string): string | null {
 export function applyAnsi(
 	text: string,
 	options: {
-		fg?: string;
-		bg?: string;
-		bold?: boolean;
-		italic?: boolean;
-		underline?: boolean;
-		strikethrough?: boolean;
+		fg?: string | undefined;
+		bg?: string | undefined;
+		bold?: boolean | undefined;
+		italic?: boolean | undefined;
+		underline?: boolean | undefined;
+		strikethrough?: boolean | undefined;
 	},
 ): string {
 	let result = text;

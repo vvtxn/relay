@@ -1,4 +1,5 @@
 import { VERSION } from "../packages/cli/version.ts";
+import { loadEnvFiles, resolveMode } from "./run-env.ts";
 
 const decoder = new TextDecoder();
 
@@ -17,7 +18,9 @@ async function getGitHash(): Promise<string> {
 }
 
 async function run(args: string[]) {
-	const cmd = new Deno.Command(args[0], { args: args.slice(1), stdout: "inherit", stderr: "inherit" });
+	const [command, ...rest] = args;
+	if (!command) throw new Error("No command provided");
+	const cmd = new Deno.Command(command, { args: rest, stdout: "inherit", stderr: "inherit" });
 	const { code } = await cmd.output();
 	if (code !== 0) {
 		console.error(`Command failed with exit code ${code}: ${args.join(" ")}`);
@@ -25,9 +28,36 @@ async function run(args: string[]) {
 	}
 }
 
+/**
+ * Write the merged mode env to a temp file so `deno compile` embeds it
+ * deterministically (multiple `--env-file` precedence is ambiguous).
+ */
+async function writeMergedEnvFile(): Promise<string | null> {
+	const mode = resolveMode(Deno.env.get("RELAY_ENV"));
+	const values = loadEnvFiles(mode);
+	const entries = Object.entries(values);
+	if (entries.length === 0) return null;
+
+	const body = entries.map(([key, value]) => `${key}=${JSON.stringify(value)}`).join("\n") + "\n";
+	const path = await Deno.makeTempFile({ prefix: "relay-build-env-", suffix: ".env" });
+	await Deno.writeTextFile(path, body);
+	return path;
+}
+
+async function exists(path: string): Promise<boolean> {
+	try {
+		await Deno.stat(path);
+		return true;
+	} catch {
+		return false;
+	}
+}
+
 async function build() {
 	const hash = await getGitHash();
 	const fullVersion = `${VERSION}+${hash}`;
+	const embedEnv = Deno.args.includes("--embed-env");
+	const skipWeb = Deno.args.includes("--no-web");
 	const compileArgs = [
 		"deno",
 		"compile",
@@ -42,16 +72,42 @@ async function build() {
 		"packages/cli/agent/index.ts",
 	];
 
-	try {
-		await Deno.stat(".env");
-		compileArgs.splice(2, 0, "--env-file=.env");
-	} catch {
-		// Release builds intentionally use runtime environment variables.
+	// Build and embed the web app so `relay web` works from the binary alone.
+	if (!skipWeb) {
+		console.log("Building web app...");
+		await run(["deno", "task", "web:build"]);
+	}
+	if (await exists("packages/web/dist")) {
+		compileArgs.splice(2, 0, "--include=packages/web/dist");
+	} else {
+		console.warn("Warning: packages/web/dist not found; the binary will not serve the web app.");
+	}
+
+	// Embed the shared font assets so `relay fonts install` works from the binary.
+	if (await exists("packages/relay/assets")) {
+		compileArgs.splice(2, 0, "--include=packages/relay/assets");
+	} else {
+		console.warn("Warning: packages/relay/assets not found; `relay fonts install` will not work from the binary.");
+	}
+
+	let envFilePath: string | null = null;
+	if (embedEnv) {
+		envFilePath = await writeMergedEnvFile();
+		if (envFilePath) {
+			compileArgs.splice(2, 0, `--env-file=${envFilePath}`);
+			console.warn("Warning: --embed-env embeds environment values (possibly secrets) into the binary.");
+		} else {
+			console.warn("Warning: --embed-env found no env files to embed.");
+		}
 	}
 
 	console.log(`Building relay v${fullVersion}`);
 
-	await run(compileArgs);
+	try {
+		await run(compileArgs);
+	} finally {
+		if (envFilePath) await Deno.remove(envFilePath).catch(() => {});
+	}
 
 	const stat = await Deno.stat("dist/relay");
 	const sizeMB = (stat.size / (1024 * 1024)).toFixed(1);

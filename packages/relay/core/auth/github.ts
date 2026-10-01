@@ -4,6 +4,9 @@ import type { AuthIdentity, AuthProvider } from "./types.ts";
 export interface GitHubProfile {
 	id?: number | string | null;
 	email?: string | null;
+	login?: string | null;
+	name?: string | null;
+	avatar_url?: string | null;
 }
 
 /** Converts a verified GitHub profile into the application identity format. */
@@ -13,10 +16,13 @@ export class GitHubAuthProvider implements AuthProvider<GitHubProfile> {
 			throw new Error("A GitHub profile ID is required");
 		}
 		const subject = String(profile.id);
+		const name = profile.name?.trim() || profile.login?.trim();
 		return Promise.resolve({
 			provider: "github",
 			subject,
 			...(profile.email ? { email: profile.email } : {}),
+			...(name ? { name } : {}),
+			...(profile.avatar_url ? { avatarUrl: profile.avatar_url } : {}),
 		});
 	}
 }

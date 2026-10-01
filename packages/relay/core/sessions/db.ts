@@ -1,5 +1,13 @@
 import { createDatabaseClient, type DatabaseClient, databaseCredentialsFromEnv } from "../database.ts";
-import type { Entry, NewEntry, SessionHandle, SessionScope, SessionStore, SessionSummary } from "./types.ts";
+import type {
+	Entry,
+	NewEntry,
+	SessionHandle,
+	SessionScope,
+	SessionStore,
+	SessionSummary,
+	WorkspaceSummary,
+} from "./types.ts";
 import { CURRENT_VERSION } from "./types.ts";
 
 const SCHEMA = `
@@ -67,6 +75,11 @@ export class DatabaseSessionStore implements SessionStore {
 		this.schemaReady = this.initialize();
 	}
 
+	/** Resolves once the store's schema has been initialized. */
+	get ready(): Promise<void> {
+		return this.schemaReady;
+	}
+
 	static fromEnv(
 		options: Omit<DatabaseSessionStoreOptions, "url" | "authToken" | "client"> = {},
 	): DatabaseSessionStore {
@@ -113,14 +126,16 @@ export class DatabaseSessionStore implements SessionStore {
 			sql: "SELECT data FROM session_entries WHERE session_id = ? ORDER BY seq ASC, entry_id ASC",
 			args: [reference],
 		});
+		const tokens = optionalNumber(row, "tokens");
+		const cost = optionalNumber(row, "cost");
 		const header = {
 			type: "session" as const,
 			version: optionalNumber(row, "version") ?? CURRENT_VERSION,
 			id: stringValue(row, "id"),
 			timestamp: stringValue(row, "created_at"),
 			cwd: stringValue(row, "cwd"),
-			tokens: optionalNumber(row, "tokens"),
-			cost: optionalNumber(row, "cost"),
+			...(tokens !== undefined ? { tokens } : {}),
+			...(cost !== undefined ? { cost } : {}),
 		};
 		return new DatabaseSessionHandle(
 			this,
@@ -144,6 +159,23 @@ export class DatabaseSessionStore implements SessionStore {
 			reference: stringValue(row, "id"),
 			timestamp: stringValue(row, "created_at"),
 			firstUserMessage: typeof row.first_user_message === "string" ? row.first_user_message : null,
+		}));
+	}
+
+	/** Distinct workspaces (session cwds) for a user, most recently active first. */
+	async listWorkspaces(ownerId: string): Promise<WorkspaceSummary[]> {
+		const result = await this.execute({
+			sql: `SELECT cwd, COUNT(*) AS session_count, MAX(updated_at) AS last_activity
+				FROM sessions
+				WHERE owner_id = ?
+				GROUP BY cwd
+				ORDER BY MAX(updated_at) DESC`,
+			args: [ownerId],
+		});
+		return result.rows.map((row) => ({
+			cwd: stringValue(row, "cwd"),
+			sessionCount: Number(row.session_count ?? 0),
+			lastActivity: typeof row.last_activity === "string" ? row.last_activity : "",
 		}));
 	}
 

@@ -1,10 +1,11 @@
 # Relay v0.8.0
 
-A coding agent with a custom terminal UI framework, built with Deno and TypeScript.
+A coding agent with a terminal UI, built with Deno and TypeScript.
 
 Relay is a monorepo (Deno workspace) containing a terminal UI framework powered by a custom JSX runtime and Yoga flexbox
-layout, an OpenAI-compatible LLM API layer with streaming support, and an agentic loop with built-in tools — all wired
-together into an interactive coding assistant that runs entirely in your terminal.
+layout, a browser client built with SolidJS, an OpenAI-compatible LLM API layer with streaming support, and an agentic
+loop with built-in tools. One agent runtime is hosted by an HTTP + SSE server; the terminal and web clients talk to it
+over the same wire protocol.
 
 > **Note — Project Transition**
 >
@@ -19,18 +20,21 @@ together into an interactive coding assistant that runs entirely in your termina
 
 ## Features
 
+- **Terminal client** — TUI that connects to the server for shared sessions
+- **Web client** — SolidJS SPA (TanStack Query/Router + Effect) served by the same server
 - **Custom JSX-based TUI framework** — Flexbox layout via Yoga, double-buffered rendering, reactive signals, vim-mode
   text input
+- **Streaming chat** — Real-time message rendering with live drafts and tool call cards
 - **OpenAI-compatible API layer** — Works with any provider exposing `/v1/chat/completions` (OpenRouter, OpenAI, local
   models, etc.)
 - **Streaming agent loop** — Async generator that yields events for real-time UI updates as the LLM thinks and uses
   tools
 - **Built-in tools** — Bash, file read/write/edit, and grep for filesystem interaction
-- **Shared session storage** — Conversations persist in a Turso database so terminal and web clients share the same
-  session history
+- **Shared session storage** — Conversations persist in a Turso database for shared session history
+- **Tool approval** — Side-effecting tools wait for an allow/deny decision
 - **Inline diffs** — File write and edit operations display colored unified diffs with line numbers
-- **Markdown rendering** — Inline markdown display in the terminal with syntax highlighting
-- **Command palette** — Fuzzy-searchable command menu
+- **Markdown rendering** — Inline markdown display in the terminal
+- **Command palette** — Fuzzy-searchable command menu in the terminal
 
 ## Install
 
@@ -54,9 +58,9 @@ cd relay
 deno task build        # outputs dist/relay
 ```
 
-On first run, Relay will prompt you for an API key and save it to `~/.relay/auth.json`.
+The server reads its LLM API key from `LLM_API_KEY`, falling back to `~/.relay/auth.json`.
 
-Model and provider settings are configured in `~/.relay/config.json`.
+Server settings (`serverUrl` for the terminal client) are configured in `~/.relay/config.json`.
 
 ## Quick Start
 
@@ -71,20 +75,98 @@ git clone https://github.com/vvtxn/relay.git
 cd relay
 ```
 
-Set your API key:
+Environment is layered and mode-based (`RELAY_ENV=development|production`). Committed non-secret defaults live in
+`.env.development` / `.env.production`; put secrets in the gitignored `.env.development.local` / `.env.production.local`
+(see `.env.example`). Precedence: process env > `.env.<mode>.local` > `.env.<mode>` > `.env.local` > `.env`.
 
 ```bash
-export LLM_API_KEY="your-api-key"
-export TURSO_DB_URL="your-database-url"
-export TURSO_DB_TOKEN="your-database-token"
-export DEV_AUTH_SUBJECT="your-local-user"
+cp .env.example .env.development.local
+# fill in TURSO_DB_URL / TURSO_DB_TOKEN (and GITHUB_APP_* when using GitHub auth)
 ```
 
 ### Run
 
+The CLI is the entry point: it starts (or reuses) a background server, then runs the TUI. The server keeps running after
+the CLI exits, so you can hop into the browser anytime.
+
 ```bash
-deno task agent
+deno task relay          # start/reuse the server + terminal UI
+deno task relay web      # open the web client in the browser
+deno task relay status   # show the background server
+deno task relay stop     # stop the background server
 ```
+
+The terminal and the browser use the same font. The browser loads it automatically; for the terminal run
+`relay fonts install` (or `deno task relay fonts install`) and select the printed family in your terminal settings.
+`relay fonts status` reports whether it is installed.
+
+In development `relay web` opens Vite (`http://localhost:5173`) when it is running, otherwise the web app bundled by the
+server. In production (`RELAY_ENV=production`, e.g. `deno task relay:prod web`) the server serves the built SPA
+(`packages/web/dist`) itself.
+
+With GitHub auth, the first `deno task relay` opens the browser to sign in; the server hands the session to the CLI
+(loopback only), so the terminal and the browser act as the same user. Sign out only affects the current client.
+
+Lower-level tasks remain for running a server in the foreground:
+
+```bash
+deno task serve:dev      # foreground server, development env
+deno task serve:prod     # foreground server, production env
+deno task web:dev        # Vite dev server with HMR
+```
+
+The compiled binary ships the same commands: `relay`, `relay web`, `relay serve`, `relay stop`, `relay status`,
+`relay fonts`. `deno task build` builds and embeds the web app (release-safe, no env); `deno task build:local` also
+embeds the dev env.
+
+## Authentication
+
+Relay is GitHub-OAuth-only. Callers authenticate by completing a GitHub App user-authorization flow and receiving an
+opaque session cookie (browser) or, for the CLI, a bearer session token handed over locally. Each GitHub account gets
+its own user, sessions, and workspaces. GitHub App credentials are **required** — the server refuses to start without
+them.
+
+### GitHub App setup
+
+1. Create a **GitHub App** (Settings → Developer settings → GitHub Apps → New GitHub App).
+   - **Callback URLs** (up to 10 — add both):
+     - `http://localhost:5173/api/auth/callback` (development, via the Vite proxy)
+     - `http://127.0.0.1:7433/api/auth/callback` (production)
+   - Under **Permissions → Account permissions**, set **Email addresses** to _Read-only_ (used to resolve a verified
+     email; the profile itself needs no permission).
+   - Optionally enable **Request user authorization (OAuth) during installation**.
+   - GitHub Apps use fine-grained permissions, so no OAuth `scope` is requested.
+2. Put the App's **client ID** and **client secret** (not the App ID or private key) in the gitignored secrets file for
+   each environment:
+
+   ```dotenv
+   # .env.development.local  (dev GitHub App)
+   GITHUB_APP_CLIENT_ID="..."
+   GITHUB_APP_CLIENT_SECRET="..."
+
+   # .env.production.local   (prod GitHub App)
+   GITHUB_APP_CLIENT_ID="..."
+   GITHUB_APP_CLIENT_SECRET="..."
+   ```
+
+   `RELAY_PUBLIC_URL` already comes from `.env.development` / `.env.production`; `AUTH_SESSION_TTL_DAYS` defaults to 30
+   and can be overridden in a `.local` file.
+
+3. Start the matching mode (`deno task serve:dev` + `deno task web:dev`, or `deno task serve:prod` after
+   `deno task web:build`) and sign in with two accounts to verify isolation.
+
+The CLI authenticates with the bearer session token a loopback browser login hands over in `~/.relay/session.json`, so
+the terminal and the browser act as the same user without extra configuration.
+
+### Hardening
+
+These are user-specific, so put them in the gitignored `.env.<mode>.local` file. When the server binds a non-loopback
+`RELAY_HOST`, **it refuses to start unless both are set**; on loopback they are optional.
+
+- `AUTH_ALLOWED_GITHUB` — comma-separated GitHub logins or numeric ids allowed to sign in (empty = any GitHub account).
+- `RELAY_WORKSPACE_ROOTS` — comma-separated absolute directories a session workspace may use (empty = any directory).
+
+See [SECURITY.md](SECURITY.md) for the full threat model and checklist.
 
 ## Architecture
 
@@ -93,9 +175,13 @@ deno task agent
 │   ├── relay/              # Core agent library (@vvtxn/relay)
 │   │   ├── api/            # LLM provider types and CompletionsProvider
 │   │   └── core/           # Agent loop, runner, tools, sessions, context, display
-│   └── cli/                # CLI + TUI frontend (@vvtxn/cli)
-│       ├── agent/          # App entry point, config, components, hooks
-│       └── tui/            # Terminal UI framework (JSX runtime, Yoga layout)
+│   ├── client/             # Wire protocol + RelayClient (@vvtxn/client)
+│   ├── server/             # HTTP + SSE server hosting the runtime (@vvtxn/server)
+│   ├── cli/                # TUI client + serve subcommand (@vvtxn/cli)
+│   │   ├── agent/          # App entry point, config, components, hooks
+│   │   └── tui/            # Terminal UI framework (JSX runtime, Yoga layout)
+│   └── web/                # Solid + Vite SPA client (@vvtxn/web)
+│       └── src/            # Effect API layer, TanStack Query/Router, components
 ├── scripts/                # Build and version bump scripts
 ├── dist/                   # Compiled binary output
 └── deno.json               # Workspace configuration
@@ -106,8 +192,36 @@ deno task agent
 ```
 packages/relay  (leaf — no internal deps)
        ↑
-packages/cli  (depends on packages/relay + npm:@preact/signals-core + npm:yoga-layout)
+packages/client  (protocol + transport + shared session-state reducer)
+       ↑
+packages/server  (HTTP + SSE runtime host)
+       ↑
+packages/cli  (TUI client + serve subcommand)   packages/web  (Solid SPA client)
 ```
+
+The terminal and web clients talk to the server over the shared protocol in `packages/client`. The agent loop, tools,
+and session stores execute only in `packages/server`; `packages/relay` powers it and provides display utilities (message
+mapping, diffs) and the shared Graphite/Silver theme tokens to both clients.
+
+### `packages/client/` — Wire Protocol + Client
+
+The single source of truth for the server↔client contract, used by the CLI (Deno) and web (browser):
+
+- `protocol.ts` — REST payloads + SSE `ServerEvent` union (plain JSON types)
+- `sse.ts` — fetch-based SSE parser (no EventSource; works in Deno and browsers) + server-side frame encoder
+- `client.ts` — `RelayClient` (typed methods for every endpoint, `subscribe()` for event streams)
+- `session-state.ts` — pure `applyServerEvent` reducer shared by both clients so run rendering cannot drift
+
+### `packages/server/` — Agent Runtime Host
+
+A dependency-free `Deno.serve` application:
+
+- **RunManager** — one active run per session; bridges agent events onto per-session SSE streams; gates side-effecting
+  tools behind approval decisions that arrive over HTTP
+- **Sessions** — create/open/list against the shared Turso store; per-session workspace cwd (file tools are confined to
+  it)
+- **Auth** — GitHub App OAuth with per-request identity resolution, opaque hashed sessions, and an optional allowlist
+- **Static serving** — optional static file serving when `RELAY_STATIC_DIR` is set
 
 ### `packages/relay/api/` — LLM Provider Layer
 
@@ -137,17 +251,18 @@ The agent loop is an async generator (`run()`) that streams `AgentEvent`s:
 | `edit_file`     | Edit         | Edit files with diff output      |
 | `grep`          | Grep         | Search files with regex patterns |
 
-**Authentication** — Provider identities are resolved to internal user IDs before they reach application storage. Local
-development uses `DEV_AUTH_SUBJECT`; GitHub identity mapping is ready for a future OAuth flow.
+**Authentication** — Provider identities are resolved to internal user IDs before they reach application storage. GitHub
+profiles are mapped through `GitHubAuthProvider` on first sign-in; every request then resolves the session token to that
+user.
 
-**Session persistence** — Conversations are stored in the shared Turso database and can be shared by the terminal and
-web clients. The terminal requires `TURSO_DB_URL`, `TURSO_DB_TOKEN`, and `DEV_AUTH_SUBJECT` while local auth is active:
+**Session persistence** — Conversations are stored in the shared Turso database and can be used by the terminal client.
+The server requires `TURSO_DB_URL`, `TURSO_DB_TOKEN`, `GITHUB_APP_CLIENT_ID`, and `GITHUB_APP_CLIENT_SECRET`:
 
 - **Create** — New sessions with unique IDs and timestamps
 - **Continue** — Resume the most recent session for a workspace
 - **Open** — Load a specific session by opaque session ID
 - **List** — Browse all sessions with summaries (first user message preview)
-- **Cross-client** — A session started in the terminal can be continued on the web, and vice versa
+- **Cross-client** — A session started in the terminal can be continued on another terminal, and vice versa
 - **Token tracking** — Per-session token and cost counts persisted in session metadata
 
 Sessions store metadata plus ordered entries: user/assistant messages and tool results. The workspace path is part of
@@ -185,16 +300,34 @@ A custom terminal UI framework with:
 | `useScrollArea(opts)`     | Scroll state with keyboard control  |
 | `useCommandPalette(opts)` | Command palette state and filtering |
 
-### `packages/cli/agent/` — Application
+### `packages/cli/agent/` — Terminal Application
 
-Ties everything together into the interactive terminal agent:
+A thin TUI client of the server:
 
-- `system-prompt.md` — The system prompt for the agent
-- Status bar with git branch, token usage progress bar, and cost tracking
+- Status bar with model, git branch, token usage progress bar, and cost tracking
 - Scrollable chat history with markdown rendering
 - Streaming tool call display
 - Vim-mode text input
-- Command palette (`/`) for actions like "New Chat" and "Quit"
+- Command palette (`/`) for actions like "New Chat", "Threads", "Open in Browser", and "Quit"
+- Tool approval prompts (`y`/`a`/`n`) for side-effecting tools, with per-process "always allow" memory
+- Double Esc to cancel in-progress generation
+- `@` file mentions backed by the server's project file listing
+- Ensures (or reuses) the background server, so `relay` works without a separate `serve`
+
+### `packages/web/` — Browser Application
+
+A SolidJS single-page app served by the server (bundled `packages/web/dist`, or `RELAY_STATIC_DIR`):
+
+- **TanStack Query** owns REST server state (identity, workspaces, sessions, files) and mutations
+- **TanStack Router** puts the active session in the URL (`/s/:sessionId`) for deep links and history
+- **Effect** owns the live run: `Api` + `SessionStream` services, a reconnect loop with exponential backoff, and typed
+  errors; events fold into Solid state via the shared `session-state.ts` reducer
+- Chat with live drafts and tool cards (rendered diffs), `@`-mention picker, approval dialog, token/cost status bar, and
+  cancel
+- **Workspaces** — the sidebar lists the project directories the server knows about (the ones you launched `relay` in);
+  selecting one filters its sessions and targets new chats. New projects are added from the CLI or via "Add workspace".
+- Shares the Graphite/Silver theme tokens with the terminal client (applied as CSS variables)
+- Auth uses GitHub App OAuth: credentialed fetches, 401 handling, and a login redirect
 
 ## Development
 
@@ -202,8 +335,19 @@ Ties everything together into the interactive terminal agent:
 deno task fmt          # Format code
 deno task fmt:check    # Check formatting
 deno task lint         # Lint
+deno task check        # Strict type-check every entrypoint
 deno task test         # Run tests
-deno task build        # Build binary (dist/relay)
+deno task relay        # Start/reuse the server + terminal UI
+deno task relay web    # Open the web client (server starts in the background)
+deno task relay stop   # Stop the background server
+deno task relay status # Show the background server
+deno task relay fonts status  # Check whether the shared terminal font is installed
+deno task serve:dev    # Run a foreground server with the development env
+deno task serve:prod   # Run a foreground server with the production env
+deno task web:dev      # Run the web client with Vite (proxies /api to the server)
+deno task web:build    # Build the web app to packages/web/dist
+deno task build        # Build binary (dist/relay; embeds web, release-safe, no env)
+deno task build:local  # Build binary embedding the dev env (may include secrets)
 deno task version      # Show current version
 deno task version:bump <patch|minor|major>  # Bump version
 ```
@@ -235,9 +379,9 @@ Tag-based releases via GitHub Actions (`.github/workflows/release.yml`):
 3. `git tag v<version> && git push --tags`
 4. CI builds the Linux binary without embedding environment files and creates the GitHub Release
 
-The released binary reads `LLM_API_KEY`, `TURSO_DB_URL`, `TURSO_DB_TOKEN`, and `DEV_AUTH_SUBJECT` from its runtime
-environment. Local `deno task build` builds may load `.env` automatically, but release builds should not include secrets
-in the executable.
+The released binary reads `LLM_API_KEY` (or falls back to `~/.relay/auth.json`), `TURSO_DB_URL`, `TURSO_DB_TOKEN`,
+`GITHUB_APP_CLIENT_ID`, and `GITHUB_APP_CLIENT_SECRET` from its runtime environment. Local `deno task build` builds may
+load `.env` automatically, but release builds should not include secrets in the executable.
 
 ## License
 

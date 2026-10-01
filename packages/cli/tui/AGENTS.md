@@ -196,7 +196,8 @@ After concluding that a task is complete, always run these commands from the rep
 
 1. `deno task fmt` — auto-format all code
 2. `deno task lint` — check for lint errors
-3. `deno task test` — run the test suite
+3. `deno task check` — strict type-check of every entrypoint
+4. `deno task test` — run the test suite
 
 If any command fails, fix the issues and re-run until all pass cleanly.
 

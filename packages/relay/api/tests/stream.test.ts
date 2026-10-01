@@ -120,5 +120,5 @@ Deno.test("parseSSEStream - handles chunk with usage data in final message", asy
 	assertEquals(chunks.length, 2);
 	assertEquals(chunks[0], validChunk);
 	assertEquals(chunks[1], chunkWithUsage);
-	assertEquals(chunks[1].usage, { prompt_tokens: 10, completion_tokens: 20, total_tokens: 30 });
+	assertEquals(chunks[1]!.usage, { prompt_tokens: 10, completion_tokens: 20, total_tokens: 30 });
 });

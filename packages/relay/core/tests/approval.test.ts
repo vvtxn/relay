@@ -19,7 +19,7 @@ function makeTool(name: string, readonly = false): { tool: Tool; calls: unknown[
 
 Deno.test("withApproval executes the tool when approved", async () => {
 	const { tool, calls } = makeTool("write_file");
-	const [wrapped] = withApproval([tool], () => Promise.resolve(true));
+	const wrapped = withApproval([tool], () => Promise.resolve(true))[0]!;
 
 	const result = await wrapped.execute({ path: "a.txt" });
 
@@ -30,7 +30,7 @@ Deno.test("withApproval executes the tool when approved", async () => {
 
 Deno.test("withApproval returns an error result without executing when denied", async () => {
 	const { tool, calls } = makeTool("bash");
-	const [wrapped] = withApproval([tool], () => Promise.resolve(false));
+	const wrapped = withApproval([tool], () => Promise.resolve(false))[0]!;
 
 	const result = await wrapped.execute({ command: "rm -rf /" });
 
@@ -43,11 +43,11 @@ Deno.test("withApproval passes the tool and input to the handler", async () => {
 	const { tool } = makeTool("bash");
 	let seenName = "";
 	let seenInput: unknown;
-	const [wrapped] = withApproval([tool], (t, input) => {
+	const wrapped = withApproval([tool], (t, input) => {
 		seenName = t.definition.function.name;
 		seenInput = input;
 		return Promise.resolve(true);
-	});
+	})[0]!;
 
 	await wrapped.execute({ command: "ls" });
 
@@ -58,10 +58,10 @@ Deno.test("withApproval passes the tool and input to the handler", async () => {
 Deno.test("withApproval skips readonly tools by default", async () => {
 	const { tool } = makeTool("read_file", true);
 	let handlerCalls = 0;
-	const [wrapped] = withApproval([tool], () => {
+	const wrapped = withApproval([tool], () => {
 		handlerCalls++;
 		return Promise.resolve(false);
-	});
+	})[0]!;
 
 	const result = await wrapped.execute({ path: "a.txt" });
 
@@ -71,7 +71,7 @@ Deno.test("withApproval skips readonly tools by default", async () => {
 
 Deno.test("withApproval gates readonly tools when skipReadonly is false", async () => {
 	const { tool, calls } = makeTool("read_file", true);
-	const [wrapped] = withApproval([tool], () => Promise.resolve(false), { skipReadonly: false });
+	const wrapped = withApproval([tool], () => Promise.resolve(false), { skipReadonly: false })[0]!;
 
 	const result = await wrapped.execute({ path: "a.txt" });
 
@@ -81,7 +81,7 @@ Deno.test("withApproval gates readonly tools when skipReadonly is false", async 
 
 Deno.test("withApproval preserves tool definitions and readonly flags", () => {
 	const { tool } = makeTool("grep", true);
-	const [wrapped] = withApproval([tool], () => Promise.resolve(true));
+	const wrapped = withApproval([tool], () => Promise.resolve(true))[0]!;
 
 	assertEquals(wrapped.definition, tool.definition);
 	assertEquals(wrapped.readonly, true);

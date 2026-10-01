@@ -42,6 +42,7 @@ function groupIntoTurns(messages: Message[]): Turn[] {
 
 	while (i < messages.length) {
 		const msg = messages[i];
+		if (!msg) break;
 
 		if (msg.role === "system") {
 			turns.push({ messages: [msg], tokens: estimateMessageTokens(msg), droppable: false });
@@ -55,9 +56,11 @@ function groupIntoTurns(messages: Message[]): Turn[] {
 
 			if (msg.tool_calls?.length) {
 				let j = i + 1;
-				while (j < messages.length && messages[j].role === "tool") {
-					group.push(messages[j]);
-					groupTokens += estimateMessageTokens(messages[j]);
+				while (j < messages.length) {
+					const next = messages[j];
+					if (!next || next.role !== "tool") break;
+					group.push(next);
+					groupTokens += estimateMessageTokens(next);
 					j++;
 				}
 				i = j;
@@ -88,7 +91,7 @@ function summarizeToolResult(content: string, toolName: string): string {
 	}
 	switch (toolName) {
 		case "bash": {
-			const firstLine = content.split("\n")[0];
+			const firstLine = content.split("\n")[0] ?? "";
 			if (firstLine === "(no output)") return "no output";
 			if (/^exit code \d+/.test(firstLine)) return firstLine;
 			return firstLine.slice(0, 120);
@@ -100,7 +103,7 @@ function summarizeToolResult(content: string, toolName: string): string {
 		}
 		case "write_file":
 		case "edit_file": {
-			return content.split("\n")[0];
+			return content.split("\n")[0] ?? "";
 		}
 		case "grep": {
 			if (content === "No matches found.") {
@@ -176,14 +179,15 @@ export function trimContext(messages: Message[], options: TrimOptions = {}): Mes
 	// Phase 1: Summarize all droppable turns before the preserve boundary
 	const recentStart = Math.max(0, turns.length - preserveRecent);
 	for (let i = 0; i < recentStart; i++) {
-		if (!turns[i].droppable) continue;
-		const summary = turnToSummary(turns[i]);
+		const turn = turns[i];
+		if (!turn?.droppable) continue;
+		const summary = turnToSummary(turn);
 		const summaryTokens = estimateMessageTokens(summary);
-		totalTokens += summaryTokens - turns[i].tokens;
+		totalTokens += summaryTokens - turn.tokens;
 		turns[i] = {
 			messages: [summary],
 			tokens: summaryTokens,
-			droppable: turns[i].droppable,
+			droppable: turn.droppable,
 		};
 	}
 
@@ -194,8 +198,9 @@ export function trimContext(messages: Message[], options: TrimOptions = {}): Mes
 	// Phase 2: Drop oldest droppable turns
 	const dropIndices = new Set<number>();
 	for (let i = 0; i < recentStart && totalTokens > budget; i++) {
-		if (turns[i].droppable) {
-			totalTokens -= turns[i].tokens;
+		const turn = turns[i];
+		if (turn?.droppable) {
+			totalTokens -= turn.tokens;
 			dropIndices.add(i);
 		}
 	}

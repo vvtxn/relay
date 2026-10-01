@@ -20,12 +20,33 @@ export interface MarkdownLine {
 	language?: string;
 }
 
+interface InlinePattern {
+	regex: RegExp;
+	bold?: boolean;
+	italic?: boolean;
+	underline?: boolean;
+	strikethrough?: boolean;
+	code?: boolean;
+	link?: boolean;
+}
+
+interface InlineMatch {
+	start: number;
+	end: number;
+	text: string;
+	bold?: boolean;
+	italic?: boolean;
+	underline?: boolean;
+	strikethrough?: boolean;
+	code?: boolean;
+	url?: string;
+}
+
 /** Parse inline markdown formatting (bold, italic, code, strikethrough) */
 function parseInlineFormatting(text: string): MarkdownSegment[] {
 	const segments: MarkdownSegment[] = [];
 
-	// Regex patterns for inline formatting
-	const patterns = [
+	const patterns: InlinePattern[] = [
 		{ regex: /\*\*\*(.+?)\*\*\*/g, bold: true, italic: true },
 		{ regex: /\*\*(.+?)\*\*/g, bold: true },
 		{ regex: /\*(.+?)\*/g, italic: true },
@@ -36,69 +57,48 @@ function parseInlineFormatting(text: string): MarkdownSegment[] {
 		{ regex: /\[([^\]]+)\]\(([^)]+)\)/g, underline: true, link: true },
 	];
 
-	// Find all matches and their positions
-	interface Match {
-		start: number;
-		end: number;
-		text: string;
-		bold?: boolean;
-		italic?: boolean;
-		underline?: boolean;
-		strikethrough?: boolean;
-		code?: boolean;
-		url?: string;
-	}
-
-	const matches: Match[] = [];
+	const matches: InlineMatch[] = [];
 
 	for (const pattern of patterns) {
-		let match;
 		const regex = new RegExp(pattern.regex.source, "g");
+		let match: RegExpExecArray | null;
 		while ((match = regex.exec(text)) !== null) {
-			// Check if this range overlaps with existing matches
+			const start = match.index;
+			const end = start + match[0].length;
 			const overlaps = matches.some(
-				(m) =>
-					(match!.index >= m.start && match!.index < m.end) ||
-					(match!.index + match![0].length > m.start && match!.index + match![0].length <= m.end),
+				(m) => (start >= m.start && start < m.end) || (end > m.start && end <= m.end),
 			);
-			if (!overlaps) {
-				const isLink = "link" in pattern && pattern.link;
-				matches.push({
-					start: match.index,
-					end: match.index + match[0].length,
-					text: match[1],
-					bold: pattern.bold,
-					italic: pattern.italic,
-					underline: pattern.underline,
-					strikethrough: pattern.strikethrough,
-					code: pattern.code,
-					url: isLink ? match[2] : undefined,
-				});
-			}
+			if (overlaps) continue;
+
+			const entry: InlineMatch = { start, end, text: match[1] ?? "" };
+			if (pattern.bold) entry.bold = true;
+			if (pattern.italic) entry.italic = true;
+			if (pattern.underline) entry.underline = true;
+			if (pattern.strikethrough) entry.strikethrough = true;
+			if (pattern.code) entry.code = true;
+			const url = match[2];
+			if (pattern.link && url) entry.url = url;
+			matches.push(entry);
 		}
 	}
 
-	// Sort by position
 	matches.sort((a, b) => a.start - b.start);
 
-	// Build segments
 	let pos = 0;
 	for (const match of matches) {
-		if (match.start > pos) {
-			segments.push({ text: text.slice(pos, match.start) });
-		}
-		segments.push({
-			text: match.text,
-			bold: match.bold,
-			italic: match.italic,
-			underline: match.underline,
-			strikethrough: match.strikethrough,
-			code: match.code,
-			color: match.code ? theme.codeInline : match.url ? theme.link : undefined,
-		});
-		if (match.url) {
-			segments.push({ text: ` (${match.url})`, color: theme.linkUrl });
-		}
+		if (match.start > pos) segments.push({ text: text.slice(pos, match.start) });
+
+		const segment: MarkdownSegment = { text: match.text };
+		if (match.bold) segment.bold = true;
+		if (match.italic) segment.italic = true;
+		if (match.underline) segment.underline = true;
+		if (match.strikethrough) segment.strikethrough = true;
+		if (match.code) segment.code = true;
+		if (match.code) segment.color = theme.codeInline;
+		else if (match.url) segment.color = theme.link;
+		segments.push(segment);
+
+		if (match.url) segments.push({ text: ` (${match.url})`, color: theme.linkUrl });
 		pos = match.end;
 	}
 
@@ -153,7 +153,7 @@ export function parseMarkdown(content: string): MarkdownLine[] {
 			result.push({
 				type: "code",
 				segments: colorizeCodeLine(line, codeLanguage),
-				language: codeLanguage,
+				...(codeLanguage ? { language: codeLanguage } : {}),
 			});
 			continue;
 		}
@@ -180,7 +180,7 @@ export function parseMarkdown(content: string): MarkdownLine[] {
 		if (h3Match) {
 			result.push({
 				type: "heading3",
-				segments: [{ text: h3Match[1], bold: true, color: theme.heading3 }],
+				segments: [{ text: h3Match[1] ?? "", bold: true, color: theme.heading3 }],
 			});
 			continue;
 		}
@@ -189,7 +189,7 @@ export function parseMarkdown(content: string): MarkdownLine[] {
 		if (h2Match) {
 			result.push({
 				type: "heading2",
-				segments: [{ text: h2Match[1], bold: true, color: theme.heading2 }],
+				segments: [{ text: h2Match[1] ?? "", bold: true, color: theme.heading2 }],
 			});
 			continue;
 		}
@@ -198,7 +198,7 @@ export function parseMarkdown(content: string): MarkdownLine[] {
 		if (h1Match) {
 			result.push({
 				type: "heading1",
-				segments: [{ text: h1Match[1], bold: true, color: theme.heading1 }],
+				segments: [{ text: h1Match[1] ?? "", bold: true, color: theme.heading1 }],
 			});
 			continue;
 		}
@@ -210,7 +210,7 @@ export function parseMarkdown(content: string): MarkdownLine[] {
 				type: "blockquote",
 				segments: [
 					{ text: "│ ", color: theme.blockquote },
-					...parseInlineFormatting(quoteMatch[1]).map((s) => ({ ...s, italic: true })),
+					...parseInlineFormatting(quoteMatch[1] ?? "").map((s) => ({ ...s, italic: true })),
 				],
 			});
 			continue;
@@ -219,14 +219,14 @@ export function parseMarkdown(content: string): MarkdownLine[] {
 		// List items (with indentation support)
 		const indentedListMatch = line.match(/^(\s*)([-*+])\s+(.+)$/);
 		if (indentedListMatch) {
-			const indent = Math.floor(indentedListMatch[1].length / 2);
+			const indent = Math.floor((indentedListMatch[1] ?? "").length / 2);
 			const bullet = indent === 0 ? "• " : indent === 1 ? "◦ " : "▪ ";
 			const padding = "  ".repeat(indent);
 			result.push({
 				type: "listItem",
 				segments: [
 					{ text: `${padding}${bullet}`, color: theme.listBullet },
-					...parseInlineFormatting(indentedListMatch[3]),
+					...parseInlineFormatting(indentedListMatch[3] ?? ""),
 				],
 				indent,
 			});
@@ -236,13 +236,13 @@ export function parseMarkdown(content: string): MarkdownLine[] {
 		// Numbered list (with indentation support)
 		const numListMatch = line.match(/^(\s*)(\d+)\.\s+(.+)$/);
 		if (numListMatch) {
-			const indent = Math.floor(numListMatch[1].length / 2);
+			const indent = Math.floor((numListMatch[1] ?? "").length / 2);
 			const padding = "  ".repeat(indent);
 			result.push({
 				type: "listItem",
 				segments: [
-					{ text: `${padding}${numListMatch[2]}. `, color: theme.listBullet },
-					...parseInlineFormatting(numListMatch[3]),
+					{ text: `${padding}${numListMatch[2] ?? ""}. `, color: theme.listBullet },
+					...parseInlineFormatting(numListMatch[3] ?? ""),
 				],
 				indent,
 			});

@@ -64,14 +64,25 @@ export type { RunnerCallbacks } from "./core/runner.ts";
 
 // Display utilities
 export {
+	abbreviateHome,
 	createUIToolCall,
+	entriesToUIMessages,
+	expandHome,
 	getToolDisplayName,
 	getToolDisplayOutput,
 	parseDiffLines,
 	summarizeToolArgs,
 	TOOL_DISPLAY_NAMES,
 } from "./core/display.ts";
-export type { DiffLine, UIToolCall } from "./core/display.ts";
+export type { DiffLine, UIMessage, UIToolCall } from "./core/display.ts";
+
+// Theme (shared design tokens for terminal and web clients)
+export { theme, themeToCssVariables } from "./core/theme.ts";
+export type { Theme } from "./core/theme.ts";
+
+// Typography (shared font identity for terminal and web clients)
+export { font } from "./core/fonts.ts";
+export type { FontWeight, RelayFont, WebFontFace } from "./core/fonts.ts";
 
 // Context trimming
 export { estimateMessageTokens, estimateTokens, trimContext } from "./core/context.ts";
@@ -103,11 +114,30 @@ export type {
 	SessionStore,
 	SessionSummary,
 	ToolResultEntry,
+	WorkspaceSummary,
 } from "./core/sessions/index.ts";
 
 // Authentication
-export { authenticate, DatabaseUserStore, GitHubAuthProvider, LocalAuthProvider } from "./core/index.ts";
-export type { AuthenticatedUser, AuthIdentity, AuthProvider, GitHubProfile, UserStore } from "./core/index.ts";
+export {
+	authenticate,
+	clearStoredSession,
+	DatabaseAuthSessionStore,
+	DatabaseUserStore,
+	GitHubAuthProvider,
+	readStoredSession,
+	writeStoredSession,
+} from "./core/index.ts";
+export type {
+	AuthenticatedUser,
+	AuthIdentity,
+	AuthProvider,
+	AuthSession,
+	AuthSessionStore,
+	GitHubProfile,
+	StoredSession,
+	UserDirectory,
+	UserStore,
+} from "./core/index.ts";
 
 // Database (shared Turso client for the session and user stores)
 export { createDatabaseClient, databaseCredentialsFromEnv } from "./core/database.ts";
@@ -120,7 +150,14 @@ export { homeDir, relayDir } from "./core/paths.ts";
 export { SYSTEM_PROMPT } from "./core/system-prompt.ts";
 
 // Workspace helpers (filesystem operations rooted at an explicit directory)
-export { expandMentions, getGitBranch, isGitRepo, listProjectFiles, resolveWithinRoot } from "./core/workspace.ts";
+export {
+	expandMentions,
+	getGitBranch,
+	isGitRepo,
+	listProjectFiles,
+	resolveRealWithinRoot,
+	resolveWithinRoot,
+} from "./core/workspace.ts";
 
 // API types
 export type {

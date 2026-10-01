@@ -10,7 +10,7 @@ export interface ScrollAreaState {
 }
 
 export function useScrollArea(
-	options?: { focused?: boolean; scrollStep?: number; autoScroll?: boolean },
+	options?: { focused?: boolean | undefined; scrollStep?: number | undefined; autoScroll?: boolean | undefined },
 ): ScrollAreaState {
 	const scrollOffset = useSignal(0);
 	const viewportHeight = useSignal(0);

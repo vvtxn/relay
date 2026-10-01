@@ -9,10 +9,19 @@ core/
 ├── index.ts              # Internal barrel re-exports (see packages/relay/mod.ts for public API)
 ├── agent.ts              # Agent loop (async generator yielding AgentEvents)
 ├── runner.ts             # runAgentLoop() convenience wrapper with callbacks
-├── display.ts            # Display utilities: UIToolCall, parseDiffLines, tool arg/output formatting
+├── display.ts            # Display utilities: UIMessage, UIToolCall, parseDiffLines, arg/output formatting
+├── theme.ts              # Graphite/Silver design tokens shared by terminal + web clients
+├── fonts.ts              # Shared font identity: web faces, CSS stack, terminal install files
+├── assets/fonts/         # Bundled font files + license (see its README for the swap procedure)
 ├── paths.ts              # relayDir(), homeDir() helpers
 ├── context.ts            # Context trimming (token estimation, turn-based truncation)
 ├── database.ts           # Shared Turso client factory + env credentials (used by session and user stores)
+├── auth/                 # Identity + sessions
+│   ├── types.ts          # AuthIdentity, AuthenticatedUser, AuthProvider, UserStore, UserDirectory
+│   ├── github.ts         # GitHubAuthProvider (profile → identity)
+│   ├── db.ts             # DatabaseUserStore: provider identity → user, profile columns
+│   ├── sessions.ts       # DatabaseAuthSessionStore: opaque hashed session tokens
+│   └── service.ts        # authenticate(): provider + user store → AuthenticatedUser
 ├── system-prompt.ts      # Re-exports the default system prompt (raw .md import)
 ├── system-prompt.md      # Default system prompt for coding agents (shared across clients)
 ├── workspace.ts          # Workspace-rooted fs helpers: expandMentions, listProjectFiles, git metadata
@@ -99,13 +108,17 @@ type AgentEvent =
 
 ### Display Utilities (`display.ts`)
 
-Shared across all clients:
+Shared across all clients (TUI, web). Deliberately dependency-free so browser bundles can import it:
 
 - `UIToolCall` — Display-ready tool call with summarized args and formatted output
+- `UIMessage` — Client-agnostic chat message (`user` or `agent` with tool calls)
+- `entriesToUIMessages()` — Converts session entries into UIMessages, folding tool results into their calls
+- `stripAttachedContext()` — Removes `@mention` attached-context blocks from user content
 - `createUIToolCall()` — Creates a UIToolCall from tool name and JSON args
 - `summarizeToolArgs()` — Converts JSON args to human-readable summary (path, pattern, command, etc.)
 - `getToolDisplayName()` — Maps internal tool names to display labels (e.g. `read_file` → "read")
 - `getToolDisplayOutput()` — Formats tool output as concise summaries for display
+- `abbreviateHome()` / `expandHome()` — Replace a home-directory prefix with `~` for display and back
 - `parseDiffLines()` — Parses unified diff into structured `DiffLine[]` (without color assignment)
 
 ### Tool System
@@ -167,7 +180,8 @@ After concluding that a task is complete, always run these commands from the rep
 
 1. `deno task fmt` — auto-format all code
 2. `deno task lint` — check for lint errors
-3. `deno task test` — run the test suite
+3. `deno task check` — strict type-check of every entrypoint
+4. `deno task test` — run the test suite
 
 If any command fails, fix the issues and re-run until all pass cleanly.
 
