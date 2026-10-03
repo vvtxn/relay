@@ -68,6 +68,8 @@ export interface WorkspaceSummary {
 	cwd: string;
 	sessionCount: number;
 	lastActivity: string;
+	/** False when the directory no longer exists on the server (stale workspace). */
+	exists?: boolean;
 }
 
 export interface SessionScope {

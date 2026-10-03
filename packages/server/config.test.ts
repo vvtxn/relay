@@ -33,7 +33,8 @@ Deno.test("serverConfigFromEnv - respects overrides", () => {
 		RELAY_PORT: "9000",
 		RELAY_HOST: "0.0.0.0",
 		AUTH_ALLOWED_GITHUB: "octocat",
-		RELAY_WORKSPACE_ROOTS: "/srv/projects",
+		RELAY_WORKSPACE_ROOTS: import.meta.dirname,
+		RELAY_WORKSPACE: import.meta.dirname,
 		LLM_MODEL: "test/model",
 		LLM_MAX_TOKENS: "100000",
 	});
@@ -120,17 +121,44 @@ Deno.test("serverConfigFromEnv - accepts legacy GITHUB_CLIENT_* names", () => {
 Deno.test("serverConfigFromEnv - parses allowlists", () => {
 	const config = serverConfigFromEnv({
 		...GITHUB_ENV,
-		RELAY_WORKSPACE_ROOTS: "/srv/projects, /srv/other",
+		RELAY_WORKSPACE_ROOTS: `${import.meta.dirname}, ${Deno.cwd()}`,
 		AUTH_ALLOWED_GITHUB: "Octocat, 12345",
 	});
-	assertEquals(config.workspaceRoots, ["/srv/projects", "/srv/other"]);
+	assertEquals(config.workspaceRoots, [import.meta.dirname, Deno.cwd()]);
 	assertEquals(config.allowedGithub, ["octocat", "12345"]);
 });
 
-Deno.test("serverConfigFromEnv - allowlists default to empty (allow any) on loopback", () => {
+Deno.test("serverConfigFromEnv - workspace roots default to the server home on loopback", () => {
 	const config = serverConfigFromEnv({ ...GITHUB_ENV });
-	assertEquals(config.workspaceRoots, []);
 	assertEquals(config.allowedGithub, []);
+	// Home is the implicit root so loopback development needs no extra setup.
+	assertEquals(config.workspaceRoots.length <= 1, true);
+	if (config.workspaceRoots.length === 1) {
+		assertEquals(config.workspaceRoots[0]!.startsWith("/"), true);
+	}
+});
+
+Deno.test("serverConfigFromEnv - RELAY_WORKSPACE_ROOTS=* allows any directory", () => {
+	const config = serverConfigFromEnv({ ...GITHUB_ENV, RELAY_WORKSPACE_ROOTS: "*" });
+	assertEquals(config.workspaceRoots, []);
+});
+
+Deno.test("serverConfigFromEnv - rejects a default workspace outside the roots", () => {
+	assertThrows(
+		() =>
+			serverConfigFromEnv({
+				...GITHUB_ENV,
+				RELAY_WORKSPACE_ROOTS: import.meta.dirname,
+				RELAY_WORKSPACE: Deno.cwd(),
+			}),
+		Error,
+		"not usable",
+	);
+});
+
+Deno.test("serverConfigFromEnv - canonicalizes the default workspace", () => {
+	const config = serverConfigFromEnv({ ...GITHUB_ENV, RELAY_WORKSPACE_ROOTS: "*" });
+	assertEquals(config.defaultCwd, Deno.realPathSync(Deno.cwd()));
 });
 
 Deno.test("serverConfigFromEnv - non-loopback mode requires both allowlists", () => {
@@ -144,15 +172,28 @@ Deno.test("serverConfigFromEnv - non-loopback mode requires both allowlists", ()
 		Error,
 		"RELAY_WORKSPACE_ROOTS",
 	);
-	const config = serverConfigFromEnv({
+	assertThrows(
+		() =>
+			serverConfigFromEnv({
+				...GITHUB_ENV,
+				RELAY_HOST: "0.0.0.0",
+				AUTH_ALLOWED_GITHUB: "octocat",
+				RELAY_WORKSPACE_ROOTS: "*",
+			}),
+		Error,
+		"not allowed",
+	);
+	const env = {
 		...GITHUB_ENV,
 		RELAY_HOST: "0.0.0.0",
 		AUTH_ALLOWED_GITHUB: "octocat",
-		RELAY_WORKSPACE_ROOTS: "/srv/projects",
-	});
+		RELAY_WORKSPACE_ROOTS: import.meta.dirname,
+		RELAY_WORKSPACE: import.meta.dirname,
+	};
+	const config = serverConfigFromEnv(env);
 	assertEquals(config.hostname, "0.0.0.0");
 	assertEquals(config.allowedGithub, ["octocat"]);
-	assertEquals(config.workspaceRoots, ["/srv/projects"]);
+	assertEquals(config.workspaceRoots, [import.meta.dirname]);
 });
 
 Deno.test("serverConfigFromEnv - rejects malformed numeric env", () => {

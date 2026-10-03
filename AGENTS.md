@@ -47,6 +47,7 @@ in the server. `packages/relay` powers the server and provides display + theme u
 - **Run CLI**: `deno task relay` (starts/reuses the background server, then the TUI)
 - **Open web client**: `deno task relay web` (ensures the server, opens the browser)
 - **Stop/status the background server**: `deno task relay stop` / `deno task relay status`
+- **Manage workspaces**: `deno task relay workspace add|list|remove [path]` (no TUI; attaches to the running server)
 - **Install the shared terminal font**: `deno task relay fonts install` / `deno task relay fonts status`
 - **Run server (foreground)**: `deno task serve` (dev alias; loads mode env files)
 - **Run server (prod)**: `deno task serve:prod` (sets `RELAY_ENV=production`)

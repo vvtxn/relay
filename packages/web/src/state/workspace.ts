@@ -15,8 +15,9 @@ export function setHomeDir(next: string): void {
 
 /**
  * Expand a workspace input into an absolute path. Returns null when it cannot
- * be resolved (empty, or `~` without a known home directory), so callers can
- * leave the current workspace untouched instead of storing a literal `~` path.
+ * be resolved (empty, relative, or `~` without a known home directory), so
+ * callers can leave the current workspace untouched instead of storing an
+ * unusable path.
  */
 export function resolveWorkspaceInput(input: string): string | null {
 	const trimmed = input.trim();
@@ -25,7 +26,12 @@ export function resolveWorkspaceInput(input: string): string | null {
 		const home = homeDir();
 		return home ? expandHome(trimmed, home) : null;
 	}
-	return trimmed;
+	return isAbsolutePath(trimmed) ? trimmed : null;
+}
+
+/** True for absolute POSIX or Windows paths; the server rejects relative paths. */
+function isAbsolutePath(path: string): boolean {
+	return path.startsWith("/") || /^[A-Za-z]:[\\/]/.test(path);
 }
 
 /** Update the active workspace and persist it for the next visit. */

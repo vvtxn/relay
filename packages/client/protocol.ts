@@ -7,6 +7,7 @@
  */
 
 import type { Entry, SessionHeader, SessionSummary, WorkspaceSummary } from "@vvtxn/relay/core/sessions/index.ts";
+import type { WorkspaceRejection } from "@vvtxn/relay/core/workspace.ts";
 import type { ToolResult } from "@vvtxn/relay/core/tools/index.ts";
 import type { Usage } from "@vvtxn/relay/api/types.ts";
 
@@ -50,6 +51,27 @@ export interface SessionListResponse {
 /** Distinct workspaces (project directories) with sessions for the user. */
 export interface WorkspacesResponse {
 	workspaces: WorkspaceSummary[];
+}
+
+/** Result of `GET /api/workspaces/validate`. Always 200 — `ok` carries the outcome. */
+export interface WorkspaceValidateResponse {
+	ok: boolean;
+	/** Canonical absolute path (symlinks resolved) when `ok`. */
+	path?: string;
+	/** Machine-readable rejection reason when not `ok`. */
+	reason?: WorkspaceRejection;
+	/** Human-readable message, safe to render verbatim. */
+	message?: string;
+	/** Roots the server enforces; empty means "any directory". */
+	roots: string[];
+}
+
+export interface RegisterWorkspaceRequest {
+	cwd: string;
+}
+
+export interface RegisterWorkspaceResponse {
+	workspace: WorkspaceSummary;
 }
 
 export interface CreateSessionRequest {

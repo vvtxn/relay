@@ -9,6 +9,8 @@ import type {
 	HealthResponse,
 	MeResponse,
 	OpenSessionResponse,
+	RegisterWorkspaceRequest,
+	RegisterWorkspaceResponse,
 	SendMessageRequest,
 	SendMessageResponse,
 	ServerEvent,
@@ -16,6 +18,7 @@ import type {
 	StatusResponse,
 	WorkspaceResponse,
 	WorkspacesResponse,
+	WorkspaceValidateResponse,
 } from "./protocol.ts";
 import { readSSEStream } from "./sse.ts";
 
@@ -83,6 +86,21 @@ export class RelayClient {
 		return await this.get("/api/workspaces");
 	}
 
+	/** Validate a candidate workspace path without creating anything. */
+	async validateWorkspace(cwd: string): Promise<WorkspaceValidateResponse> {
+		return await this.get(`/api/workspaces/validate?cwd=${encodeURIComponent(cwd)}`);
+	}
+
+	/** Register a workspace so it appears in the picker before its first session. */
+	async registerWorkspace(cwd: string): Promise<RegisterWorkspaceResponse> {
+		return await this.post("/api/workspaces", { cwd } satisfies RegisterWorkspaceRequest);
+	}
+
+	/** Remove a workspace registration (its sessions are left intact). */
+	async unregisterWorkspace(cwd: string): Promise<StatusResponse> {
+		return await this.delete(`/api/workspaces?cwd=${encodeURIComponent(cwd)}`);
+	}
+
 	async createSession(cwd: string): Promise<CreateSessionResponse> {
 		return await this.post("/api/sessions", { cwd } satisfies CreateSessionRequest);
 	}
@@ -136,6 +154,12 @@ export class RelayClient {
 			headers: { "Content-Type": "application/json" },
 			body: JSON.stringify(body),
 		});
+		if (!response.ok) throw await this.toError(response);
+		return await response.json();
+	}
+
+	private async delete(path: string): Promise<any> {
+		const response = await this.doFetch(`${this.baseUrl}${path}`, { method: "DELETE" });
 		if (!response.ok) throw await this.toError(response);
 		return await response.json();
 	}

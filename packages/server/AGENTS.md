@@ -60,6 +60,11 @@ RunManager handle.
 The per-session workspace cwd comes from the client (CLI sends its terminal cwd). File tools are confined to that cwd;
 bash is not (documented in relay core AGENTS.md).
 
+Workspace creation and registration run through `validateWorkspacePath` (core): the path must be an absolute, existing
+directory whose canonical (symlink-resolved) path sits within `config.workspaceRoots`. `handleCreateSession` stores the
+canonical path and registers it so the workspace appears in the picker before its first append; `handleListWorkspaces`
+marks deleted directories with `exists: false`; `RunManager` re-validates the cwd before every run.
+
 ### Auth
 
 GitHub OAuth is the only auth transport:
@@ -105,6 +110,9 @@ no state behind.
 | `/api/config`                | GET    | Model + context window for status displays            |
 | `/api/workspace`             | GET    | Server default cwd                                    |
 | `/api/workspaces`            | GET    | Distinct workspaces (cwds) with session counts        |
+| `/api/workspaces`            | POST   | Validate + register a workspace                       |
+| `/api/workspaces`            | DELETE | Unregister a workspace (sessions are kept)            |
+| `/api/workspaces/validate`   | GET    | Validate a candidate cwd without registering it       |
 | `/api/sessions?cwd=`         | GET    | Session summaries for a workspace                     |
 | `/api/sessions`              | POST   | Create session                                        |
 | `/api/sessions/:id`          | GET    | Open (header, entries, tokens, cost, branch, running) |
@@ -125,7 +133,8 @@ Payload types live in `@vvtxn/client/protocol.ts` — never redeclare them here.
   accepted); the server refuses to start without them
 - `RELAY_PUBLIC_URL` (OAuth redirect base), `AUTH_SESSION_TTL_DAYS` (default 30)
 - Hardening: `AUTH_ALLOWED_GITHUB` (logins/ids allowed to sign in) and `RELAY_WORKSPACE_ROOTS` (allowed session cwd
-  roots); both required when binding a non-loopback `RELAY_HOST`
+  roots; defaults to the server user's home, `*` allows any directory); both required when binding a non-loopback
+  `RELAY_HOST`, and `*` is rejected there
 - `RELAY_PORT` (default 7433), `RELAY_HOST` (default 127.0.0.1), `RELAY_WORKSPACE`, `RELAY_STATIC_DIR`
 
 ## Running

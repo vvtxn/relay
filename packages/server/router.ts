@@ -16,7 +16,12 @@ import {
 import { handleEvents } from "./sse.ts";
 import { handleListFiles } from "./files.ts";
 import { handleApprove, handleCancel } from "./approvals.ts";
-import { handleWorkspace } from "./workspace.ts";
+import {
+	handleRegisterWorkspace,
+	handleUnregisterWorkspace,
+	handleValidateWorkspace,
+	handleWorkspace,
+} from "./workspace.ts";
 import { serveStatic } from "./static.ts";
 
 function health(): Response {
@@ -106,6 +111,9 @@ async function routeApi(
 	if (method === "GET" && path === "/api/config") return handleConfig(services);
 	if (method === "GET" && path === "/api/workspace") return handleWorkspace(services);
 	if (method === "GET" && path === "/api/workspaces") return await handleListWorkspaces(services);
+	if (method === "GET" && path === "/api/workspaces/validate") return await handleValidateWorkspace(services, url);
+	if (method === "POST" && path === "/api/workspaces") return await handleRegisterWorkspace(services, request);
+	if (method === "DELETE" && path === "/api/workspaces") return await handleUnregisterWorkspace(services, url);
 
 	// Sessions collection
 	if (method === "GET" && path === "/api/sessions") return await handleListSessions(services, url);

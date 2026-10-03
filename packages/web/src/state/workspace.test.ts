@@ -17,3 +17,10 @@ Deno.test("resolveWorkspaceInput - passes absolute paths through", () => {
 	assertEquals(resolveWorkspaceInput("/opt/project"), "/opt/project");
 	assertEquals(resolveWorkspaceInput("   "), null);
 });
+
+Deno.test("resolveWorkspaceInput - rejects relative paths", () => {
+	setHomeDir("/home/magni");
+	assertEquals(resolveWorkspaceInput("project"), null);
+	assertEquals(resolveWorkspaceInput("./project"), null);
+	assertEquals(resolveWorkspaceInput("C:\\project"), "C:\\project");
+});

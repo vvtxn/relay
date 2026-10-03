@@ -63,4 +63,7 @@ export {
 	listProjectFiles,
 	resolveRealWithinRoot,
 	resolveWithinRoot,
+	validateWorkspacePath,
+	validateWorkspacePathSync,
 } from "./workspace.ts";
+export type { WorkspaceRejection, WorkspaceValidation } from "./workspace.ts";

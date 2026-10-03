@@ -36,6 +36,10 @@ export async function startServer(): Promise<void> {
 
 	console.log(`Relay server listening on http://${config.hostname}:${config.port}`);
 	console.log(`Mode: ${config.relayEnv}`);
+	console.log(`Workspace: ${config.defaultCwd}`);
+	console.log(
+		`Workspace roots: ${config.workspaceRoots.length > 0 ? config.workspaceRoots.join(", ") : "(any directory)"}`,
+	);
 	console.log(
 		`OAuth callback: ${config.publicUrl}/api/auth/callback (must match a GitHub App callback URL exactly)`,
 	);

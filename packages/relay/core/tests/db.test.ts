@@ -10,7 +10,7 @@ class FakeClient {
 
 	execute(statement: string | Statement): Promise<{ rows: Record<string, unknown>[] }> {
 		this.executed.push(statement);
-		if (typeof statement !== "string" && statement.sql.includes("GROUP BY cwd")) {
+		if (typeof statement !== "string" && statement.sql.includes("UNION ALL")) {
 			return Promise.resolve({ rows: this.workspaces });
 		}
 		return Promise.resolve({ rows: [] });
@@ -39,7 +39,7 @@ Deno.test("DatabaseSessionStore creates schema lazily and appends an ordered ent
 	const id = await session.append({ type: "message", role: "user", content: "hello" });
 
 	assert(id.length > 0);
-	assertEquals(fake.executed.length, 4);
+	assertEquals(fake.executed.length, 5);
 	assertEquals(fake.batches.length, 1);
 	assertEquals(fake.batches[0]!.mode, "write");
 	assertEquals(fake.batches[0]!.statements.length, 2);

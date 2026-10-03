@@ -2,7 +2,7 @@ import type { LLMProvider, Message, Usage } from "@vvtxn/relay/api/types.ts";
 import type { ToolResult } from "@vvtxn/relay/core/tools/index.ts";
 import { createToolRegistry, createWorkspaceTools, withApproval } from "@vvtxn/relay/core/tools/index.ts";
 import { summarizeToolArgs } from "@vvtxn/relay/core/display.ts";
-import { expandMentions } from "@vvtxn/relay/core/workspace.ts";
+import { expandMentions, validateWorkspacePath } from "@vvtxn/relay/core/workspace.ts";
 import {
 	entriesToMessages,
 	type SessionHandle,
@@ -186,7 +186,14 @@ export class RunManager {
 		let finished: ServerEvent = { type: "run_finished", reason: "completed" };
 
 		try {
-			const cwd = handle.getHeader().cwd;
+			// Re-validate the workspace before every run: the directory may have
+			// been deleted or replaced by a symlink since the session was created.
+			const storedCwd = handle.getHeader().cwd;
+			const workspace = await validateWorkspacePath(storedCwd, this.config.workspaceRoots);
+			if (!workspace.ok) {
+				throw new Error(`Workspace "${storedCwd}" is not usable: ${workspace.message}`);
+			}
+			const cwd = workspace.path;
 
 			// Expand @mentions against the session workspace, persist the stripped version
 			const expanded = await expandMentions(content, cwd);

@@ -8,9 +8,10 @@ starts (or reuses) a background server before running the TUI.
 
 ```
 agent/
-├── index.ts              # Entry: relay | relay web | serve | stop | status | fonts
-├── server.ts             # Background-server supervisor (ensureServer/stop/status)
+├── index.ts              # Entry: relay | relay web | serve | stop | status | fonts | workspace
+├── server.ts             # Background-server supervisor (ensureServer/stop/status) + auth helpers
 ├── open.ts               # openBrowser(url) helper
+├── workspace.ts          # relay workspace add|list|remove (register without the TUI)
 ├── fonts.ts              # relay fonts install|status|path (shared font for the terminal)
 ├── app.tsx               # App component, signals, SSE event folding, command palettes
 ├── client.ts             # RelayClient singleton (server URL from config/env)
@@ -121,11 +122,13 @@ deno task relay           # start/reuse the server + TUI
 deno task relay web       # open the browser client
 deno task relay stop      # stop the background server
 deno task relay status    # show the background server
+deno task relay workspace add ~/Code/foo  # register a workspace (no TUI)
+deno task relay workspace list            # list registered workspaces
 deno task relay fonts status  # check whether the shared font is installed
 ```
 
 The compiled binary uses the same commands: `relay`, `relay web`, `relay serve`, `relay stop`, `relay status`,
-`relay fonts`.
+`relay workspace add|list|remove`, `relay fonts`.
 
 ## Task Completion Checklist
 

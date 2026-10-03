@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/solid-query";
 import { abbreviateHome } from "@vvtxn/relay/core/display.ts";
 import type { SessionSummary, WorkspaceSummary } from "@vvtxn/relay/core/sessions/index.ts";
 import { sessionsQuery, workspacesQuery } from "@/api/queries.ts";
-import { createSession } from "@/api/mutations.ts";
+import { createSession, registerWorkspace, validateWorkspace } from "@/api/mutations.ts";
 import { queryKeys } from "@/api/query-client.ts";
 import { appendError } from "@/state/session.ts";
 import { cwd, homeDir, resolveWorkspaceInput, setCwd } from "@/state/workspace.ts";
@@ -41,6 +41,8 @@ export function Sidebar(props: {
 	const workspaces = useQuery(() => workspacesQuery);
 	const [addOpen, setAddOpen] = createSignal(false);
 	const [draftCwd, setDraftCwd] = createSignal("");
+	const [addError, setAddError] = createSignal("");
+	const [adding, setAdding] = createSignal(false);
 
 	// Include the active workspace even when the server has no sessions for it.
 	const items = createMemo<WorkspaceSummary[]>(() => {
@@ -65,15 +67,30 @@ export function Sidebar(props: {
 		if (next !== cwd()) setCwd(next);
 	}
 
-	function applyCwd(event: SubmitEvent): void {
+	async function applyCwd(event: SubmitEvent): Promise<void> {
 		event.preventDefault();
 		const resolved = resolveWorkspaceInput(draftCwd());
-		if (resolved) {
-			setCwd(resolved);
+		if (!resolved) {
+			setAddError("Enter an absolute path (e.g. /home/me/project or ~/project).");
+			return;
+		}
+		setAddError("");
+		setAdding(true);
+		try {
+			const validation = await validateWorkspace(resolved);
+			if (!validation.ok || !validation.path) {
+				setAddError(validation.message ?? "That workspace cannot be used.");
+				return;
+			}
+			await registerWorkspace(validation.path);
+			await queryClient.invalidateQueries({ queryKey: queryKeys.workspaces });
+			setCwd(validation.path);
 			setDraftCwd("");
 			setAddOpen(false);
-		} else {
-			setDraftCwd("");
+		} catch (error) {
+			setAddError(error instanceof Error ? error.message : String(error));
+		} finally {
+			setAdding(false);
 		}
 	}
 
@@ -103,7 +120,9 @@ export function Sidebar(props: {
 						>
 							<span class="workspace-name">{workspaceName(workspace.cwd)}</span>
 							<span class="workspace-meta">
-								{workspace.sessionCount} session{workspace.sessionCount === 1 ? "" : "s"}
+								{workspace.exists === false ? <span class="workspace-missing">missing</span> : (
+									`${workspace.sessionCount} session${workspace.sessionCount === 1 ? "" : "s"}`
+								)}
 							</span>
 						</button>
 					)}
@@ -127,9 +146,14 @@ export function Sidebar(props: {
 							title="Server-side directory that scopes sessions and confines file tools"
 							onInput={(event) => setDraftCwd(event.currentTarget.value)}
 						/>
+						<Show when={addError()}>
+							<p class="workspace-error">{addError()}</p>
+						</Show>
 						<div class="workspace-add-actions">
 							<button type="button" class="btn ghost" onClick={() => setAddOpen(false)}>Cancel</button>
-							<button type="submit" class="btn">Add</button>
+							<button type="submit" class="btn" disabled={adding()}>
+								{adding() ? "Checking…" : "Add"}
+							</button>
 						</div>
 					</form>
 				</Show>

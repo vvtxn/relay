@@ -157,7 +157,10 @@ export {
 	listProjectFiles,
 	resolveRealWithinRoot,
 	resolveWithinRoot,
+	validateWorkspacePath,
+	validateWorkspacePathSync,
 } from "./core/workspace.ts";
+export type { WorkspaceRejection, WorkspaceValidation } from "./core/workspace.ts";
 
 // API types
 export type {

@@ -35,6 +35,12 @@ CREATE TABLE IF NOT EXISTS session_entries (
 );
 CREATE INDEX IF NOT EXISTS session_entries_session_seq_idx
 	ON session_entries (session_id, seq);
+CREATE TABLE IF NOT EXISTS workspaces (
+	owner_id TEXT NOT NULL,
+	cwd TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	PRIMARY KEY (owner_id, cwd)
+);
 `;
 
 type QueryArgs = (string | number | null)[];
@@ -162,21 +168,50 @@ export class DatabaseSessionStore implements SessionStore {
 		}));
 	}
 
-	/** Distinct workspaces (session cwds) for a user, most recently active first. */
+	/** Distinct workspaces (registered + session cwds) for a user, most recently active first. */
 	async listWorkspaces(ownerId: string): Promise<WorkspaceSummary[]> {
 		const result = await this.execute({
-			sql: `SELECT cwd, COUNT(*) AS session_count, MAX(updated_at) AS last_activity
-				FROM sessions
-				WHERE owner_id = ?
+			sql: `SELECT cwd, COALESCE(SUM(session_count), 0) AS session_count, MAX(last_activity) AS last_activity
+				FROM (
+					SELECT cwd, 0 AS session_count, created_at AS last_activity
+					FROM workspaces
+					WHERE owner_id = ?
+					UNION ALL
+					SELECT cwd, COUNT(*) AS session_count, MAX(updated_at) AS last_activity
+					FROM sessions
+					WHERE owner_id = ?
+					GROUP BY cwd
+				)
 				GROUP BY cwd
-				ORDER BY MAX(updated_at) DESC`,
-			args: [ownerId],
+				ORDER BY MAX(last_activity) DESC`,
+			args: [ownerId, ownerId],
 		});
 		return result.rows.map((row) => ({
 			cwd: stringValue(row, "cwd"),
 			sessionCount: Number(row.session_count ?? 0),
 			lastActivity: typeof row.last_activity === "string" ? row.last_activity : "",
 		}));
+	}
+
+	/**
+	 * Records a workspace so it appears in the picker before its first session.
+	 * Idempotent — re-registering an existing workspace is a no-op.
+	 */
+	async registerWorkspace(scope: SessionScope): Promise<void> {
+		await this.schemaReady;
+		await this.client.execute({
+			sql: "INSERT OR IGNORE INTO workspaces (owner_id, cwd, created_at) VALUES (?, ?, ?)",
+			args: [scope.ownerId, scope.cwd, new Date().toISOString()],
+		});
+	}
+
+	/** Removes a workspace registration. Sessions for that cwd are left intact. */
+	async unregisterWorkspace(scope: SessionScope): Promise<void> {
+		await this.schemaReady;
+		await this.client.execute({
+			sql: "DELETE FROM workspaces WHERE owner_id = ? AND cwd = ?",
+			args: [scope.ownerId, scope.cwd],
+		});
 	}
 
 	async append(

@@ -320,6 +320,17 @@ body {
 	white-space: nowrap;
 }
 
+.workspace-missing {
+	color: var(--relay-warning);
+}
+
+.workspace-error {
+	margin: 0;
+	color: var(--relay-error);
+	font-size: 0.75rem;
+	line-height: 1.4;
+}
+
 .workspace-add {
 	background: transparent;
 	border: 1px dashed var(--relay-border, #303030);

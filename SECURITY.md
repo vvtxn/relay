@@ -40,9 +40,14 @@ written when the server binds a non-loopback host.
 - Every session-scoped route verifies the session belongs to the caller; the `RunManager` caches handles keyed by
   `(sessionId, ownerId)`.
 - `AUTH_ALLOWED_GITHUB` (comma-separated GitHub logins or numeric ids) restricts who may sign in.
-- `RELAY_WORKSPACE_ROOTS` (comma-separated absolute paths) restricts where a session's workspace may be created; `bash`
-  is never confined by it.
-- **Exposure is gated.** Binding a non-loopback `RELAY_HOST` requires both `AUTH_ALLOWED_GITHUB` and
+- `RELAY_WORKSPACE_ROOTS` (comma-separated absolute paths) restricts where a session's workspace may be created. It
+  **defaults to the server user's home directory**; set it to `*` to allow any directory. `bash` is never confined by
+  it.
+- **Workspace paths are validated.** A workspace must be an absolute, existing directory, and its canonical
+  (symlink-resolved) path must sit within an allowed root. Relative paths, missing directories, files, and symlinks that
+  escape a root are rejected when a session is created or a workspace is registered. The stored path is the canonical
+  one, and it is re-validated before every run.
+- **Exposure is gated.** Binding a non-loopback `RELAY_HOST` requires both `AUTH_ALLOWED_GITHUB` and a non-wildcard
   `RELAY_WORKSPACE_ROOTS` — the server refuses to start otherwise, so an unrestricted agent cannot be exposed by
   accident. On loopback they are optional, so development needs no extra setup.
 - These are user/machine-specific, so they belong in the gitignored `.env.<mode>.local` files, not the committed
@@ -74,7 +79,7 @@ to that root with an `index.html` fallback for SPA routing. Directory traversal 
 ## Hardening checklist for exposure
 
 1. Set `AUTH_ALLOWED_GITHUB` (enforced when the host is non-loopback).
-2. Set `RELAY_WORKSPACE_ROOTS` (also enforced when the host is non-loopback).
+2. Set `RELAY_WORKSPACE_ROOTS` to a non-wildcard allowlist (also enforced when the host is non-loopback).
 3. Terminate TLS and set `RELAY_PUBLIC_URL` to the https origin.
 4. Run the server as an unprivileged user, ideally in a container.
 5. Never commit `.env.*.local` files; `deno task build` does not embed env.
