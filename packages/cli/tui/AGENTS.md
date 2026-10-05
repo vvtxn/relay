@@ -13,11 +13,13 @@ tui/
 │   ├── terminal.ts             # Terminal buffer, rendering, cursor control
 │   ├── input.ts                # Keyboard input handling
 │   └── primitives/             # Drawing primitives
-│       ├── color.ts            # Color parsing and ANSI conversion
-│       ├── draw-box.ts         # Box/border rendering with styles
+│       ├── color.ts            # Color parsing, ANSI conversion, bg inheritance
+│       ├── char-width.ts       # wcwidth (combining/wide) + ANSI-aware measurement
+│       ├── fill.ts             # Box background fill positions
 │       ├── format-text.ts      # Text styling (bold, italic, colors)
+│       ├── mentions.ts         # @mention detection and line formatting
 │       ├── parse-markdown.ts   # Markdown-to-segments parser
-│       └── wrap-text.ts        # Text wrapping utilities
+│       └── wrap-text.ts        # ANSI/width-aware text wrapping utilities
 ├── render/                     # JSX rendering layer
 │   ├── renderer.ts             # Custom renderer with Yoga layout and reconciliation
 │   ├── components.tsx          # Box, Text, TextInput, Spinner, ScrollArea, Markdown
@@ -46,7 +48,6 @@ tui/
 │   └── types/
 │       └── index.ts            # TypeScript type definitions, ElementRegistry, props
 ├── playground/                 # Example apps
-│   ├── agent.tsx               # Agent UI demo
 │   ├── approval.tsx            # Approval prompt demo
 │   ├── command-palette.tsx     # Command palette demo
 │   ├── layout.tsx              # Flexbox layout demo
@@ -57,11 +58,14 @@ tui/
 │   ├── text-styling.tsx        # Text styling demo
 │   └── welcome.tsx             # Welcome screen demo
 ├── tests/
-│   ├── input-parsing.test.ts   # Input parsing tests
+│   ├── char-width.test.ts      # wcwidth + ANSI measurement tests
+│   ├── input-parsing.test.ts   # Input parsing tests (keys + SGR mouse)
 │   ├── jsx-runtime.test.ts     # JSX runtime tests
+│   ├── terminal-render.test.ts # Bg coverage, wide chars, batching, resize tests
+│   ├── terminal-teardown.test.ts # Teardown/alt-screen ordering tests
 │   ├── text-input-cursor.test.ts # Text input cursor tests
 │   ├── text-utils.test.ts      # Text utility tests
-│   └── wrap-text.test.ts       # Text wrapping tests
+│   └── wrap-text.test.ts       # Text wrapping tests (ANSI/wide-aware)
 └── theme.ts                    # Centralized color theme (hex colors for all UI elements)
 ```
 
@@ -75,16 +79,30 @@ tui/
 4. **Layout Calculation**: Yoga calculates positions using flexbox algorithm
 5. **Element Rendering**: Element handlers convert instances to Position arrays
 6. **Terminal Output**: `Terminal.render()` writes positions to a double-buffered character grid
-7. **Differential Flush**: Only changed cells are written to stdout
+7. **Differential Flush**: Only changed cells are written to stdout, batched into contiguous runs (one cursor move per
+   run, styles emitted only on change)
+
+### Full-Bleed Backgrounds
+
+The root is always laid out at the full terminal size, and the `Terminal` carries a **default cell style**
+(`TerminalOptions.defaultBg`). Every cell — including those no component painted — is initialized with that style, so
+the app background always fills the entire window. For hex colors the terminal itself is also themed via **OSC 11**
+(restored on exit). Boxes with `bgColor` paint a full-rect fill — edge to edge across their computed bounds — and
+re-apply their background after any full SGR reset in child text, so nested surfaces survive styled markdown/mentions.
+`bgColor="default"` means transparent (inherits the parent). There are no borders: visual hierarchy comes from the
+background steps (`background` → `surface` → `surfaceElevated`) plus padding, not outlines.
 
 ### Core Classes
 
 #### `Terminal` (core/terminal.ts)
 
 - Double-buffered rendering for flicker-free updates
-- Manages character grid with styles per cell
+- Manages character grid with styles per cell (default background + double-width continuation cells)
 - Tracks cursor state to avoid redundant escape sequences
-- Methods: `render(positions)`, `dispose()`, `showCursor()`, `hideCursor()`
+- Exposes a reactive `size` signal so renderers re-layout + repaint on resize
+- Batches contiguous changed cells into runs when flushing (few cursor moves, styles only on change)
+- Enables SGR mouse reporting (wheel events) and OSC 11 background theming; both restored on dispose
+- Methods: `render(positions)`, `dispose()`, `drain()`, `showCursor()`, `hideCursor()`
 
 #### `Renderer` (render/renderer.ts)
 
@@ -113,7 +131,6 @@ Supports flexbox properties on `<Box>`:
 - `flexWrap` (wrap/wrap-reverse/nowrap)
 - `gap`, `padding`
 - `width`, `height`
-- `border` (single/double/round/bold/dash/block), `borderColor`, `borderLabel`, `borderLabelColor`
 - `bgColor`
 - `position` (relative/absolute), `top`, `left`, `right`, `bottom`
 
@@ -130,7 +147,7 @@ Text styling via `<Text>` props:
 
 All exported from `render/components.tsx`:
 
-- **`Box`** - Flexbox container with border, padding, and positioning support
+- **`Box`** - Flexbox container with background, padding, and positioning support
 - **`Text`** - Styled text with color, bold, italic, underline, strikethrough
 - **`TextInput`** - Text input field with cursor, placeholder, and vim mode support
 - **`Spinner`** - Animated spinner (default 80ms interval, 10 frames)
@@ -205,7 +222,7 @@ If any command fails, fix the issues and re-run until all pass cleanly.
 
 - **Element type strings**: camelCase (e.g., `"textInput"`, `"scrollArea"`)
 - **ElementType constants**: UPPER_SNAKE_CASE (e.g., `ElementType.TEXT_INPUT`, `ElementType.SCROLL_AREA`)
-- **File names**: kebab-case (e.g., `text-input.ts`, `draw-box.ts`)
+- **File names**: kebab-case (e.g., `text-input.ts`, `fill.ts`)
 - **Functions/variables**: camelCase (e.g., `BoxLayout`, `getElement`)
 - **Types/Interfaces**: PascalCase (e.g., `TextInputProps`, `ElementHandler`, `BoxInstance`)
 - **JSX intrinsic elements**: camelCase (e.g., `<textInput />`, `<scrollArea />`) - internal use only

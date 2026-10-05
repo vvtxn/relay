@@ -1,3 +1,4 @@
+import { visibleLength } from "@/tui/core/primitives/char-width.ts";
 import { formatText } from "@/tui/core/primitives/format-text.ts";
 import { wrapText } from "@/tui/core/primitives/wrap-text.ts";
 import type { Children, ElementHandler, Position, TextInstance } from "../types/index.ts";
@@ -30,7 +31,7 @@ export const TextLayout: LayoutHandler<TextInstance> = (instance) => {
 				return { width: text.length, height: 1 };
 			}
 			const lines = wrapText(text, w);
-			const maxLineWidth = Math.max(...lines.map((l) => l.length));
+			const maxLineWidth = Math.max(...lines.map((l) => visibleLength(l)));
 			return { width: maxLineWidth, height: lines.length };
 		});
 	}

@@ -3,7 +3,7 @@ import {
 	BOLD_OFF,
 	ITALIC,
 	ITALIC_OFF,
-	RESET,
+	RESET_FG,
 	STRIKETHROUGH,
 	STRIKETHROUGH_OFF,
 	UNDERLINE,
@@ -62,7 +62,7 @@ function formatSegment(segment: MarkdownSegment): string {
 	let text = segment.text;
 	if (segment.color) {
 		const ansi = toAnsi(segment.color);
-		if (ansi) text = `${ansi}${text}${RESET}`;
+		if (ansi) text = `${ansi}${text}${RESET_FG}`;
 	}
 	if (segment.bold) text = `${BOLD}${text}${BOLD_OFF}`;
 	if (segment.italic) text = `${ITALIC}${text}${ITALIC_OFF}`;

@@ -11,8 +11,19 @@ export interface KeyEvent {
 
 export type KeyHandler = (event: KeyEvent) => boolean | void;
 
-function isDigit(char: string | undefined): boolean {
-	return char !== undefined && char >= "0" && char <= "9";
+/** CSI final byte range (0x40–0x7e). */
+function isFinalByte(code: number): boolean {
+	return code >= 0x40 && code <= 0x7e;
+}
+
+/** Parse an SGR mouse report (`\x1b[<button;x;yM` / `m`) into a key event. */
+function parseMouse(seq: string): KeyEvent {
+	const final = seq[seq.length - 1];
+	const params = seq.slice(3, -1).split(";");
+	const button = Number.parseInt(params[0] ?? "", 10);
+	if (final === "M" && button === 64) return { key: "wheelup", ctrl: false, meta: false, shift: false };
+	if (final === "M" && button === 65) return { key: "wheeldown", ctrl: false, meta: false, shift: false };
+	return { key: "mouse", ctrl: false, meta: false, shift: false };
 }
 
 class InputManager {
@@ -66,18 +77,10 @@ class InputManager {
 		while (i < data.length) {
 			if (data[i] === "\x1b" && data[i + 1] === "[") {
 				let end = i + 2;
-				while (end < data.length && isDigit(data[end])) {
+				while (end < data.length && !isFinalByte(data.charCodeAt(end))) {
 					end++;
 				}
-				if (data[end] === ";") {
-					end++;
-					while (end < data.length && isDigit(data[end])) {
-						end++;
-					}
-				}
-				if (end < data.length) {
-					end++;
-				}
+				if (end < data.length) end++;
 				sequences.push(data.slice(i, end));
 				i = end;
 			} else {
@@ -89,6 +92,9 @@ class InputManager {
 	}
 
 	parseKey(seq: string): KeyEvent {
+		if (seq.startsWith("\x1b[<")) {
+			return parseMouse(seq);
+		}
 		if (seq.startsWith(CSI)) {
 			const body = seq.slice(2);
 			switch (body) {

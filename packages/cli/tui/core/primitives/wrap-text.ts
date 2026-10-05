@@ -1,84 +1,173 @@
+import { codePointWidth } from "./char-width.ts";
+
 export interface LineWithOffset {
 	line: string;
 	startIndex: number;
 }
 
+interface Unit {
+	/** Visible character. */
+	char: string;
+	/** Terminal cell width (0, 1, or 2). */
+	width: number;
+	/** Raw text for this unit, including any preceding SGR sequences. */
+	raw: string;
+	/** Index of the character in the original string (excluding escape sequences). */
+	rawStart: number;
+}
+
 /**
- * Wraps text to a specified width, splitting by words and preserving spaces.
- * Returns an array of lines with their starting character index in the original text.
+ * Split a string into visible character units, keeping SGR escape sequences
+ * attached to the following character so wrapping never splits a sequence.
+ * Zero-width (combining) code points are merged into the previous unit.
+ */
+function tokenize(text: string): Unit[] {
+	const units: Unit[] = [];
+	let pendingAnsi = "";
+	let i = 0;
+
+	while (i < text.length) {
+		const cp = text.codePointAt(i) ?? 0;
+
+		if (cp === 0x1b && text[i + 1] === "[") {
+			let j = i + 2;
+			while (j < text.length && text[j] !== "m") j++;
+			pendingAnsi += text.slice(i, j + 1);
+			i = j + 1;
+			continue;
+		}
+
+		const ch = String.fromCodePoint(cp);
+		const width = codePointWidth(cp);
+
+		if (width === 0) {
+			const prev = units[units.length - 1];
+			if (prev) {
+				prev.raw += `${pendingAnsi}${ch}`;
+			} else {
+				units.push({ char: ch, width: 0, raw: `${pendingAnsi}${ch}`, rawStart: i });
+			}
+		} else {
+			units.push({ char: ch, width, raw: `${pendingAnsi}${ch}`, rawStart: i });
+		}
+
+		pendingAnsi = "";
+		i += ch.length;
+	}
+
+	if (pendingAnsi && units.length > 0) {
+		units[units.length - 1]!.raw += pendingAnsi;
+	}
+
+	return units;
+}
+
+function unitsToString(units: Unit[]): string {
+	return units.map((u) => u.raw).join("");
+}
+
+function unitsWidth(units: Unit[]): number {
+	return units.reduce((sum, u) => sum + u.width, 0);
+}
+
+/**
+ * Wraps text to a specified visible width, preferring word boundaries and
+ * preserving multiple/leading spaces. ANSI escape sequences are treated as
+ * zero-width and never split. Returns each line with its starting character
+ * index in the original string.
  */
 export function wrapTextWithOffsets(text: string, width: number): LineWithOffset[] {
 	if (width <= 0) return [];
 
-	const str = String(text || "");
-	const result: LineWithOffset[] = [];
-	const words = str.split(" ");
-	let currentLine = "";
-	let lineStart = 0;
+	const units = tokenize(String(text || ""));
+	if (units.length === 0) return [{ line: "", startIndex: 0 }];
 
-	for (let wi = 0; wi < words.length; wi++) {
-		const word = words[wi] ?? "";
-		if (word.length > width) {
-			if (currentLine) {
-				result.push({ line: currentLine, startIndex: lineStart });
-				lineStart += currentLine.length + 1;
-				currentLine = "";
+	const lines: LineWithOffset[] = [];
+	let line: Unit[] = [];
+	let lineWidth = 0;
+	/** Index in `line` immediately after the most recent space. */
+	let breakIndex = -1;
+
+	const emit = (lineUnits: Unit[]) => {
+		if (lineUnits.length === 0) return;
+		lines.push({ line: unitsToString(lineUnits), startIndex: lineUnits[0]!.rawStart });
+	};
+
+	let i = 0;
+	while (i < units.length) {
+		const unit = units[i]!;
+
+		if (line.length > 0 && unit.width > 0 && lineWidth + unit.width > width) {
+			if (breakIndex > 0) {
+				let end = breakIndex;
+				while (end > 0 && line[end - 1]!.char === " ") end--;
+				emit(line.slice(0, end));
+				line = line.slice(breakIndex);
+				lineWidth = unitsWidth(line);
+				breakIndex = -1;
+				continue;
 			}
-			for (let i = 0; i < word.length; i += width) {
-				const chunk = word.slice(i, i + width);
-				result.push({ line: chunk, startIndex: lineStart + i });
-			}
-			lineStart += word.length + (wi < words.length - 1 ? 1 : 0);
+			emit(line);
+			line = [];
+			lineWidth = 0;
+			breakIndex = -1;
 			continue;
 		}
 
-		const testLine = currentLine ? `${currentLine} ${word}` : word;
-
-		if (testLine.length <= width) {
-			currentLine = testLine;
-		} else {
-			if (currentLine) {
-				result.push({ line: currentLine, startIndex: lineStart });
-				lineStart += currentLine.length + 1;
-			}
-			currentLine = word;
-		}
+		line.push(unit);
+		lineWidth += unit.width;
+		if (unit.char === " ") breakIndex = line.length;
+		i++;
 	}
 
-	if (currentLine) {
-		result.push({ line: currentLine, startIndex: lineStart });
-	}
+	let end = line.length;
+	while (end > 0 && line[end - 1]!.char === " ") end--;
+	emit(line.slice(0, end));
 
-	return result.length > 0 ? result : [{ line: "", startIndex: 0 }];
+	return lines.length > 0 ? lines : [{ line: "", startIndex: 0 }];
 }
 
 /**
- * Wraps text to a specified width, splitting by words and preserving spaces.
- * Returns an array of lines, each not exceeding the specified width.
+ * Wraps text to a specified visible width, preferring word boundaries and
+ * preserving multiple/leading spaces.
  */
 export function wrapText(text: string, width: number): string[] {
 	return wrapTextWithOffsets(text, width).map((l) => l.line);
 }
 
 /**
- * Splits text into lines of specified width without word wrapping, tracking offsets.
- * Simply breaks text every `width` characters.
+ * Splits text into lines of the specified visible width without word wrapping,
+ * keeping ANSI escape sequences intact. Tracks each line's starting index.
  */
 export function splitTextWithOffsets(text: string, width: number): LineWithOffset[] {
 	if (width <= 0) return [];
 
-	const str = String(text || "");
+	const units = tokenize(String(text || ""));
+	if (units.length === 0) return [{ line: "", startIndex: 0 }];
+
 	const result: LineWithOffset[] = [];
-	for (let i = 0; i < str.length; i += width) {
-		result.push({ line: str.slice(i, i + width), startIndex: i });
+	let line: Unit[] = [];
+	let lineWidth = 0;
+
+	for (const unit of units) {
+		if (line.length > 0 && unit.width > 0 && lineWidth + unit.width > width) {
+			result.push({ line: unitsToString(line), startIndex: line[0]!.rawStart });
+			line = [];
+			lineWidth = 0;
+		}
+		line.push(unit);
+		lineWidth += unit.width;
+	}
+
+	if (line.length > 0) {
+		result.push({ line: unitsToString(line), startIndex: line[0]!.rawStart });
 	}
 
 	return result.length > 0 ? result : [{ line: "", startIndex: 0 }];
 }
 
 /**
- * Splits text into lines of specified width without word wrapping.
- * Simply breaks text every `width` characters.
+ * Splits text into lines of the specified visible width without word wrapping.
  */
 export function splitText(text: string, width: number): string[] {
 	return splitTextWithOffsets(text, width).map((l) => l.line);

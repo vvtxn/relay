@@ -63,14 +63,6 @@ export interface BoxProps extends BaseProps {
 	alignItems?: "flex-start" | "center" | "flex-end" | "stretch" | "baseline";
 	/** Whether flex items wrap */
 	flexWrap?: "wrap" | "wrap-reverse" | "nowrap";
-	/** Border style of the element */
-	border?: "single" | "double" | "round" | "bold" | "dash" | "block";
-	/** Color of the border */
-	borderColor?: string;
-	/** Label embedded in top-left border (like vim mode indicator) */
-	borderLabel?: string;
-	/** Color of the border label */
-	borderLabelColor?: string;
 	/** Background color of the box */
 	bgColor?: string;
 	/** Position type for overlay behavior */

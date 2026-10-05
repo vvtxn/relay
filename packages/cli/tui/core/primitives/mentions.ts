@@ -1,4 +1,4 @@
-import { RESET } from "@/tui/core/ansi.ts";
+import { RESET_FG } from "@/tui/core/ansi.ts";
 
 export interface MentionRange {
 	start: number;
@@ -25,7 +25,7 @@ export function formatLineWithMentions(
 ): string {
 	const padded = line.slice(0, width).padEnd(width, " ");
 	if (mentions.length === 0) {
-		if (defaultAnsi) return `${defaultAnsi}${padded}${RESET}`;
+		if (defaultAnsi) return `${defaultAnsi}${padded}${RESET_FG}`;
 		return padded;
 	}
 
@@ -40,13 +40,13 @@ export function formatLineWithMentions(
 			if (isMention) {
 				result += `${mentionAnsi}`;
 			} else {
-				result += `${RESET}${defaultAnsi ?? ""}`;
+				result += `${RESET_FG}${defaultAnsi ?? ""}`;
 			}
 			inMention = isMention;
 		}
 		result += padded[i];
 	}
 
-	result += RESET;
+	result += RESET_FG;
 	return result;
 }

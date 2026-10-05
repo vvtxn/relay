@@ -5,6 +5,7 @@ import {
 	fgRgb,
 	ITALIC,
 	ITALIC_OFF,
+	RESET,
 	RESET_BG,
 	RESET_FG,
 	STRIKETHROUGH,
@@ -138,4 +139,13 @@ export function applyAnsi(
 	if (options.strikethrough) result = `${STRIKETHROUGH}${result}${STRIKETHROUGH_OFF}`;
 
 	return result;
+}
+
+/**
+ * Prefix `text` with an inherited background color, re-applying it after every
+ * full SGR reset so nested surfaces keep their background even when a child
+ * string resets attributes mid-line.
+ */
+export function applyInheritedBackground(text: string, bgAnsi: string): string {
+	return `${bgAnsi}${text.split(RESET).join(`${RESET}${bgAnsi}`)}`;
 }
