@@ -1,5 +1,13 @@
 import { assert, assertEquals } from "@std/assert";
-import { expandMentions, getGitBranch, isGitRepo, listProjectFiles, resolveWithinRoot } from "@/core/workspace.ts";
+import {
+	expandMentions,
+	getGitBranch,
+	isGitRepo,
+	listProjectFiles,
+	resolveWithinRoot,
+	validateWorkspacePath,
+	validateWorkspacePathSync,
+} from "@/core/workspace.ts";
 
 // ---------------------------------------------------------------------------
 // resolveWithinRoot
@@ -180,6 +188,116 @@ Deno.test("getGitBranch returns null outside a git repo", async () => {
 	const dir = await Deno.makeTempDir();
 	try {
 		assertEquals(await getGitBranch(dir), null);
+	} finally {
+		await Deno.remove(dir, { recursive: true });
+	}
+});
+
+Deno.test("listProjectFiles returns an empty list for a missing directory", async () => {
+	const dir = `${await Deno.makeTempDir()}/gone`;
+	assertEquals(await listProjectFiles(dir), []);
+});
+
+// ---------------------------------------------------------------------------
+// validateWorkspacePath
+// ---------------------------------------------------------------------------
+
+Deno.test("validateWorkspacePath accepts an existing directory and canonicalizes it", async () => {
+	const dir = await Deno.makeTempDir();
+	try {
+		const result = await validateWorkspacePath(`${dir}/`, []);
+		assertEquals(result, { ok: true, path: await Deno.realPath(dir) });
+	} finally {
+		await Deno.remove(dir, { recursive: true });
+	}
+});
+
+Deno.test("validateWorkspacePath rejects empty and non-string input", async () => {
+	assertEquals((await validateWorkspacePath("", [])).ok, false);
+	assertEquals((await validateWorkspacePath("   ", [])).ok, false);
+	assertEquals((await validateWorkspacePath(undefined, [])).ok, false);
+	assertEquals((await validateWorkspacePath(42, [])).ok, false);
+});
+
+Deno.test("validateWorkspacePath rejects relative paths before resolving them", async () => {
+	const result = await validateWorkspacePath("./relative", []);
+	assertEquals(result.ok, false);
+	if (!result.ok) assertEquals(result.reason, "not-absolute");
+});
+
+Deno.test("validateWorkspacePath rejects missing paths and files", async () => {
+	const dir = await Deno.makeTempDir();
+	try {
+		const missing = await validateWorkspacePath(`${dir}/nope`, []);
+		assertEquals(missing.ok, false);
+		if (!missing.ok) assertEquals(missing.reason, "missing");
+
+		const file = `${dir}/file.txt`;
+		await Deno.writeTextFile(file, "");
+		const notDir = await validateWorkspacePath(file, []);
+		assertEquals(notDir.ok, false);
+		if (!notDir.ok) assertEquals(notDir.reason, "not-a-directory");
+	} finally {
+		await Deno.remove(dir, { recursive: true });
+	}
+});
+
+Deno.test("validateWorkspacePath enforces roots against the canonical path", async () => {
+	const parent = await Deno.makeTempDir();
+	try {
+		const root = `${parent}/root`;
+		const inside = `${root}/project`;
+		const outside = `${parent}/outside`;
+		await Deno.mkdir(inside, { recursive: true });
+		await Deno.mkdir(outside, { recursive: true });
+
+		const allowed = await validateWorkspacePath(inside, [root]);
+		assertEquals(allowed.ok, true);
+
+		const denied = await validateWorkspacePath(outside, [root]);
+		assertEquals(denied.ok, false);
+		if (!denied.ok) assertEquals(denied.reason, "outside-roots");
+	} finally {
+		await Deno.remove(parent, { recursive: true });
+	}
+});
+
+Deno.test("validateWorkspacePath rejects a symlink that escapes the root", async () => {
+	const parent = await Deno.makeTempDir();
+	try {
+		const root = `${parent}/root`;
+		const outside = `${parent}/outside`;
+		await Deno.mkdir(root);
+		await Deno.mkdir(outside);
+		await Deno.symlink(outside, `${root}/link`);
+
+		const result = await validateWorkspacePath(`${root}/link`, [root]);
+		assertEquals(result.ok, false);
+		if (!result.ok) assertEquals(result.reason, "outside-roots");
+	} finally {
+		await Deno.remove(parent, { recursive: true });
+	}
+});
+
+Deno.test("validateWorkspacePath treats an empty root list as allow-anywhere", async () => {
+	const dir = await Deno.makeTempDir();
+	try {
+		assertEquals((await validateWorkspacePath(dir, [])).ok, true);
+	} finally {
+		await Deno.remove(dir, { recursive: true });
+	}
+});
+
+Deno.test("validateWorkspacePathSync matches the async contract", async () => {
+	const dir = await Deno.makeTempDir();
+	try {
+		const sync = validateWorkspacePathSync(dir, [dir]);
+		const asyncResult = await validateWorkspacePath(dir, [dir]);
+		assertEquals(sync, asyncResult);
+
+		const relative = validateWorkspacePathSync("relative", []);
+		assertEquals(relative.ok, false);
+		if (!relative.ok) assertEquals(relative.reason, "not-absolute");
 	} finally {
 		await Deno.remove(dir, { recursive: true });
 	}

@@ -2,7 +2,8 @@
 
 import { join } from "@std/path/join";
 import { resolve } from "@std/path/resolve";
-import { relayDir } from "@vvtxn/relay/core/paths.ts";
+import { homeDir, relayDir } from "@vvtxn/relay/core/paths.ts";
+import { validateWorkspacePathSync } from "@vvtxn/relay/core/workspace.ts";
 
 /** Deployment mode selected by `RELAY_ENV`. */
 export type RelayEnv = "development" | "production";
@@ -112,7 +113,14 @@ export function serverConfigFromEnv(
 	// accepted as fallbacks for setups configured before the App switch.
 	const githubClientId = env.GITHUB_APP_CLIENT_ID ?? env.GITHUB_CLIENT_ID ?? null;
 	const githubClientSecret = env.GITHUB_APP_CLIENT_SECRET ?? env.GITHUB_CLIENT_SECRET ?? null;
-	const workspaceRoots = parseList(env.RELAY_WORKSPACE_ROOTS).map((root) => resolve(root));
+	const rawRoots = parseList(env.RELAY_WORKSPACE_ROOTS);
+	// A workspace must sit within one of these canonical roots. `*` allows any
+	// directory (empty list); unset defaults to the server user's home so
+	// loopback development stays zero-config while `/etc`, `/proc`, and other
+	// users' homes are blocked.
+	const workspaceRoots = rawRoots.includes("*")
+		? []
+		: (rawRoots.length > 0 ? rawRoots : homeRoots()).map((root) => resolve(root));
 	const allowedGithub = parseList(env.AUTH_ALLOWED_GITHUB).map((entry) => entry.toLowerCase());
 
 	// GitHub OAuth is the only auth transport.
@@ -124,9 +132,25 @@ export function serverConfigFromEnv(
 		if (allowedGithub.length === 0) {
 			throw new Error("AUTH_ALLOWED_GITHUB is required when binding a non-loopback host");
 		}
-		if (workspaceRoots.length === 0) {
+		if (rawRoots.length === 0) {
 			throw new Error("RELAY_WORKSPACE_ROOTS is required when binding a non-loopback host");
 		}
+		if (rawRoots.includes("*")) {
+			throw new Error("RELAY_WORKSPACE_ROOTS=* is not allowed when binding a non-loopback host");
+		}
+	}
+
+	// Canonicalize the default workspace and require it to satisfy the same
+	// rules as a client-supplied path, so the server never advertises a
+	// workspace it would refuse to create.
+	const candidateCwd = env.RELAY_WORKSPACE ?? Deno.cwd();
+	const defaultWorkspace = validateWorkspacePathSync(candidateCwd, workspaceRoots);
+	if (!defaultWorkspace.ok) {
+		throw new Error(
+			`Default workspace "${candidateCwd}" is not usable: ${defaultWorkspace.message}. ` +
+				`Set RELAY_WORKSPACE, or allow more roots via RELAY_WORKSPACE_ROOTS ` +
+				`(use RELAY_WORKSPACE_ROOTS=* to allow any directory).`,
+		);
 	}
 
 	return {
@@ -146,9 +170,15 @@ export function serverConfigFromEnv(
 		githubClientSecret,
 		publicUrl: (env.RELAY_PUBLIC_URL ?? `http://${hostname}:${port}`).replace(/\/+$/, ""),
 		sessionTtlDays: positiveInt(env.AUTH_SESSION_TTL_DAYS, DEFAULT_SESSION_TTL_DAYS, "AUTH_SESSION_TTL_DAYS", 365),
-		defaultCwd: env.RELAY_WORKSPACE ?? Deno.cwd(),
+		defaultCwd: defaultWorkspace.path,
 		workspaceRoots,
 		allowedGithub,
 		staticDir: env.RELAY_STATIC_DIR ?? null,
 	};
+}
+
+/** The default workspace roots: the server user's home, or none when unknown. */
+function homeRoots(): string[] {
+	const home = homeDir();
+	return home ? [home] : [];
 }

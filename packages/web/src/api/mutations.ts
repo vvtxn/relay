@@ -3,6 +3,10 @@ import { runApi } from "./runtime.ts";
 
 export const createSession = (cwd: string) => runApi((api) => api.createSession(cwd));
 
+export const validateWorkspace = (cwd: string) => runApi((api) => api.validateWorkspace(cwd));
+
+export const registerWorkspace = (cwd: string) => runApi((api) => api.registerWorkspace(cwd));
+
 export const sendMessage = (sessionId: string, content: string) => runApi((api) => api.sendMessage(sessionId, content));
 
 export const approve = (sessionId: string, toolCallId: string, decision: ApprovalDecision) =>

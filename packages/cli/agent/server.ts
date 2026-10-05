@@ -8,6 +8,7 @@
  */
 
 import { dirname, fromFileUrl, join } from "@std/path";
+import { readStoredSession } from "@vvtxn/relay/core/auth/session-file.ts";
 import { relayDir } from "@vvtxn/relay/core/paths.ts";
 import { openBrowser } from "./open.ts";
 
@@ -15,6 +16,7 @@ const DEFAULT_PORT = 7433;
 const HEALTH_TIMEOUT_MS = 1_000;
 const START_TIMEOUT_MS = 10_000;
 const STOP_TIMEOUT_MS = 5_000;
+const SIGN_IN_TIMEOUT_MS = 10 * 60_000;
 
 export interface ServerState {
 	url: string;
@@ -224,8 +226,70 @@ export async function ensureServer(options: { cwd: string }): Promise<ServerStat
 		{ url, port, pid: 0, startedAt: "", cwd: options.cwd, webUrl: Deno.env.get("RELAY_PUBLIC_URL") ?? url };
 }
 
-/** Stop the background server recorded in the state file. */
-export async function stopServer(): Promise<void> {
+/** True when this CLI currently has valid credentials for the server. */
+export async function isAuthorized(serverUrl: string): Promise<boolean> {
+	return (await authStatus(serverUrl)).status === "authorized";
+}
+
+export type AuthStatus =
+	| { status: "authorized" }
+	/** The server answered but rejected the token (or none is stored). */
+	| { status: "unauthenticated" }
+	/** The server could not be reached or failed to resolve the session. */
+	| { status: "unreachable"; detail: string };
+
+/**
+ * Probe `/api/me` and distinguish a rejected token (401) from a server that is
+ * unreachable or failing (network error, 5xx). Treating the latter as "not
+ * signed in" would send the user through the whole browser login flow for what
+ * is really a database/server problem.
+ */
+export async function authStatus(serverUrl: string): Promise<AuthStatus> {
+	const token = readStoredSession()?.token;
+	try {
+		const response = await fetch(`${serverUrl}/api/me`, {
+			...(token ? { headers: { Authorization: `Bearer ${token}` } } : {}),
+			signal: AbortSignal.timeout(5_000),
+		});
+		if (response.ok) return { status: "authorized" };
+		if (response.status === 401) return { status: "unauthenticated" };
+		return { status: "unreachable", detail: `the server returned ${response.status}` };
+	} catch (error) {
+		return { status: "unreachable", detail: error instanceof Error ? error.message : String(error) };
+	}
+}
+
+/**
+ * The CLI has no session until a browser login. Open the web client and wait
+ * for the token handoff (`~/.relay/session.json`), so the terminal and the
+ * browser act as the same user.
+ */
+export async function ensureAuthenticated(state: ServerState): Promise<void> {
+	const status = await authStatus(state.url);
+	if (status.status === "authorized") return;
+	if (status.status === "unreachable") {
+		throw new Error(
+			`Cannot reach the Relay server at ${state.url} (${status.detail}). ` +
+				`Check ${logPath()}, then run \`relay stop\` and \`relay\` again.`,
+		);
+	}
+
+	const webUrl = state.webUrl || state.url;
+	console.log(`Not signed in. Opening ${webUrl} — sign in with GitHub to continue.`);
+	openBrowser(webUrl);
+
+	const deadline = Date.now() + SIGN_IN_TIMEOUT_MS;
+	while (Date.now() < deadline) {
+		await new Promise((resolve) => setTimeout(resolve, 1_000));
+		if (await isAuthorized(state.url)) {
+			console.log("Signed in.");
+			return;
+		}
+	}
+	throw new Error("Sign-in timed out. Open the web client, sign in, then run `relay` again.");
+}
+
+/** Stop the background server recorded in the state file. */ export async function stopServer(): Promise<void> {
 	const state = readState();
 	if (!state) {
 		console.log("No background Relay server.");

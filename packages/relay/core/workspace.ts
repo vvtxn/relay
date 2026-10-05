@@ -6,7 +6,7 @@
  * Every helper takes the root explicitly so the caller controls confinement.
  */
 
-import { basename, dirname, join, resolve, SEPARATOR } from "@std/path";
+import { basename, dirname, isAbsolute, join, resolve, SEPARATOR } from "@std/path";
 
 const IGNORE_DIRS = new Set([".git", "node_modules", "dist", "out", "build", "coverage", ".next", "target", ".cache"]);
 const MAX_FILES = 10_000;
@@ -22,6 +22,109 @@ export function resolveWithinRoot(root: string, rel: string): string | null {
 	const normalizedRoot = resolve(root);
 	const abs = resolve(normalizedRoot, rel);
 	return abs === normalizedRoot || abs.startsWith(normalizedRoot + SEPARATOR) ? abs : null;
+}
+
+/** Why a candidate workspace directory was rejected. */
+export type WorkspaceRejection = "empty" | "not-absolute" | "missing" | "not-a-directory" | "outside-roots";
+
+/** Result of validating a candidate workspace directory. */
+export type WorkspaceValidation =
+	| { ok: true; path: string }
+	| { ok: false; reason: WorkspaceRejection; message: string };
+
+function reject(reason: WorkspaceRejection, message: string): WorkspaceValidation {
+	return { ok: false, reason, message };
+}
+
+/** True when `abs` equals `root` or sits inside it. Both must be canonical. */
+function isWithin(root: string, abs: string): boolean {
+	return abs === root || abs.startsWith(root + SEPARATOR);
+}
+
+/**
+ * Checks that the input is an absolute path and returns its normalized form.
+ * The absoluteness test runs before `resolve()` so a relative path is rejected
+ * rather than silently anchored to the caller's working directory.
+ */
+function absoluteInput(raw: unknown): { ok: true; abs: string } | { ok: false; result: WorkspaceValidation } {
+	if (typeof raw !== "string" || raw.trim().length === 0) {
+		return { ok: false, result: reject("empty", "Workspace path is required") };
+	}
+	const trimmed = raw.trim();
+	if (!isAbsolute(trimmed)) {
+		return { ok: false, result: reject("not-absolute", `Workspace path must be absolute: "${trimmed}"`) };
+	}
+	return { ok: true, abs: resolve(trimmed) };
+}
+
+function rootsReject(real: string, realRoots: string[]): WorkspaceValidation | null {
+	if (realRoots.length > 0 && !realRoots.some((root) => isWithin(root, real))) {
+		return reject("outside-roots", `Workspace is outside the allowed roots: ${real}`);
+	}
+	return null;
+}
+
+/**
+ * Canonicalizes and validates a candidate workspace directory for synchronous
+ * callers (server startup). See {@link validateWorkspacePath} for the contract.
+ */
+export function validateWorkspacePathSync(raw: unknown, roots: string[]): WorkspaceValidation {
+	const input = absoluteInput(raw);
+	if (!input.ok) return input.result;
+
+	let stat: Deno.FileInfo | null;
+	try {
+		stat = Deno.statSync(input.abs);
+	} catch {
+		stat = null;
+	}
+	if (!stat) return reject("missing", `No such directory on the server: ${input.abs}`);
+	if (!stat.isDirectory) return reject("not-a-directory", `Not a directory on the server: ${input.abs}`);
+
+	const realOf = (path: string): string | null => {
+		try {
+			return Deno.realPathSync(path);
+		} catch {
+			return null;
+		}
+	};
+	const real = realOf(input.abs) ?? input.abs;
+	const realRoots = roots.map((root) => realOf(resolve(root)) ?? resolve(root));
+	return rootsReject(real, realRoots) ?? { ok: true, path: real };
+}
+
+/**
+ * Canonicalizes and validates a candidate workspace directory.
+ *
+ * The path must be an absolute, existing directory. It is resolved through
+ * symlinks so the returned canonical path is stable — callers should persist
+ * and use it as the workspace root, which collapses `/a/b`, `/a/b/`, and a
+ * symlinked alias into a single workspace. `roots` empty means "allow
+ * anywhere"; otherwise the canonical path must sit within a canonical root.
+ */
+export async function validateWorkspacePath(raw: unknown, roots: string[]): Promise<WorkspaceValidation> {
+	const input = absoluteInput(raw);
+	if (!input.ok) return input.result;
+
+	let stat: Deno.FileInfo | null;
+	try {
+		stat = await Deno.stat(input.abs);
+	} catch {
+		stat = null;
+	}
+	if (!stat) return reject("missing", `No such directory on the server: ${input.abs}`);
+	if (!stat.isDirectory) return reject("not-a-directory", `Not a directory on the server: ${input.abs}`);
+
+	const realOf = async (path: string): Promise<string | null> => {
+		try {
+			return await Deno.realPath(path);
+		} catch {
+			return null;
+		}
+	};
+	const real = await realOf(input.abs) ?? input.abs;
+	const realRoots = await Promise.all(roots.map(async (root) => (await realOf(resolve(root))) ?? resolve(root)));
+	return rootsReject(real, realRoots) ?? { ok: true, path: real };
 }
 
 export async function isGitRepo(root: string): Promise<boolean> {
@@ -76,7 +179,14 @@ async function listFilesWalk(root: string): Promise<string[]> {
 
 	async function walk(dir: string, prefix: string) {
 		if (files.length >= MAX_FILES) return;
-		for await (const entry of Deno.readDir(dir)) {
+		let entries: Deno.DirEntry[];
+		try {
+			entries = await Array.fromAsync(Deno.readDir(dir));
+		} catch {
+			// Directory vanished or is unreadable — skip it rather than failing.
+			return;
+		}
+		for (const entry of entries) {
 			if (files.length >= MAX_FILES) return;
 			if (entry.isDirectory) {
 				if (IGNORE_DIRS.has(entry.name)) continue;

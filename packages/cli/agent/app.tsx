@@ -26,7 +26,7 @@ import { useTextInput, type VimMode } from "@/tui/render/hooks/text-input.ts";
 import { type CommandPaletteItem, useCommandPalette } from "@/tui/render/hooks/command-palette.ts";
 import { inputManager } from "@/tui/core/input.ts";
 import { useProjectFiles } from "./hooks/project-files.ts";
-import { client, serverUrl } from "./client.ts";
+import { getClient, serverUrl } from "./client.ts";
 import { openBrowser } from "./open.ts";
 import { theme } from "@/tui/theme.ts";
 import { VERSION } from "../version.ts";
@@ -140,7 +140,7 @@ function App({ onQuit, user, initialSessionId, info }: AppProps) {
 		const id = sessionId.value;
 		if (!id) return;
 		try {
-			const response = await client.openSession(id);
+			const response = await getClient().openSession(id);
 			if (sessionId.value !== id) return;
 			sync.value.pending = {
 				...sync.value.pending,
@@ -184,7 +184,7 @@ function App({ onQuit, user, initialSessionId, info }: AppProps) {
 			}
 			if (sessionId.value !== askSessionId) return;
 			try {
-				await client.approve(askSessionId, info.toolCallId, decision);
+				await getClient().approve(askSessionId, info.toolCallId, decision);
 			} catch {
 				// The server already resolved (or dropped) this approval
 			}
@@ -195,7 +195,7 @@ function App({ onQuit, user, initialSessionId, info }: AppProps) {
 		const ask = currentAsk.value;
 		currentAsk.value = null;
 		if (!ask) return;
-		if (denyOnServer) void client.approve(ask.sessionId, ask.toolCallId, "deny").catch(() => {});
+		if (denyOnServer) void getClient().approve(ask.sessionId, ask.toolCallId, "deny").catch(() => {});
 		approval.cancel();
 	};
 
@@ -231,7 +231,7 @@ function App({ onQuit, user, initialSessionId, info }: AppProps) {
 		void (async () => {
 			while (!ac.signal.aborted) {
 				try {
-					for await (const event of client.subscribe(id, { signal: ac.signal })) {
+					for await (const event of getClient().subscribe(id, { signal: ac.signal })) {
 						if (sessionId.value !== id) break;
 						foldEvent(event);
 					}
@@ -263,7 +263,7 @@ function App({ onQuit, user, initialSessionId, info }: AppProps) {
 			if (!id) return false;
 			const now = Date.now();
 			if (now - lastEsc < 1500) {
-				void client.cancel(id).catch(() => {});
+				void getClient().cancel(id).catch(() => {});
 				lastEsc = 0;
 				escPrimed.value = false;
 				if (escTimer) {
@@ -304,7 +304,7 @@ function App({ onQuit, user, initialSessionId, info }: AppProps) {
 
 		void (async () => {
 			try {
-				await client.sendMessage(id, value);
+				await getClient().sendMessage(id, value);
 			} catch (error) {
 				sync.value.pending = { ...sync.value.pending, running: false, status: { kind: "idle" } };
 				syncStream(true);
@@ -326,7 +326,7 @@ function App({ onQuit, user, initialSessionId, info }: AppProps) {
 	const startNewChat = async () => {
 		dropPendingAsk(true);
 		try {
-			const response = await client.createSession(Deno.cwd());
+			const response = await getClient().createSession(Deno.cwd());
 			sessionId.value = response.id;
 			sync.value.pending = resetSessionStreamState();
 			syncStream(true);
@@ -386,7 +386,7 @@ function App({ onQuit, user, initialSessionId, info }: AppProps) {
 			if (item.id === "new-chat") {
 				void startNewChat();
 			} else if (item.id === "threads") {
-				void client.listSessions(Deno.cwd()).then((response) => {
+				void getClient().listSessions(Deno.cwd()).then((response) => {
 					threadItems.value = response.sessions.map((s) => {
 						const date = new Date(s.timestamp);
 						const label = date.toLocaleString();
@@ -455,10 +455,6 @@ function App({ onQuit, user, initialSessionId, info }: AppProps) {
 
 			<Box height={1} />
 			<Box
-				border="round"
-				borderColor={theme.border}
-				borderLabel={mode.value}
-				borderLabelColor={theme.brand}
 				bgColor={theme.surface}
 				padding={1}
 			>
@@ -471,31 +467,40 @@ function App({ onQuit, user, initialSessionId, info }: AppProps) {
 				/>
 			</Box>
 
-			{stream.value.running && (
-				<Box flexDirection="row" padding={1}>
-					<Box flexDirection="row" gap={1}>
-						<Spinner color={theme.accent} />
-						<Text color={theme.textMuted} bold italic>
-							{formatStatus(stream.value.status)}
+			<Box flexDirection="row" gap={1}>
+				<Text color={theme.brand} bold>
+					{mode.value}
+				</Text>
+				{stream.value.running
+					? (
+						<>
+							<Spinner color={theme.accent} />
+							<Text color={theme.textMuted} bold italic>
+								{formatStatus(stream.value.status)}
+							</Text>
+							{escPrimed.value
+								? (
+									<Text color={theme.warning} bold>
+										Press Esc again to cancel
+									</Text>
+								)
+								: (
+									<Text color={theme.textDim} italic>
+										Esc to cancel
+									</Text>
+								)}
+						</>
+					)
+					: (
+						<Text color={theme.textFaint} italic>
+							@ files • / commands • i/Esc mode
 						</Text>
-						{escPrimed.value
-							? (
-								<Text color={theme.warning} bold>
-									Press Esc again to cancel
-								</Text>
-							)
-							: (
-								<Text color={theme.textDim} italic>
-									Esc to cancel
-								</Text>
-							)}
-					</Box>
-				</Box>
-			)}
+					)}
+			</Box>
 
 			<CommandPalette palette={palette} />
-			<CommandPalette palette={filePalette} placeholder="Search files..." borderLabel="Files" />
-			<CommandPalette palette={threadsPalette} placeholder="Search threads..." borderLabel="Threads" width={80} />
+			<CommandPalette palette={filePalette} placeholder="Search files..." title="Files" />
+			<CommandPalette palette={threadsPalette} placeholder="Search threads..." title="Threads" width={80} />
 			<ApprovalPrompt approval={approval} />
 		</Box>
 	);
@@ -517,14 +522,14 @@ void bootstrap();
 async function bootstrap(): Promise<void> {
 	try {
 		try {
-			await client.health();
+			await getClient().health();
 		} catch {
 			throw new Error(
-				`Cannot reach the Relay server at ${serverUrl}. Start one with 'relay serve'.`,
+				`Cannot reach the Relay server at ${serverUrl()}. Start one with 'relay serve'.`,
 			);
 		}
-		const [user, info] = await Promise.all([client.me(), client.getConfig()]);
-		const response = await client.createSession(Deno.cwd());
+		const [user, info] = await Promise.all([getClient().me(), getClient().getConfig()]);
+		const response = await getClient().createSession(Deno.cwd());
 		boot.value = { kind: "ready", user, sessionId: response.id, info };
 	} catch (error) {
 		boot.value = { kind: "error", message: error instanceof Error ? error.message : String(error) };
@@ -546,4 +551,4 @@ function Root({ quit }: { quit: () => void }) {
 // Entry
 // ---------------------------------------------------------------------------
 
-run((quit) => <Root quit={quit} />, () => {});
+run((quit) => <Root quit={quit} />, () => {}, { defaultBg: theme.background });

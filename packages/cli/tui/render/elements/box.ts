@@ -1,7 +1,6 @@
 import Y from "yoga-layout";
-import { RESET_BG } from "@/tui/core/ansi.ts";
-import { toBgAnsi } from "@/tui/core/primitives/color.ts";
-import { drawBox } from "@/tui/core/primitives/draw-box.ts";
+import { applyInheritedBackground, toBgAnsi } from "@/tui/core/primitives/color.ts";
+import { fillPositions } from "@/tui/core/primitives/fill.ts";
 import type { BoxInstance, ElementHandler, Position } from "../types/index.ts";
 import type { LayoutHandler } from "./index.ts";
 
@@ -52,7 +51,6 @@ export const BoxLayout: LayoutHandler<BoxInstance> = (instance) => {
 	else yogaNode.setWidthAuto();
 	if (props.height !== undefined) yogaNode.setHeight(props.height);
 	else yogaNode.setHeightAuto();
-	yogaNode.setBorder(Y.EDGE_ALL, props.border ? 1 : undefined);
 	yogaNode.setFlexWrap(props.flexWrap ? FLEX_WRAP_MAP[props.flexWrap] : Y.WRAP_NO_WRAP);
 	yogaNode.setPositionType(props.position === "absolute" ? Y.POSITION_TYPE_ABSOLUTE : Y.POSITION_TYPE_RELATIVE);
 	if (props.top !== undefined) yogaNode.setPosition(Y.EDGE_TOP, props.top);
@@ -72,39 +70,15 @@ export const BoxElement: ElementHandler<BoxInstance> = (instance, context): Posi
 	const h = Math.round(instance.yogaNode.getComputedHeight());
 	const positions: Position[] = [];
 
-	const bgDefault = instance.props.bgColor === "default";
-	const bg = instance.props.bgColor && !bgDefault ? toBgAnsi(instance.props.bgColor) : null;
-	if (bg || bgDefault) {
-		const borderW = instance.props.border ? 1 : 0;
-		for (let row = borderW; row < h - borderW; row++) {
-			positions.push({
-				x: x + borderW,
-				y: y + row,
-				text: bg ? `${bg}${" ".repeat(w - borderW * 2)}${RESET_BG}` : " ".repeat(w - borderW * 2),
-			});
-		}
-	}
-
-	if (instance.props.border) {
-		positions.push(
-			...drawBox(
-				x,
-				y,
-				w,
-				h,
-				instance.props.border,
-				instance.props.borderColor,
-				instance.props.borderLabel,
-				instance.props.borderLabelColor,
-				instance.props.bgColor,
-			),
-		);
+	const bg = instance.props.bgColor && instance.props.bgColor !== "default" ? toBgAnsi(instance.props.bgColor) : null;
+	if (bg) {
+		positions.push(...fillPositions(x, y, w, h, bg));
 	}
 
 	const childPositions = instance.children.flatMap((child) => context.renderInstance(child, x, y));
 	if (bg) {
 		for (const pos of childPositions) {
-			pos.text = `${bg}${pos.text}`;
+			pos.text = applyInheritedBackground(pos.text, bg);
 		}
 	}
 	positions.push(...childPositions);

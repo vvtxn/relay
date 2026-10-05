@@ -1,6 +1,6 @@
 import Y from "yoga-layout";
-import { drawBox } from "@/tui/core/primitives/draw-box.ts";
-import { applyAnsi } from "@/tui/core/primitives/color.ts";
+import { applyAnsi, applyInheritedBackground, toBgAnsi } from "@/tui/core/primitives/color.ts";
+import { fillPositions } from "@/tui/core/primitives/fill.ts";
 import { theme } from "@/tui/theme.ts";
 import type { ElementHandler, Position, ScrollAreaInstance } from "../types/index.ts";
 import type { LayoutHandler } from "./index.ts";
@@ -47,7 +47,6 @@ export const ScrollAreaLayout: LayoutHandler<ScrollAreaInstance> = (instance) =>
 	else yogaNode.setWidthAuto();
 	if (props.height !== undefined) yogaNode.setHeight(props.height);
 	else yogaNode.setHeightAuto();
-	yogaNode.setBorder(Y.EDGE_ALL, props.border ? 1 : undefined);
 	yogaNode.setOverflow(Y.OVERFLOW_SCROLL);
 	if (props.scrollbar) {
 		yogaNode.setPadding(Y.EDGE_RIGHT, basePadding + 1);
@@ -60,26 +59,15 @@ export const ScrollAreaElement: ElementHandler<ScrollAreaInstance> = (instance, 
 	const w = Math.round(instance.yogaNode.getComputedWidth());
 	const h = Math.round(instance.yogaNode.getComputedHeight());
 
-	const borderPositions: Position[] = [];
-	if (instance.props.border) {
-		borderPositions.push(
-			...drawBox(
-				x,
-				y,
-				w,
-				h,
-				instance.props.border,
-				instance.props.borderColor,
-				instance.props.borderLabel,
-				instance.props.borderLabelColor,
-				instance.props.bgColor,
-			),
-		);
+	const bg = instance.props.bgColor && instance.props.bgColor !== "default" ? toBgAnsi(instance.props.bgColor) : null;
+
+	const backgroundPositions: Position[] = [];
+	if (bg) {
+		backgroundPositions.push(...fillPositions(x, y, w, h, bg));
 	}
 
-	const borderW = instance.props.border ? 1 : 0;
-	const clipTop = y + borderW;
-	const clipBottom = y + h - borderW - 1;
+	const clipTop = y;
+	const clipBottom = y + h - 1;
 
 	let contentHeight = 0;
 	for (const child of instance.children) {
@@ -115,7 +103,7 @@ export const ScrollAreaElement: ElementHandler<ScrollAreaInstance> = (instance, 
 
 	const scrollbarPositions: Position[] = [];
 	if (instance.props.scrollbar && contentHeight > viewportHeight) {
-		const barX = x + w - borderW - 1;
+		const barX = x + w - 1;
 		const trackHeight = viewportHeight;
 		const thumbHeight = Math.max(1, Math.floor(viewportHeight / contentHeight * trackHeight));
 		const thumbTop = maxScroll > 0
@@ -132,5 +120,10 @@ export const ScrollAreaElement: ElementHandler<ScrollAreaInstance> = (instance, 
 		}
 	}
 
-	return [...borderPositions, ...clipped, ...scrollbarPositions];
+	if (bg) {
+		for (const pos of clipped) pos.text = applyInheritedBackground(pos.text, bg);
+		for (const pos of scrollbarPositions) pos.text = applyInheritedBackground(pos.text, bg);
+	}
+
+	return [...backgroundPositions, ...clipped, ...scrollbarPositions];
 };

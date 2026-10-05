@@ -1,6 +1,6 @@
 import type { CommandPaletteItem } from "@/tui/render/hooks/command-palette.ts";
 import { useSignal } from "@/tui/render/hooks/signals.ts";
-import { client } from "../client.ts";
+import { getClient } from "../client.ts";
 
 /**
  * Project file listing for the @-mention picker, served by the Relay server
@@ -21,7 +21,7 @@ export function useProjectFiles(getSessionId: () => string | null) {
 
 		void (async () => {
 			try {
-				const response = await client.listFiles(id);
+				const response = await getClient().listFiles(id);
 				if (gen !== generation.value) return;
 				files.value = response.files.map((p) => ({ id: p, title: p }));
 				cachedSession.value = id;

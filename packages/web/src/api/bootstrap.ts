@@ -33,7 +33,17 @@ export const bootstrap: Effect.Effect<BootResult, RelayError, Api> = Effect.gen(
 	}
 
 	const config = yield* api.getConfig();
-	const cwd = readStoredCwd() ?? (yield* api.workspace()).cwd;
+	const fallbackCwd = (yield* api.workspace()).cwd;
+	// A persisted workspace may have been deleted server-side since the last
+	// visit; validate it and fall back to the server default when unusable.
+	let cwd = fallbackCwd;
+	const storedCwd = readStoredCwd();
+	if (storedCwd) {
+		const validation = yield* Effect.either(api.validateWorkspace(storedCwd));
+		if (Either.isRight(validation) && validation.right.ok && validation.right.path) {
+			cwd = validation.right.path;
+		}
+	}
 	const sessions = yield* api.listSessions(cwd);
 	const first = sessions.sessions[0];
 	const sessionId = first ? first.reference : (yield* api.createSession(cwd)).id;

@@ -164,9 +164,13 @@ These are user-specific, so put them in the gitignored `.env.<mode>.local` file.
 `RELAY_HOST`, **it refuses to start unless both are set**; on loopback they are optional.
 
 - `AUTH_ALLOWED_GITHUB` — comma-separated GitHub logins or numeric ids allowed to sign in (empty = any GitHub account).
-- `RELAY_WORKSPACE_ROOTS` — comma-separated absolute directories a session workspace may use (empty = any directory).
+- `RELAY_WORKSPACE_ROOTS` — comma-separated absolute directories a session workspace may use. **Defaults to the server
+  user's home directory**; set it to `*` to allow any directory (or list one or more roots). Cannot be `*` when binding
+  a non-loopback host.
 
-See [SECURITY.md](SECURITY.md) for the full threat model and checklist.
+A workspace path is validated when it is created or registered: it must be an absolute, existing directory, and its
+canonical (symlink-resolved) path must sit within an allowed root. See [SECURITY.md](SECURITY.md) for the full threat
+model and checklist.
 
 ## Architecture
 
@@ -324,8 +328,12 @@ A SolidJS single-page app served by the server (bundled `packages/web/dist`, or 
   errors; events fold into Solid state via the shared `session-state.ts` reducer
 - Chat with live drafts and tool cards (rendered diffs), `@`-mention picker, approval dialog, token/cost status bar, and
   cancel
-- **Workspaces** — the sidebar lists the project directories the server knows about (the ones you launched `relay` in);
-  selecting one filters its sessions and targets new chats. New projects are added from the CLI or via "Add workspace".
+- **Workspaces** — the sidebar lists the project directories the server knows about (registered ones plus the ones you
+  launched `relay` in); selecting one filters its sessions and targets new chats. "Add workspace" accepts an absolute
+  path, validates it against the server (with an inline error when the directory is missing or outside the allowed
+  roots), and registers it immediately. Workspaces whose directory has since been deleted are flagged as `missing`.
+  Projects can also be added from the terminal with `relay workspace add [path]`, which attaches to the running server
+  without opening the TUI.
 - Shares the Graphite/Silver theme tokens with the terminal client (applied as CSS variables)
 - Auth uses GitHub App OAuth: credentialed fetches, 401 handling, and a login redirect
 
@@ -341,6 +349,9 @@ deno task relay        # Start/reuse the server + terminal UI
 deno task relay web    # Open the web client (server starts in the background)
 deno task relay stop   # Stop the background server
 deno task relay status # Show the background server
+deno task relay workspace list          # List registered workspaces
+deno task relay workspace add <path>    # Register a project directory (default: cwd)
+deno task relay workspace remove <path> # Unregister a workspace (sessions are kept)
 deno task relay fonts status  # Check whether the shared terminal font is installed
 deno task serve:dev    # Run a foreground server with the development env
 deno task serve:prod   # Run a foreground server with the production env
@@ -350,21 +361,6 @@ deno task build        # Build binary (dist/relay; embeds web, release-safe, no 
 deno task build:local  # Build binary embedding the dev env (may include secrets)
 deno task version      # Show current version
 deno task version:bump <patch|minor|major>  # Bump version
-```
-
-### Playgrounds
-
-Interactive demos for individual TUI components:
-
-```bash
-deno task playground:command-palette  # Command palette
-deno task playground:layout           # Flexbox layout and borders
-deno task playground:markdown         # Markdown rendering
-deno task playground:scroll-area      # Scroll area
-deno task playground:spinner          # Spinner animations
-deno task playground:text-input       # Text input with vim mode
-deno task playground:text-styling     # Text styling
-deno task playground:welcome          # Welcome screen
 ```
 
 ## Releasing

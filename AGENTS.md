@@ -47,6 +47,7 @@ in the server. `packages/relay` powers the server and provides display + theme u
 - **Run CLI**: `deno task relay` (starts/reuses the background server, then the TUI)
 - **Open web client**: `deno task relay web` (ensures the server, opens the browser)
 - **Stop/status the background server**: `deno task relay stop` / `deno task relay status`
+- **Manage workspaces**: `deno task relay workspace add|list|remove [path]` (no TUI; attaches to the running server)
 - **Install the shared terminal font**: `deno task relay fonts install` / `deno task relay fonts status`
 - **Run server (foreground)**: `deno task serve` (dev alias; loads mode env files)
 - **Run server (prod)**: `deno task serve:prod` (sets `RELAY_ENV=production`)
@@ -101,18 +102,6 @@ Tag-based releases via GitHub Actions (`.github/workflows/release.yml`):
 2. Commit and push to `main`
 3. `git tag v<version> && git push --tags`
 4. CI builds Linux binary and creates GitHub Release
-
-### Development (Playgrounds)
-
-- `deno task playground:approval` - Tool approval prompt demo
-- `deno task playground:command-palette` - Command palette demo
-- `deno task playground:layout` - Box layout and borders demo
-- `deno task playground:markdown` - Markdown rendering demo
-- `deno task playground:scroll-area` - Scroll area demo
-- `deno task playground:spinner` - Spinner animations demo
-- `deno task playground:text-input` - Text input with vim mode demo
-- `deno task playground:text-styling` - Text styling demo
-- `deno task playground:welcome` - Welcome screen demo
 
 ## Import Aliases
 

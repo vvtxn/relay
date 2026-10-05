@@ -7,6 +7,23 @@ export const EXIT_ALT_SCREEN = "\x1b[?1049l";
 /** Clear entire screen and move cursor to top-left */
 export const CLEAR_SCREEN = "\x1b[2J\x1b[H";
 
+// ── Mouse Tracking (SGR extended mode) ──────────────────────────────────────
+
+/** Enable button + wheel reporting with SGR coordinates (`\x1b[<b;x;yM`) */
+export const MOUSE_ENABLE = "\x1b[?1000h\x1b[?1006h";
+/** Disable mouse reporting (SGR + button mode) */
+export const MOUSE_DISABLE = "\x1b[?1006l\x1b[?1000l";
+
+// ── OSC Terminal Colors (OSC 11) ────────────────────────────────────────────
+
+/** Set the terminal's default background color to a `#rrggbb` value */
+export function oscSetBackground(hex: string): string {
+	return `\x1b]11;${hex}\x1b\\`;
+}
+
+/** Restore the terminal's default background color */
+export const OSC_RESET_BACKGROUND = "\x1b]111\x1b\\";
+
 // ── Cursor Visibility ───────────────────────────────────────────────────────
 
 /** Hide the cursor */

@@ -1,4 +1,4 @@
-import { RESET } from "@/tui/core/ansi.ts";
+import { RESET_FG } from "@/tui/core/ansi.ts";
 import { toAnsi } from "@/tui/core/primitives/color.ts";
 import type { ElementHandler, Position, SpinnerInstance } from "../types/index.ts";
 import type { LayoutHandler } from "./index.ts";
@@ -18,7 +18,7 @@ export const SpinnerElement: ElementHandler<SpinnerInstance> = (instance, contex
 	const char = BRAILLE_FRAMES[frame % BRAILLE_FRAMES.length];
 
 	const baseColor = toAnsi(color) ?? "\x1b[37m";
-	const resetCode = RESET;
+	const resetCode = RESET_FG;
 
 	return [{ x, y, text: `${baseColor}${char}${resetCode}` }];
 };

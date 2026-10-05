@@ -29,6 +29,14 @@ export function useScrollArea(
 				scrollOffset.value = Math.min(maxScroll.value, scrollOffset.value + step);
 				return true;
 			}
+			if (event.key === "wheelup") {
+				scrollOffset.value = Math.max(0, scrollOffset.value - step * 3);
+				return true;
+			}
+			if (event.key === "wheeldown") {
+				scrollOffset.value = Math.min(maxScroll.value, scrollOffset.value + step * 3);
+				return true;
+			}
 			if (event.key === "pageup") {
 				scrollOffset.value = Math.max(0, scrollOffset.value - Math.max(1, viewportHeight.value));
 				return true;

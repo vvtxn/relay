@@ -1,4 +1,4 @@
-import { RESET } from "@/tui/core/ansi.ts";
+import { RESET_FG } from "@/tui/core/ansi.ts";
 import { toAnsi } from "@/tui/core/primitives/color.ts";
 import { theme } from "@/tui/theme.ts";
 import { findMentions, formatLineWithMentions } from "@/tui/core/primitives/mentions.ts";
@@ -114,7 +114,7 @@ export const TextInputElement: ElementHandler<TextInputInstance> = (instance, co
 			? formatLineWithMentions(entry.line, entry.startIndex, width, mentions, defaultAnsi, mentionAnsi)
 			: (() => {
 				let text = entry.line.slice(0, width).padEnd(width, " ");
-				if (defaultAnsi) text = `${defaultAnsi}${text}${RESET}`;
+				if (defaultAnsi) text = `${defaultAnsi}${text}${RESET_FG}`;
 				return text;
 			})();
 

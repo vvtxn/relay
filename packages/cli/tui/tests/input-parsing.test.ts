@@ -105,3 +105,19 @@ Deno.test("parseKey - parses regular characters", () => {
 	assertEquals(inputManager.parseKey("1").key, "1");
 	assertEquals(inputManager.parseKey(" ").key, " ");
 });
+
+// SGR mouse sequences
+Deno.test("splitSequences - keeps SGR mouse reports together", () => {
+	assertEquals(inputManager.splitSequences("\x1b[<64;10;5M"), ["\x1b[<64;10;5M"]);
+	assertEquals(inputManager.splitSequences("\x1b[<0;1;2m"), ["\x1b[<0;1;2m"]);
+});
+
+Deno.test("parseKey - maps SGR wheel events", () => {
+	assertEquals(inputManager.parseKey("\x1b[<64;10;5M").key, "wheelup");
+	assertEquals(inputManager.parseKey("\x1b[<65;10;5M").key, "wheeldown");
+});
+
+Deno.test("parseKey - consumes other mouse events", () => {
+	assertEquals(inputManager.parseKey("\x1b[<0;10;5M").key, "mouse");
+	assertEquals(inputManager.parseKey("\x1b[<0;10;5m").key, "mouse");
+});

@@ -1,7 +1,8 @@
 import { effect } from "@preact/signals-core";
+import process from "node:process";
 import Y from "yoga-layout";
 import { inputManager } from "../core/input.ts";
-import { Terminal } from "../core/terminal.ts";
+import { Terminal, type TerminalOptions } from "../core/terminal.ts";
 import { ElementType, getElement } from "./elements/index.ts";
 import { clearPendingCursor, getPendingCursor } from "./elements/text-input.ts";
 import {
@@ -426,6 +427,8 @@ export class Renderer {
 
 	render(createVNode: () => VNode) {
 		this.disposeEffect = effect(() => {
+			// Track terminal size so a resize triggers a fresh layout + repaint.
+			this.terminal.size.value;
 			this.commitRender(createVNode());
 		});
 	}
@@ -452,8 +455,12 @@ export function render(createVNode: () => VNode, terminal: Terminal) {
 	};
 }
 
-export function run(createVNode: (quit: () => void) => VNode, onBeforeQuit?: () => void | Promise<void>) {
-	const terminal = new Terminal();
+export function run(
+	createVNode: (quit: () => void) => VNode,
+	onBeforeQuit?: () => void | Promise<void>,
+	options: TerminalOptions = {},
+) {
+	const terminal = new Terminal(process.stdout, options);
 
 	const quit = async () => {
 		if (onBeforeQuit) await onBeforeQuit();

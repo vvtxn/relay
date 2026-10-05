@@ -166,6 +166,8 @@ Filesystem helpers rooted at an explicit workspace directory — the CLI passes 
 per-session workspace:
 
 - `resolveWithinRoot(root, rel)` — resolves a path, returning null when it escapes the root
+- `validateWorkspacePath(raw, roots)` / `validateWorkspacePathSync(...)` — canonicalize (symlinks resolved) and validate
+  a candidate workspace directory: absolute, existing directory, and within `roots` (empty roots = allow anywhere)
 - `expandMentions(text, root)` — expands `@path` mentions into `<attached_context>` blocks
 - `listProjectFiles(root)` — project file listing (`git ls-files`, directory walk fallback) for file pickers
 - `isGitRepo(root)` / `getGitBranch(root)` — repository metadata

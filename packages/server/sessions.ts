@@ -1,4 +1,5 @@
-import { getGitBranch, resolveWithinRoot } from "@vvtxn/relay/core/workspace.ts";
+import { resolve } from "@std/path";
+import { getGitBranch, validateWorkspacePath } from "@vvtxn/relay/core/workspace.ts";
 import { homeDir } from "@vvtxn/relay/core/paths.ts";
 import type { SessionHandle } from "@vvtxn/relay/core/sessions/index.ts";
 import type {
@@ -33,7 +34,17 @@ export async function openSessionHandle(services: RequestServices, sessionId: st
 
 /** Resolve the workspace cwd from the query param or fall back to the server default. */
 function resolveCwd(services: RequestServices, url: URL): string {
-	return url.searchParams.get("cwd") ?? services.config.defaultCwd;
+	const raw = url.searchParams.get("cwd");
+	return raw ? resolve(raw) : services.config.defaultCwd;
+}
+
+/** True when `path` is an existing directory. */
+async function directoryExists(path: string): Promise<boolean> {
+	try {
+		return (await Deno.stat(path)).isDirectory;
+	} catch {
+		return false;
+	}
 }
 
 export function handleMe(services: RequestServices): Response {
@@ -80,17 +91,29 @@ export async function handleListWorkspaces(services: RequestServices): Promise<R
 			lastActivity: "",
 		});
 	}
-	return json({ workspaces: [...byCwd.values()] } satisfies WorkspacesResponse);
+	// Mark directories that have since been deleted/renamed so clients can flag
+	// them instead of failing later.
+	const workspaces = await Promise.all(
+		[...byCwd.values()].map(async (summary) => ({
+			...summary,
+			exists: await directoryExists(summary.cwd),
+		})),
+	);
+	return json({ workspaces } satisfies WorkspacesResponse);
 }
 
 export async function handleCreateSession(services: RequestServices, request: Request): Promise<Response> {
 	const body = await readJsonBody<CreateSessionRequest>(request);
-	const cwd = typeof body.cwd === "string" && body.cwd ? body.cwd : services.config.defaultCwd;
-	if (services.config.workspaceRoots.length > 0) {
-		const allowed = services.config.workspaceRoots.some((root) => resolveWithinRoot(root, cwd) !== null);
-		if (!allowed) throw new ForbiddenError("Workspace is outside the allowed roots");
+	const raw = typeof body.cwd === "string" && body.cwd.trim() ? body.cwd : services.config.defaultCwd;
+	const validation = await validateWorkspacePath(raw, services.config.workspaceRoots);
+	if (!validation.ok) {
+		if (validation.reason === "outside-roots") throw new ForbiddenError(validation.message);
+		throw new BadRequestError(validation.message);
 	}
-	const scope = { ownerId: services.user.id, cwd };
+	const scope = { ownerId: services.user.id, cwd: validation.path };
+	// Register eagerly so the workspace appears in the picker before the first
+	// append persists the session row.
+	await services.sessionStore.registerWorkspace(scope);
 	const handle = services.sessionStore.create(scope);
 	services.runs.attachHandle(handle.getHeader().id, handle, services.user.id);
 	return json(

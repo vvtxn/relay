@@ -98,10 +98,12 @@ inserts `@path`; the server expands mentions into `<attached_context>` blocks be
 
 ### Workspaces
 
-A workspace is a project directory. `GET /api/workspaces` returns the distinct session `cwd`s (plus the server default)
-for the user; the sidebar lists them and selecting one scopes the session list and the "New chat" target. `cwd` lives in
-`state/workspace.ts` (persisted) and drives `sessionsQuery(cwd)`. "Add workspace" accepts a path, expanded with `~` when
-the server's home dir is known; the server rejects paths outside `RELAY_WORKSPACE_ROOTS`.
+A workspace is a project directory. `GET /api/workspaces` returns the distinct session `cwd`s plus explicitly registered
+workspaces (and the server default) for the user; the sidebar lists them and selecting one scopes the session list and
+the "New chat" target. `cwd` lives in `state/workspace.ts` (persisted) and drives `sessionsQuery(cwd)`. "Add workspace"
+accepts an absolute path, calls `GET /api/workspaces/validate` (inline error when missing/outside roots), stores the
+returned canonical path, and registers it via `POST /api/workspaces`. Entries whose directory is gone (`exists: false`)
+are flagged. Bootstrap re-validates the persisted cwd and falls back to the server default.
 
 ## Building & Running
 

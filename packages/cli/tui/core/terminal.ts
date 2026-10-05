@@ -1,4 +1,5 @@
 import process from "node:process";
+import { type Signal, signal } from "@preact/signals-core";
 import type { Cell } from "../render/types/index.ts";
 import {
 	CLEAR_SCREEN,
@@ -9,35 +10,74 @@ import {
 	cursorTo,
 	ENTER_ALT_SCREEN,
 	EXIT_ALT_SCREEN,
+	MOUSE_DISABLE,
+	MOUSE_ENABLE,
+	OSC_RESET_BACKGROUND,
+	oscSetBackground,
 	RESET,
 	SYNC_END,
 	SYNC_START,
 } from "./ansi.ts";
+import { charWidth } from "./primitives/char-width.ts";
+import { toBgAnsi } from "./primitives/color.ts";
+
+export interface TerminalOptions {
+	/**
+	 * Default background color (name or `#rrggbb`). Painted into every cell of
+	 * the grid so the app background always spans the full terminal, and — for
+	 * hex values — applied to the terminal itself via OSC 11 (restored on exit).
+	 */
+	defaultBg?: string | undefined;
+}
+
+export interface TerminalSize {
+	width: number;
+	height: number;
+}
+
+function normalizeHex(color?: string): string | null {
+	if (!color) return null;
+	const match = color.match(/^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/);
+	if (!match) return null;
+	const digits = match[1]!;
+	const full = digits.length === 3 ? digits.split("").map((d) => d + d).join("") : digits;
+	return `#${full.toLowerCase()}`;
+}
 
 export class Terminal {
 	stdout: typeof process.stdout;
 	width: number;
 	height: number;
+	/** Reactive terminal size — renderers can subscribe to re-layout on resize. */
+	readonly size: Signal<TerminalSize>;
 	currentBuffer: Cell[][];
 	previousBuffer: Cell[][];
 	isFirstRender: boolean = true;
 	cursorVisible: boolean = true;
 	cursorX: number = -1;
 	cursorY: number = -1;
+	private defaultStyle: string = "";
+	private defaultBgHex: string | null = null;
+	private mouseEnabled: boolean = false;
 	private resizeHandler: (() => void) | null = null;
 	private disposed: boolean = false;
 	private frameBuffer: string = "";
 	private batching: boolean = false;
 
-	constructor(stdout: typeof process.stdout = process.stdout) {
+	constructor(stdout: typeof process.stdout = process.stdout, options: TerminalOptions = {}) {
 		this.stdout = stdout;
 		this.width = this.stdout.columns || 80;
 		this.height = this.stdout.rows || 24;
+		this.defaultBgHex = normalizeHex(options.defaultBg);
+		this.defaultStyle = options.defaultBg ? (toBgAnsi(options.defaultBg) ?? "") : "";
+		this.size = signal<TerminalSize>({ width: this.width, height: this.height });
 		this.currentBuffer = this.createEmptyBuffer();
 		this.previousBuffer = this.createEmptyBuffer();
 
 		this.setupResizeHandler();
 		this.enterAlternateScreen();
+		this.applyDefaultBackground();
+		this.enableMouseTracking();
 		this.write(CURSOR_BLOCK);
 		this.hideCursor();
 		this.clearScreen();
@@ -92,6 +132,7 @@ export class Terminal {
 		this.resizeHandler = () => {
 			this.width = this.stdout.columns || 80;
 			this.height = this.stdout.rows || 24;
+			this.size.value = { width: this.width, height: this.height };
 			this.currentBuffer = this.createEmptyBuffer();
 			this.previousBuffer = this.createEmptyBuffer();
 			this.isFirstRender = true;
@@ -101,16 +142,25 @@ export class Terminal {
 		this.stdout.on("resize", this.resizeHandler);
 	}
 
+	private blankCell(): Cell {
+		return { char: " ", style: this.defaultStyle };
+	}
+
 	private createEmptyBuffer(): Cell[][] {
 		return Array.from(
 			{ length: this.height },
-			() => Array.from({ length: this.width }, () => ({ char: " ", style: "" })),
+			() => Array.from({ length: this.width }, () => this.blankCell()),
 		);
 	}
 
 	private clearScreen() {
 		if (!this.isTTY()) return;
 		this.write(CLEAR_SCREEN);
+	}
+
+	private applyDefaultBackground() {
+		if (!this.isTTY() || !this.defaultBgHex) return;
+		this.write(oscSetBackground(this.defaultBgHex));
 	}
 
 	enterAlternateScreen() {
@@ -121,6 +171,18 @@ export class Terminal {
 	exitAlternateScreen() {
 		if (!this.isTTY()) return;
 		this.write(EXIT_ALT_SCREEN);
+	}
+
+	private enableMouseTracking() {
+		if (!this.isTTY() || this.mouseEnabled) return;
+		this.write(MOUSE_ENABLE);
+		this.mouseEnabled = true;
+	}
+
+	private disableMouseTracking() {
+		if (!this.isTTY() || !this.mouseEnabled) return;
+		this.write(MOUSE_DISABLE);
+		this.mouseEnabled = false;
 	}
 
 	hideCursor() {
@@ -148,53 +210,93 @@ export class Terminal {
 		}
 	}
 
-	private extractStyle(str: string): { chars: string[]; styles: string[] } {
-		const chars: string[] = [];
-		const styles: string[] = [];
-
-		let currentStyle = "";
+	/**
+	 * Parse a styled string into per-character cells. Iterates by code point so
+	 * surrogate pairs (emoji) stay intact, and resets to the terminal's default
+	 * style on SGR reset so backgrounds are never lost mid-string.
+	 */
+	private extractStyle(str: string): Array<{ char: string; style: string }> {
+		const out: Array<{ char: string; style: string }> = [];
+		let currentStyle = this.defaultStyle;
 		let i = 0;
 
 		while (i < str.length) {
-			const char = str[i];
-			const nextChar = str[i + 1];
-			if (char === "\x1b" && nextChar === "[") {
+			const cp = str.codePointAt(i) ?? 0;
+
+			if (cp === 0x1b && str[i + 1] === "[") {
 				let j = i + 2;
 				while (j < str.length && str[j] !== "m") j++;
 				const sequence = str.slice(i, j + 1);
 				if (sequence === RESET) {
-					currentStyle = "";
+					currentStyle = this.defaultStyle;
 				} else {
 					currentStyle += sequence;
 				}
 				i = j + 1;
-			} else if (char !== undefined) {
-				const sanitized = char === "\n" || char === "\r" || char === "\t" ? " " : char;
-				chars.push(sanitized);
-				styles.push(currentStyle);
-				i++;
-			} else {
-				i++;
+				continue;
 			}
+
+			const ch = String.fromCodePoint(cp);
+			const sanitized = ch === "\n" || ch === "\r" || ch === "\t" ? " " : ch;
+			out.push({ char: sanitized, style: currentStyle });
+			i += ch.length;
 		}
 
-		return { chars, styles };
+		return out;
+	}
+
+	/** Clear any double-width character overlapping `col` so cells never desync. */
+	private clearWideNeighbors(row: Cell[], col: number) {
+		const cell = row[col];
+		if (!cell) return;
+		if (cell.cont) {
+			const lead = col - 1 >= 0 ? row[col - 1] : undefined;
+			if (lead) row[col - 1] = this.blankCell();
+		} else if (charWidth(cell.char) === 2 && col + 1 < this.width) {
+			const next = row[col + 1];
+			if (next?.cont) row[col + 1] = this.blankCell();
+		}
 	}
 
 	private writeToBuffer(x: number, y: number, text: string) {
 		if (y < 0 || y >= this.height) return;
 
-		const { chars, styles } = this.extractStyle(text);
 		const row = this.currentBuffer[y];
 		if (!row) return;
 
-		for (let i = 0; i < chars.length; i++) {
-			const col = x + i;
-			const char = chars[i];
-			const style = styles[i];
-			if (col >= 0 && col < this.width && char !== undefined && style !== undefined) {
-				row[col] = { char, style };
+		const cells = this.extractStyle(text);
+		let col = x;
+
+		for (const { char, style } of cells) {
+			const width = charWidth(char);
+
+			if (width === 0) {
+				const prev = col - 1;
+				if (prev >= 0 && prev < this.width) {
+					const prevCell = row[prev];
+					if (prevCell && !prevCell.cont) prevCell.char += char;
+				}
+				continue;
 			}
+
+			if (col < 0 || col >= this.width) {
+				col += width;
+				continue;
+			}
+
+			if (width === 2 && col + 1 >= this.width) {
+				// Not enough room for a double-width glyph — render a space.
+				this.clearWideNeighbors(row, col);
+				row[col] = { char: " ", style };
+				col += width;
+				continue;
+			}
+
+			this.clearWideNeighbors(row, col);
+			if (width === 2) this.clearWideNeighbors(row, col + 1);
+			row[col] = { char, style };
+			if (width === 2) row[col + 1] = { char: "", style, cont: true };
+			col += width;
 		}
 	}
 
@@ -216,7 +318,8 @@ export class Terminal {
 				const cell = row[x];
 				if (cell) {
 					cell.char = " ";
-					cell.style = "";
+					cell.style = this.defaultStyle;
+					cell.cont = false;
 				}
 			}
 		}
@@ -232,16 +335,45 @@ export class Terminal {
 			const previousRow = this.previousBuffer[y];
 			if (!currentRow || !previousRow) continue;
 
+			let runStart = -1;
+			let run = "";
+			let runStyle = "";
+			let runStyleSet = false;
+
+			const endRun = () => {
+				if (runStart < 0) return;
+				output += cursorTo(y + 1, runStart + 1) + run + RESET;
+				runStart = -1;
+				run = "";
+				runStyle = "";
+				runStyleSet = false;
+			};
+
 			for (let x = 0; x < this.width; x++) {
 				const current = currentRow[x];
 				const previous = previousRow[x];
 				if (!current || !previous) continue;
+				if (current.cont) continue;
 
-				if (this.isFirstRender || current.char !== previous.char || current.style !== previous.style) {
-					output += cursorTo(y + 1, x + 1);
-					output += `${current.style + current.char}${RESET}`;
+				const changed = this.isFirstRender ||
+					current.char !== previous.char ||
+					current.style !== previous.style;
+
+				if (!changed) {
+					endRun();
+					continue;
 				}
+
+				if (runStart < 0) runStart = x;
+				if (!runStyleSet || current.style !== runStyle) {
+					run += RESET + current.style;
+					runStyle = current.style;
+					runStyleSet = true;
+				}
+				run += current.char;
 			}
+
+			endRun();
 		}
 
 		if (output) {
@@ -276,6 +408,8 @@ export class Terminal {
 		this.clearScreen();
 		this.write(CURSOR_DEFAULT);
 		this.showCursor();
+		this.disableMouseTracking();
+		if (this.defaultBgHex) this.write(OSC_RESET_BACKGROUND);
 		this.exitAlternateScreen();
 	}
 
