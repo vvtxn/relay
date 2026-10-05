@@ -79,7 +79,6 @@ export function SessionPage() {
 					/>
 					<main class="main">
 						<StatusBar
-							model={config.data!.model}
 							branch={session.data!.branch}
 							userName={me.data!.name}
 							avatarUrl={me.data!.avatarUrl}
