@@ -632,28 +632,50 @@ body {
 .message {
 	display: flex;
 	flex-direction: column;
+	gap: 0.55rem;
+	width: 100%;
+	padding: 0.7rem 0.9rem;
+	border: 1px solid var(--relay-border, #303030);
+	border-left-width: 3px;
+	border-radius: 6px;
+}
+
+.message-head {
+	display: flex;
+	align-items: center;
+	gap: 0.45rem;
+}
+
+.message-role {
+	font-size: 0.72rem;
+	font-weight: 700;
+	letter-spacing: 0.14em;
+	text-transform: uppercase;
+	color: var(--relay-text-dim, #808080);
 }
 
 .message.user {
-	align-items: flex-end;
+	border-left-color: var(--relay-info, #a8a8b0);
+	background: var(--relay-surface-elevated, #181818);
 }
 
-.bubble {
-	background: var(--relay-surface-elevated, #181818);
-	border: 1px solid var(--relay-border, #303030);
-	border-radius: 6px;
-	padding: 0.55rem 0.75rem;
-	max-width: 75ch;
+.message.user .message-role {
+	color: var(--relay-info, #a8a8b0);
+}
+
+.message-body {
+	color: var(--relay-text, #f2f2f2);
 	white-space: pre-wrap;
 	word-break: break-word;
 }
 
 .message.agent {
-	gap: 0.6rem;
+	border-left-color: var(--relay-brand, #c0c0c0);
 	background: var(--relay-surface, #101010);
-	border: 1px solid var(--relay-border, #303030);
-	border-radius: 6px;
-	padding: 0.75rem;
+}
+
+.message.agent .message-role {
+	color: var(--relay-brand, #c0c0c0);
 }
 
 .agent-text {
