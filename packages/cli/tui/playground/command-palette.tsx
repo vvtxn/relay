@@ -2,6 +2,7 @@ import { run } from "@/tui/render/index.ts";
 import { Box, CommandPalette, Text } from "@/tui/render/components.tsx";
 import { useSignal } from "@/tui/render/hooks/signals.ts";
 import { type CommandPaletteItem, useCommandPalette } from "@/tui/render/hooks/command-palette.ts";
+import { theme } from "@/tui/theme.ts";
 
 const COMMANDS: CommandPaletteItem[] = [
 	{ id: "new-file", title: "New File", description: "Create a new file", keywords: ["create"] },
@@ -29,7 +30,7 @@ function App() {
 
 	return (
 		<Box flex flexDirection="column" padding={1} gap={1}>
-			<Box border="single" borderLabel="Command Palette Demo" padding={1} flexDirection="column" gap={1}>
+			<Box bgColor={theme.surface} padding={1} flexDirection="column" gap={1}>
 				<Text bold color="white">
 					Press / to open the command palette
 				</Text>

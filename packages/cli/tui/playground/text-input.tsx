@@ -2,6 +2,7 @@ import { run } from "@/tui/render/index.ts";
 import { Box, Text, TextInput } from "@/tui/render/components.tsx";
 import { useSignal } from "@/tui/render/hooks/signals.ts";
 import { useTextInput, type VimMode } from "@/tui/render/hooks/text-input.ts";
+import { theme } from "@/tui/theme.ts";
 
 function App() {
 	const input = useSignal("");
@@ -33,7 +34,7 @@ function App() {
 				</Text>
 			</Box>
 
-			<Box border="single" borderLabel={`[${mode.value}]`} padding={1} flexDirection="column">
+			<Box bgColor={theme.surface} padding={1} flexDirection="column">
 				<TextInput
 					value={input.value}
 					cursorPosition={cursor.value}
@@ -54,7 +55,8 @@ function App() {
 			</Box>
 
 			{submitted.value.length > 0 && (
-				<Box border="single" borderLabel="Submitted" padding={1} flexDirection="column" gap={0}>
+				<Box bgColor={theme.surface} padding={1} flexDirection="column" gap={0}>
+					<Text color={theme.textDim} bold>Submitted</Text>
 					{submitted.value.map((val, i) => (
 						<Box flexDirection="row" gap={1}>
 							<Text color="gray">{i + 1}.</Text>
@@ -64,7 +66,8 @@ function App() {
 				</Box>
 			)}
 
-			<Box border="single" borderLabel="Keybindings" padding={1} flexDirection="column" gap={1}>
+			<Box bgColor={theme.surface} padding={1} flexDirection="column" gap={1}>
+				<Text color={theme.textDim} bold>Keybindings</Text>
 				<Box flexDirection="column">
 					<Text bold color="green">INSERT mode:</Text>
 					<Text color="gray">Type text • Backspace • Ctrl+W (word delete) • Ctrl+U (delete to start)</Text>

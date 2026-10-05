@@ -455,10 +455,6 @@ function App({ onQuit, user, initialSessionId, info }: AppProps) {
 
 			<Box height={1} />
 			<Box
-				border="round"
-				borderColor={theme.border}
-				borderLabel={mode.value}
-				borderLabelColor={theme.brand}
 				bgColor={theme.surface}
 				padding={1}
 			>
@@ -471,31 +467,40 @@ function App({ onQuit, user, initialSessionId, info }: AppProps) {
 				/>
 			</Box>
 
-			{stream.value.running && (
-				<Box flexDirection="row" padding={1}>
-					<Box flexDirection="row" gap={1}>
-						<Spinner color={theme.accent} />
-						<Text color={theme.textMuted} bold italic>
-							{formatStatus(stream.value.status)}
+			<Box flexDirection="row" gap={1}>
+				<Text color={theme.brand} bold>
+					{mode.value}
+				</Text>
+				{stream.value.running
+					? (
+						<>
+							<Spinner color={theme.accent} />
+							<Text color={theme.textMuted} bold italic>
+								{formatStatus(stream.value.status)}
+							</Text>
+							{escPrimed.value
+								? (
+									<Text color={theme.warning} bold>
+										Press Esc again to cancel
+									</Text>
+								)
+								: (
+									<Text color={theme.textDim} italic>
+										Esc to cancel
+									</Text>
+								)}
+						</>
+					)
+					: (
+						<Text color={theme.textFaint} italic>
+							@ files • / commands • i/Esc mode
 						</Text>
-						{escPrimed.value
-							? (
-								<Text color={theme.warning} bold>
-									Press Esc again to cancel
-								</Text>
-							)
-							: (
-								<Text color={theme.textDim} italic>
-									Esc to cancel
-								</Text>
-							)}
-					</Box>
-				</Box>
-			)}
+					)}
+			</Box>
 
 			<CommandPalette palette={palette} />
-			<CommandPalette palette={filePalette} placeholder="Search files..." borderLabel="Files" />
-			<CommandPalette palette={threadsPalette} placeholder="Search threads..." borderLabel="Threads" width={80} />
+			<CommandPalette palette={filePalette} placeholder="Search files..." title="Files" />
+			<CommandPalette palette={threadsPalette} placeholder="Search threads..." title="Threads" width={80} />
 			<ApprovalPrompt approval={approval} />
 		</Box>
 	);
@@ -546,4 +551,4 @@ function Root({ quit }: { quit: () => void }) {
 // Entry
 // ---------------------------------------------------------------------------
 
-run((quit) => <Root quit={quit} />, () => {});
+run((quit) => <Root quit={quit} />, () => {}, { defaultBg: theme.background });

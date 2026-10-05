@@ -1,5 +1,6 @@
 import { run } from "@/tui/render/index.ts";
 import { Box, ScrollArea, Text } from "@/tui/render/components.tsx";
+import { theme } from "@/tui/theme.ts";
 
 const COLORS = ["white", "cyan", "yellow", "green", "magenta", "red", "blue"] as const;
 
@@ -24,7 +25,7 @@ function App() {
 
 	return (
 		<Box flex flexDirection="column" padding={1} gap={1}>
-			<Box border="single" borderLabel="Scrollable Content" flexDirection="column">
+			<Box bgColor={theme.surface} flexDirection="column" padding={1}>
 				<ScrollArea flex flexDirection="column" height={20} scrollbar focused>
 					{lines.map((line, i) => (
 						<Text key={i} color={line.color} bold={line.bold} italic={line.italic}>

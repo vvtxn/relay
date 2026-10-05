@@ -14,18 +14,26 @@ export function ApprovalPrompt(props: ApprovalPromptProps) {
 	if (!pending) return <Box />;
 
 	return (
-		<Box position="absolute" top={0} left={0} right={0} bottom={0} justifyContent="center" alignItems="center">
+		<Box
+			position="absolute"
+			top={0}
+			left={0}
+			right={0}
+			bottom={0}
+			bgColor={theme.background}
+			justifyContent="center"
+			alignItems="center"
+		>
 			<Box
 				width={width}
-				border="round"
-				borderColor={theme.warning}
-				borderLabel="Approval required"
-				borderLabelColor={theme.warning}
 				bgColor={theme.surfaceElevated}
 				flexDirection="column"
 				padding={1}
 				gap={1}
 			>
+				<Text bold color={theme.warning}>
+					Approval required
+				</Text>
 				<Box flexDirection="row" gap={1}>
 					<Text bold color={theme.text}>
 						{pending.toolName}

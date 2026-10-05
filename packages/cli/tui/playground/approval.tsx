@@ -3,6 +3,7 @@ import { ApprovalPrompt, Box, Text } from "@/tui/render/components.tsx";
 import { getHookKey, hasCleanup, setCleanup, useSignal } from "@/tui/render/hooks/signals.ts";
 import { type ApprovalDecision, useApprovalPrompt } from "@/tui/render/hooks/approval.ts";
 import { inputManager, type KeyEvent } from "@/tui/core/input.ts";
+import { theme } from "@/tui/theme.ts";
 
 const DEMO_TOOLS = [
 	{ toolName: "Run", summary: "git status" },
@@ -32,7 +33,7 @@ function App() {
 
 	return (
 		<Box flex flexDirection="column" padding={1} gap={1}>
-			<Box border="single" borderLabel="Approval Prompt Demo" padding={1} flexDirection="column" gap={1}>
+			<Box bgColor={theme.surface} padding={1} flexDirection="column" gap={1}>
 				<Text bold color="white">
 					Press t to simulate a tool call requiring approval
 				</Text>

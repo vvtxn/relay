@@ -1,5 +1,6 @@
 import { run } from "@/tui/render/index.ts";
 import { Box, Text } from "@/tui/render/components.tsx";
+import { theme } from "@/tui/theme.ts";
 
 function App() {
 	return (
@@ -9,7 +10,8 @@ function App() {
 			</Text>
 
 			{/* Basic Colors */}
-			<Box border="single" borderLabel="Basic Colors" padding={1} flexDirection="row" gap={2}>
+			<Box bgColor={theme.surface} padding={1} flexDirection="row" gap={2}>
+				<Text color={theme.textDim} bold>Basic Colors</Text>
 				<Text color="red">Red</Text>
 				<Text color="green">Green</Text>
 				<Text color="blue">Blue</Text>
@@ -19,7 +21,8 @@ function App() {
 			</Box>
 
 			{/* Bright Colors */}
-			<Box border="single" borderLabel="Bright Colors" padding={1} flexDirection="row" gap={2}>
+			<Box bgColor={theme.surface} padding={1} flexDirection="row" gap={2}>
+				<Text color={theme.textDim} bold>Bright Colors</Text>
 				<Text color="brightRed">BrightRed</Text>
 				<Text color="brightGreen">BrightGreen</Text>
 				<Text color="brightBlue">BrightBlue</Text>
@@ -29,7 +32,8 @@ function App() {
 			</Box>
 
 			{/* Hex Colors */}
-			<Box border="single" borderLabel="Hex Colors" padding={1} flexDirection="row" gap={2}>
+			<Box bgColor={theme.surface} padding={1} flexDirection="row" gap={2}>
+				<Text color={theme.textDim} bold>Hex Colors</Text>
 				<Text color="#ff6600">Orange (#ff6600)</Text>
 				<Text color="#8b5cf6">Purple (#8b5cf6)</Text>
 				<Text color="#06b6d4">Teal (#06b6d4)</Text>
@@ -37,7 +41,8 @@ function App() {
 			</Box>
 
 			{/* Text Decorations */}
-			<Box border="single" borderLabel="Text Decorations" padding={1} flexDirection="row" gap={2}>
+			<Box bgColor={theme.surface} padding={1} flexDirection="row" gap={2}>
+				<Text color={theme.textDim} bold>Text Decorations</Text>
 				<Text bold>Bold</Text>
 				<Text italic>Italic</Text>
 				<Text underline>Underline</Text>
@@ -45,7 +50,8 @@ function App() {
 			</Box>
 
 			{/* Combined Styles */}
-			<Box border="single" borderLabel="Combined Styles" padding={1} flexDirection="row" gap={2}>
+			<Box bgColor={theme.surface} padding={1} flexDirection="row" gap={2}>
+				<Text color={theme.textDim} bold>Combined Styles</Text>
 				<Text bold italic>Bold+Italic</Text>
 				<Text bold color="cyan">Bold+Color</Text>
 				<Text underline color="yellow">Underline+Color</Text>
@@ -54,7 +60,8 @@ function App() {
 			</Box>
 
 			{/* Background Colors */}
-			<Box border="single" borderLabel="Background Colors" padding={1} flexDirection="row" gap={2}>
+			<Box bgColor={theme.surface} padding={1} flexDirection="row" gap={2}>
+				<Text color={theme.textDim} bold>Background Colors</Text>
 				<Text bgColor="red" color="white">Red BG</Text>
 				<Text bgColor="blue" color="white">Blue BG</Text>
 				<Text bgColor="green" color="black">Green BG</Text>
@@ -63,7 +70,7 @@ function App() {
 			</Box>
 
 			{/* Flex on Text */}
-			<Box border="single" borderLabel="Flex on Text" padding={1} flexDirection="row" gap={1}>
+			<Box bgColor={theme.surface} padding={1} flexDirection="row" gap={1}>
 				<Text color="gray">Label:</Text>
 				<Text flex color="cyan">This text takes the remaining space (flex)</Text>
 			</Box>

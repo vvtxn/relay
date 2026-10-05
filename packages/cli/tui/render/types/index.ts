@@ -19,6 +19,8 @@ export type InstanceChild = Instance | PrimitiveChild;
 export interface Cell {
 	char: string;
 	style: string;
+	/** True for the trailing cell of a double-width character (skipped when flushing). */
+	cont?: boolean;
 }
 
 export interface Position {
