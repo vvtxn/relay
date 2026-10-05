@@ -32,29 +32,3 @@ jobs:
                   restore-keys: deno-
 
             - run: deno task fmt:check && deno task lint && deno task test
-
-    ai-review:
-        needs: lint-and-test
-        if: github.event_name == 'pull_request'
-        runs-on: ubuntu-latest
-        timeout-minutes: 15
-        permissions:
-            contents: read
-            pull-requests: write
-        steps:
-            - uses: actions/checkout@v4
-              with:
-                  persist-credentials: false
-
-            - uses: anomalyco/opencode/github@b1fc8113948b518835c2a39ece49553cffe9b30c # v1.17.18
-              env:
-                  OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
-                  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-              with:
-                  model: opencode-go/kimi-k2.7-code
-                  use_github_token: true
-                  prompt: |
-                      Review this pull request:
-                      - Check for code quality issues
-                      - Look for potential bugs, especially concurrency issues
-                      - Suggest improvements
