@@ -47,16 +47,6 @@ tui/
 │   │   └── welcome-screen.tsx  # WelcomeScreen component
 │   └── types/
 │       └── index.ts            # TypeScript type definitions, ElementRegistry, props
-├── playground/                 # Example apps
-│   ├── approval.tsx            # Approval prompt demo
-│   ├── command-palette.tsx     # Command palette demo
-│   ├── layout.tsx              # Flexbox layout demo
-│   ├── markdown.tsx            # Markdown rendering demo
-│   ├── scroll-area.tsx         # Scroll area demo
-│   ├── spinner.tsx             # Spinner demo
-│   ├── text-input.tsx          # Text input demo
-│   ├── text-styling.tsx        # Text styling demo
-│   └── welcome.tsx             # Welcome screen demo
 ├── tests/
 │   ├── char-width.test.ts      # wcwidth + ANSI measurement tests
 │   ├── input-parsing.test.ts   # Input parsing tests (keys + SGR mouse)

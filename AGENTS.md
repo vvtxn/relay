@@ -103,18 +103,6 @@ Tag-based releases via GitHub Actions (`.github/workflows/release.yml`):
 3. `git tag v<version> && git push --tags`
 4. CI builds Linux binary and creates GitHub Release
 
-### Development (Playgrounds)
-
-- `deno task playground:approval` - Tool approval prompt demo
-- `deno task playground:command-palette` - Command palette demo
-- `deno task playground:layout` - Box layout and borders demo
-- `deno task playground:markdown` - Markdown rendering demo
-- `deno task playground:scroll-area` - Scroll area demo
-- `deno task playground:spinner` - Spinner animations demo
-- `deno task playground:text-input` - Text input with vim mode demo
-- `deno task playground:text-styling` - Text styling demo
-- `deno task playground:welcome` - Welcome screen demo
-
 ## Import Aliases
 
 Within each package, use `@/` for intra-package imports:
