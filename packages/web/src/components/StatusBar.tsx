@@ -19,7 +19,6 @@ function TokenBar(props: { tokens: number; contextWindow: number }) {
 }
 
 export function StatusBar(props: {
-	model: string;
 	branch: string | null;
 	userName?: string | undefined;
 	avatarUrl?: string | undefined;
@@ -29,7 +28,6 @@ export function StatusBar(props: {
 	return (
 		<header class="status-bar">
 			<div class="status-left">
-				<span class="status-model">{props.model.split("/").pop()}</span>
 				<Show when={props.branch}>
 					<span class="status-meta">on {props.branch}</span>
 				</Show>
