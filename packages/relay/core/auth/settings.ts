@@ -54,13 +54,8 @@ export class DatabaseUserSettingsStore {
 	/** Set (or, with null, clear) the user's LLM API key. */
 	async setApiKey(userId: string, apiKey: string | null): Promise<void> {
 		await this.schemaReady;
-		if (apiKey === null) {
-			await this.client.execute({
-				sql: "DELETE FROM user_settings WHERE user_id = ?",
-				args: [userId],
-			});
-			return;
-		}
+		// Upsert rather than delete so future per-user settings columns survive
+		// clearing the key.
 		await this.client.execute({
 			sql: `INSERT INTO user_settings (user_id, llm_api_key, updated_at) VALUES (?, ?, ?)
 				ON CONFLICT(user_id) DO UPDATE SET llm_api_key = excluded.llm_api_key, updated_at = excluded.updated_at`,
