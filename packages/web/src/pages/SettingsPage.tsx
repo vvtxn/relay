@@ -47,6 +47,13 @@ export function SettingsPage() {
 		save.mutate(value);
 	}
 
+	/** Editing the key retires the previous save/error notice. */
+	function onKeyInput(event: Event & { currentTarget: HTMLInputElement }): void {
+		setDraftKey(event.currentTarget.value);
+		setMessage("");
+		setError("");
+	}
+
 	return (
 		<Show when={me.data} fallback={<BootScreen />}>
 			{(user) => (
@@ -88,6 +95,7 @@ export function SettingsPage() {
 									<button
 										type="button"
 										class={theme() === "dark" ? "theme-option active" : "theme-option"}
+										aria-pressed={theme() === "dark"}
 										onClick={() => setTheme("dark")}
 									>
 										Dark
@@ -95,6 +103,7 @@ export function SettingsPage() {
 									<button
 										type="button"
 										class={theme() === "light" ? "theme-option active" : "theme-option"}
+										aria-pressed={theme() === "light"}
 										onClick={() => setTheme("light")}
 									>
 										Light
@@ -110,25 +119,34 @@ export function SettingsPage() {
 								Used by the server to call the model on your behalf. Stored per account and never shown
 								again.
 							</p>
-							<div class="settings-row">
-								<span class="settings-label">Status</span>
-								<span class="settings-value">
-									<Show
-										when={settings.data?.apiKey.set}
-										fallback={<span class="settings-empty">not set</span>}
-									>
-										set (••••{settings.data?.apiKey.hint})
-									</Show>
-								</span>
-							</div>
+							<Show when={settings.isError}>
+								<p class="settings-error">
+									Could not load your settings:{" "}
+									{settings.error instanceof Error ? settings.error.message : String(settings.error)}
+								</p>
+							</Show>
+							<Show when={!settings.isError}>
+								<div class="settings-row">
+									<span class="settings-label">Status</span>
+									<span class="settings-value">
+										<Show
+											when={settings.data?.apiKey.set}
+											fallback={<span class="settings-empty">not set</span>}
+										>
+											set (••••{settings.data?.apiKey.hint})
+										</Show>
+									</span>
+								</div>
+							</Show>
 							<form class="settings-form" onSubmit={submit}>
 								<input
 									class="input"
 									type="password"
-									autocomplete="off"
+									autocomplete="new-password"
+									name="relay-api-key"
 									placeholder="Paste your API key"
 									value={draftKey()}
-									onInput={(event) => setDraftKey(event.currentTarget.value)}
+									onInput={onKeyInput}
 								/>
 								<div class="settings-actions">
 									<button

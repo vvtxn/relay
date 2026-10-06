@@ -140,71 +140,79 @@ export function Sidebar(props: {
 			<div class="workspace-list">
 				<div class="workspace-label">Workspaces</div>
 				<For each={items()}>
-					{(workspace) => (
-						<div class="workspace-node">
-							<div class={workspace.cwd === cwd() ? "workspace-row active" : "workspace-row"}>
-								<button
-									type="button"
-									class="workspace-toggle"
-									title={expanded().has(workspace.cwd) ? "Collapse" : "Expand"}
-									onClick={() => toggleWorkspace(workspace.cwd)}
-								>
-									{expanded().has(workspace.cwd) ? "▾" : "▸"}
-								</button>
-								<button
-									type="button"
-									class="workspace-name-btn"
-									title={workspace.cwd}
-									onClick={() => selectWorkspace(workspace.cwd)}
-								>
-									<span class="workspace-name">{workspaceName(workspace.cwd)}</span>
-									<span class="workspace-meta">
-										{workspace.exists === false ? <span class="workspace-missing">missing</span> : (
-											`${workspace.sessionCount}`
-										)}
-									</span>
-								</button>
-							</div>
-							<Show when={expanded().has(workspace.cwd)}>
-								<div class="tree-sessions">
-									<Show
-										when={sessionsFor(workspace.cwd)?.data}
-										fallback={
-											<div class="session-empty">
-												{sessionsFor(workspace.cwd)?.isFetching
-													? "Loading…"
-													: "No sessions yet"}
-											</div>
-										}
+					{(workspace) => {
+						const open = () => expanded().has(workspace.cwd);
+						const result = createMemo(() => sessionsFor(workspace.cwd));
+						return (
+							<div class="workspace-node">
+								<div class={workspace.cwd === cwd() ? "workspace-row active" : "workspace-row"}>
+									<button
+										type="button"
+										class="workspace-toggle"
+										title={open() ? "Collapse" : "Expand"}
+										onClick={() => toggleWorkspace(workspace.cwd)}
 									>
-										{(list) => (
-											<Show
-												when={list().length}
-												fallback={<div class="session-empty">No sessions yet</div>}
-											>
-												<For each={list()}>
-													{(session) => (
-														<button
-															type="button"
-															class={session.reference === props.activeSessionId
-																? "session-item active"
-																: "session-item"}
-															onClick={() => props.onSelect(session.reference)}
-														>
-															<span class="session-preview">{preview(session)}</span>
-															<span class="session-time">
-																{formatTimestamp(session.timestamp)}
-															</span>
-														</button>
-													)}
-												</For>
-											</Show>
-										)}
-									</Show>
+										{open() ? "▾" : "▸"}
+									</button>
+									<button
+										type="button"
+										class="workspace-name-btn"
+										title={workspace.cwd}
+										onClick={() => selectWorkspace(workspace.cwd)}
+									>
+										<span class="workspace-name">{workspaceName(workspace.cwd)}</span>
+										<span class="workspace-meta">
+											{workspace.exists === false
+												? <span class="workspace-missing">missing</span>
+												: (
+													`${workspace.sessionCount}`
+												)}
+										</span>
+									</button>
 								</div>
-							</Show>
-						</div>
-					)}
+								<Show when={open()}>
+									<div class="tree-sessions">
+										<Show
+											when={result()?.data}
+											fallback={
+												<div class="session-empty">
+													{result()?.isFetching
+														? "Loading…"
+														: result()?.isError
+														? "Failed to load"
+														: "No sessions yet"}
+												</div>
+											}
+										>
+											{(list) => (
+												<Show
+													when={list().length}
+													fallback={<div class="session-empty">No sessions yet</div>}
+												>
+													<For each={list()}>
+														{(session) => (
+															<button
+																type="button"
+																class={session.reference === props.activeSessionId
+																	? "session-item active"
+																	: "session-item"}
+																onClick={() => props.onSelect(session.reference)}
+															>
+																<span class="session-preview">{preview(session)}</span>
+																<span class="session-time">
+																	{formatTimestamp(session.timestamp)}
+																</span>
+															</button>
+														)}
+													</For>
+												</Show>
+											)}
+										</Show>
+									</div>
+								</Show>
+							</div>
+						);
+					}}
 				</For>
 				<Show when={cwd()}>
 					<p class="workspace-hint">{workspacePath({ cwd: cwd(), sessionCount: 0, lastActivity: "" })}</p>
