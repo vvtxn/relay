@@ -43,6 +43,7 @@ export { createDatabaseClient, databaseCredentialsFromEnv } from "./database.ts"
 export type { DatabaseClient, DatabaseCredentials } from "./database.ts";
 
 export { DatabaseUserStore } from "./auth/db.ts";
+export { DatabaseUserSettingsStore } from "./auth/settings.ts";
 export { GitHubAuthProvider } from "./auth/github.ts";
 export { DatabaseAuthSessionStore } from "./auth/sessions.ts";
 export { clearStoredSession, readStoredSession, writeStoredSession } from "./auth/session-file.ts";

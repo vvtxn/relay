@@ -76,6 +76,49 @@ export const theme: Theme = {
 	hr: "#303030",
 };
 
+/**
+ * Light counterpart built from the same token names: paper canvas → graphite
+ * primary information. Used by clients that offer a light/dark switch (the web
+ * app); the terminal keeps the dark default.
+ */
+export const lightTheme: Theme = {
+	brand: "#3C3C3C",
+	accent: "#1F1F1F",
+
+	success: "#4A6B4A",
+	warning: "#7A6A3A",
+	error: "#8A3F3F",
+	info: "#3F4A6B",
+
+	text: "#1C1C1C",
+	textMuted: "#3C3C3C",
+	textDim: "#6A6A6A",
+	textFaint: "#8C8C8C",
+
+	background: "#FAFAFA",
+	surface: "#F2F2F2",
+	surfaceElevated: "#E8E8E8",
+
+	border: "#D6D6D6",
+	borderLabel: "#8C8C8C",
+
+	heading1: "#000000",
+	heading2: "#262626",
+	heading3: "#3C3C3C",
+	codeInline: "#4A4A4A",
+	codeBlock: "#262626",
+	link: "#262626",
+	linkUrl: "#6A6A6A",
+	blockquote: "#6A6A6A",
+	listBullet: "#6A6A6A",
+	hr: "#D6D6D6",
+};
+
+/** Named palettes for clients that let the user pick one. */
+export const themes = { dark: theme, light: lightTheme } as const;
+
+export type ThemeName = keyof typeof themes;
+
 const CSS_VARIABLE_PREFIX = "--relay-";
 
 function toKebabCase(key: string): string {
