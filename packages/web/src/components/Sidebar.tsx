@@ -239,15 +239,20 @@ export function Sidebar(props: {
 			</div>
 
 			<div class="sidebar-footer">
-				<Show when={props.userName}>
+				<button
+					type="button"
+					class="sidebar-user"
+					title="Open settings"
+					onClick={props.onOpenSettings}
+				>
 					<span class="status-user">
 						<Show when={props.avatarUrl}>
 							<img class="avatar" src={props.avatarUrl} alt="" />
 						</Show>
-						<span class="status-meta">{props.userName}</span>
+						<span class="status-meta">{props.userName ?? "Account"}</span>
 					</span>
-				</Show>
-				<button type="button" class="status-action" onClick={props.onOpenSettings}>settings</button>
+					<span class="sidebar-user-action">settings</span>
+				</button>
 			</div>
 		</aside>
 	);

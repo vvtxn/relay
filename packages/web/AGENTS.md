@@ -95,7 +95,8 @@ same font via `relay fonts install` — see `packages/relay/assets/fonts/README.
 A dedicated, auth-guarded route (`pages/SettingsPage.tsx`) with grouped sections: **Account** (identity from `/api/me`,
 sign out), **Appearance** (dark/light switch, applied instantly and persisted locally), and **API key**. The key is
 per-user, stored in the server database, and the only place a key is entered; `GET /api/settings` returns just
-`{ set, hint }` and the page never echoes the key back. Entry points are in the sidebar footer and status bar.
+`{ set, hint }` and the page never echoes the key back. Entry points are the user chip in the sidebar footer and the
+status bar (the CLI also opens this page and blocks until a key is set).
 
 ### Markdown
 
