@@ -58,7 +58,7 @@ cd relay
 deno task build        # outputs dist/relay
 ```
 
-The server reads its LLM API key from `LLM_API_KEY`, falling back to `~/.relay/auth.json`.
+The server reads each user's LLM API key from the database; users paste theirs in the web app's Settings page.
 
 Server settings (`serverUrl` for the terminal client) are configured in `~/.relay/config.json`.
 
@@ -375,9 +375,9 @@ Tag-based releases via GitHub Actions (`.github/workflows/release.yml`):
 3. `git tag v<version> && git push --tags`
 4. CI builds the Linux binary without embedding environment files and creates the GitHub Release
 
-The released binary reads `LLM_API_KEY` (or falls back to `~/.relay/auth.json`), `TURSO_DB_URL`, `TURSO_DB_TOKEN`,
-`GITHUB_APP_CLIENT_ID`, and `GITHUB_APP_CLIENT_SECRET` from its runtime environment. Local `deno task build` builds may
-load `.env` automatically, but release builds should not include secrets in the executable.
+The released binary reads `TURSO_DB_URL`, `TURSO_DB_TOKEN`, `GITHUB_APP_CLIENT_ID`, and `GITHUB_APP_CLIENT_SECRET` from
+its runtime environment. The LLM API key is per user and stored in the database (set via the web Settings page). Local
+`deno task build` builds may load `.env` automatically, but release builds should not include secrets in the executable.
 
 ## License
 
