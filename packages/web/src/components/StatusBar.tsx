@@ -24,6 +24,7 @@ export function StatusBar(props: {
 	avatarUrl?: string | undefined;
 	contextWindow: number;
 	onSignOut: () => void;
+	onOpenSettings: () => void;
 }) {
 	return (
 		<header class="status-bar">
@@ -53,6 +54,8 @@ export function StatusBar(props: {
 					<span class="status-stat-key">cost</span>
 					<span class="status-stat-value">${streamState().cost.toFixed(2)}</span>
 				</div>
+				<span class="status-sep" />
+				<button type="button" class="status-action" onClick={props.onOpenSettings}>settings</button>
 				<span class="status-sep" />
 				<button type="button" class="status-action" onClick={props.onSignOut}>sign out</button>
 			</div>

@@ -15,7 +15,7 @@ web/
 └── src/
     ├── main.tsx     # render + apply theme + QueryClientProvider + RouterProvider
     ├── router.tsx   # Code-based routes: "/" boot → "/s/$sessionId"
-    ├── theme.ts     # applyTheme(): shared tokens → --relay-* CSS variables
+    ├── theme.ts     # applyTheme(mode): palette + color-scheme → --relay-* CSS variables
     ├── version.ts   # Display version
     ├── styles.css   # Layout + components, all colors via var(--relay-*)
     ├── api/
@@ -30,10 +30,12 @@ web/
     ├── auth/auth.ts       # OAuth seam: login/logout URLs, redirect helpers
     ├── state/
     │   ├── session.ts     # Live stream store + reconnect fiber + query invalidation
-    │   └── workspace.ts   # Active cwd signal (persisted)
+    │   ├── workspace.ts   # Active cwd signal (persisted)
+    │   └── theme.ts       # Palette preference (persisted; dark default)
     ├── pages/
     │   ├── BootPage.tsx   # Runs bootstrap, seeds query cache, redirects to a session
-    │   └── SessionPage.tsx# Hydrates session, starts stream, composes the shell
+    │   ├── SessionPage.tsx# Hydrates session, starts stream, composes the shell
+    │   └── SettingsPage.tsx # Account + appearance + API key, in grouped sections
     └── components/
         ├── Sidebar.tsx         # Workspace switcher, session list, new chat
         ├── ChatView.tsx        # Message list + in-flight draft + auto-scroll
@@ -77,14 +79,23 @@ GitHub" button linking to `/api/auth/login`. `SessionPage` redirects to `/` on a
 
 ### Theming
 
-`packages/relay/core/theme.ts` is the single source of tokens; the CLI re-exports it from `@/tui/theme.ts`. `theme.ts`
-here calls `themeToCssVariables()` and applies `--relay-*` custom properties to `document.documentElement` at startup.
-`styles.css` only references those variables — never hardcode colors.
+`packages/relay/core/theme.ts` is the single source of tokens; the CLI re-exports it from `@/tui/theme.ts`. It exports
+`lightTheme` alongside the dark default plus a `themes` map. `theme.ts` here calls `themeToCssVariables(themes[mode])`,
+applies `--relay-*` custom properties and `color-scheme` to `document.documentElement`, and tags `data-theme`.
+`state/theme.ts` holds the persisted preference (localStorage key `relay.theme`, dark default) and is applied before the
+first render in `main.tsx`; `styles.css` only references those variables — never hardcode colors.
 
 Typography is shared too: `packages/relay/core/fonts.ts` names the family and CSS stack, and `styles.css` declares
 `@font-face` rules for the woff2 files under `packages/relay/assets/fonts` (Vite copies them into the bundle). Startup
 sets `--relay-font-mono` from `font.cssStack`; the value in `:root` is only a no-JS fallback. The terminal installs the
 same font via `relay fonts install` — see `packages/relay/assets/fonts/README.md` before swapping it.
+
+### Settings (`/settings`)
+
+A dedicated, auth-guarded route (`pages/SettingsPage.tsx`) with grouped sections: **Account** (identity from `/api/me`,
+sign out), **Appearance** (dark/light switch, applied instantly and persisted locally), and **API key**. The key is
+per-user, stored in the server database, and the only place a key is entered; `GET /api/settings` returns just
+`{ set, hint }` and the page never echoes the key back. Entry points are in the sidebar footer and status bar.
 
 ### Markdown
 
@@ -99,11 +110,13 @@ inserts `@path`; the server expands mentions into `<attached_context>` blocks be
 ### Workspaces
 
 A workspace is a project directory. `GET /api/workspaces` returns the distinct session `cwd`s plus explicitly registered
-workspaces (and the server default) for the user; the sidebar lists them and selecting one scopes the session list and
-the "New chat" target. `cwd` lives in `state/workspace.ts` (persisted) and drives `sessionsQuery(cwd)`. "Add workspace"
-accepts an absolute path, calls `GET /api/workspaces/validate` (inline error when missing/outside roots), stores the
-returned canonical path, and registers it via `POST /api/workspaces`. Entries whose directory is gone (`exists: false`)
-are flagged. Bootstrap re-validates the persisted cwd and falls back to the server default.
+workspaces (and the server default) for the user. The sidebar renders them as an expandable **tree**: each workspace is
+a row with a chevron, session count, and a `missing` flag when its directory is gone; its sessions nest underneath. Only
+expanded workspaces are fetched (`useQueries` over `sessionsQuery(cwd)` per open cwd), and the active workspace is
+always expanded. Selecting a workspace scopes the "New chat" target (`cwd` in `state/workspace.ts`, persisted) and
+drives the session queries. "Add workspace" accepts an absolute path, calls `GET /api/workspaces/validate` (inline error
+when missing/outside roots), stores the returned canonical path, and registers it via `POST /api/workspaces`. Bootstrap
+re-validates the persisted cwd and falls back to the server default.
 
 ## Building & Running
 

@@ -1,5 +1,5 @@
-import { createMemo, createSignal, For, Show } from "solid-js";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/solid-query";
+import { createEffect, createMemo, createSignal, For, Show } from "solid-js";
+import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/solid-query";
 import { abbreviateHome } from "@vvtxn/relay/core/display.ts";
 import type { SessionSummary, WorkspaceSummary } from "@vvtxn/relay/core/sessions/index.ts";
 import { sessionsQuery, workspacesQuery } from "@/api/queries.ts";
@@ -35,10 +35,11 @@ export function Sidebar(props: {
 	avatarUrl?: string | undefined;
 	activeSessionId: string;
 	onSelect: (id: string) => void;
+	onOpenSettings: () => void;
 }) {
 	const queryClient = useQueryClient();
-	const sessions = useQuery(() => sessionsQuery(cwd()));
 	const workspaces = useQuery(() => workspacesQuery);
+	const [expanded, setExpanded] = createSignal<Set<string>>(new Set(cwd() ? [cwd()] : []));
 	const [addOpen, setAddOpen] = createSignal(false);
 	const [draftCwd, setDraftCwd] = createSignal("");
 	const [addError, setAddError] = createSignal("");
@@ -53,17 +54,45 @@ export function Sidebar(props: {
 		return list;
 	});
 
+	// The active workspace is always expanded; others toggle on demand.
+	createEffect(() => {
+		const active = cwd();
+		if (active) setExpanded((prev) => (prev.has(active) ? prev : new Set(prev).add(active)));
+	});
+
+	// Only fetch sessions for workspaces the user has opened.
+	const expandedCwds = createMemo(() =>
+		items().filter((workspace) => expanded().has(workspace.cwd)).map((workspace) => workspace.cwd)
+	);
+	const sessionQueries = useQueries(() => ({
+		queries: expandedCwds().map((path) => sessionsQuery(path)),
+	}));
+	const sessionsFor = (path: string) => {
+		const index = expandedCwds().indexOf(path);
+		return index >= 0 ? sessionQueries[index] : undefined;
+	};
+
 	const create = useMutation(() => ({
 		mutationFn: () => createSession(cwd()),
 		onSuccess: async (response) => {
-			await queryClient.invalidateQueries({ queryKey: queryKeys.sessions(cwd()) });
+			await queryClient.invalidateQueries({ queryKey: ["sessions"] });
 			await queryClient.invalidateQueries({ queryKey: queryKeys.workspaces });
 			props.onSelect(response.id);
 		},
 		onError: (error) => appendError(error instanceof Error ? error.message : String(error)),
 	}));
 
+	function toggleWorkspace(path: string): void {
+		setExpanded((prev) => {
+			const next = new Set(prev);
+			if (next.has(path)) next.delete(path);
+			else next.add(path);
+			return next;
+		});
+	}
+
 	function selectWorkspace(next: string): void {
+		setExpanded((prev) => (prev.has(next) ? prev : new Set(prev).add(next)));
 		if (next !== cwd()) setCwd(next);
 	}
 
@@ -112,19 +141,69 @@ export function Sidebar(props: {
 				<div class="workspace-label">Workspaces</div>
 				<For each={items()}>
 					{(workspace) => (
-						<button
-							type="button"
-							class={workspace.cwd === cwd() ? "workspace-item active" : "workspace-item"}
-							title={workspace.cwd}
-							onClick={() => selectWorkspace(workspace.cwd)}
-						>
-							<span class="workspace-name">{workspaceName(workspace.cwd)}</span>
-							<span class="workspace-meta">
-								{workspace.exists === false ? <span class="workspace-missing">missing</span> : (
-									`${workspace.sessionCount} session${workspace.sessionCount === 1 ? "" : "s"}`
-								)}
-							</span>
-						</button>
+						<div class="workspace-node">
+							<div class={workspace.cwd === cwd() ? "workspace-row active" : "workspace-row"}>
+								<button
+									type="button"
+									class="workspace-toggle"
+									title={expanded().has(workspace.cwd) ? "Collapse" : "Expand"}
+									onClick={() => toggleWorkspace(workspace.cwd)}
+								>
+									{expanded().has(workspace.cwd) ? "▾" : "▸"}
+								</button>
+								<button
+									type="button"
+									class="workspace-name-btn"
+									title={workspace.cwd}
+									onClick={() => selectWorkspace(workspace.cwd)}
+								>
+									<span class="workspace-name">{workspaceName(workspace.cwd)}</span>
+									<span class="workspace-meta">
+										{workspace.exists === false ? <span class="workspace-missing">missing</span> : (
+											`${workspace.sessionCount}`
+										)}
+									</span>
+								</button>
+							</div>
+							<Show when={expanded().has(workspace.cwd)}>
+								<div class="tree-sessions">
+									<Show
+										when={sessionsFor(workspace.cwd)?.data}
+										fallback={
+											<div class="session-empty">
+												{sessionsFor(workspace.cwd)?.isFetching
+													? "Loading…"
+													: "No sessions yet"}
+											</div>
+										}
+									>
+										{(list) => (
+											<Show
+												when={list().length}
+												fallback={<div class="session-empty">No sessions yet</div>}
+											>
+												<For each={list()}>
+													{(session) => (
+														<button
+															type="button"
+															class={session.reference === props.activeSessionId
+																? "session-item active"
+																: "session-item"}
+															onClick={() => props.onSelect(session.reference)}
+														>
+															<span class="session-preview">{preview(session)}</span>
+															<span class="session-time">
+																{formatTimestamp(session.timestamp)}
+															</span>
+														</button>
+													)}
+												</For>
+											</Show>
+										)}
+									</Show>
+								</div>
+							</Show>
+						</div>
 					)}
 				</For>
 				<Show when={cwd()}>
@@ -159,32 +238,6 @@ export function Sidebar(props: {
 				</Show>
 			</div>
 
-			<div class="session-list">
-				<Show
-					when={sessions.data?.length}
-					fallback={
-						<div class="session-empty">
-							{sessions.isFetching ? "Loading sessions..." : "No sessions yet"}
-						</div>
-					}
-				>
-					<For each={sessions.data}>
-						{(session) => (
-							<button
-								type="button"
-								class={session.reference === props.activeSessionId
-									? "session-item active"
-									: "session-item"}
-								onClick={() => props.onSelect(session.reference)}
-							>
-								<span class="session-preview">{preview(session)}</span>
-								<span class="session-time">{formatTimestamp(session.timestamp)}</span>
-							</button>
-						)}
-					</For>
-				</Show>
-			</div>
-
 			<div class="sidebar-footer">
 				<Show when={props.userName}>
 					<span class="status-user">
@@ -194,6 +247,7 @@ export function Sidebar(props: {
 						<span class="status-meta">{props.userName}</span>
 					</span>
 				</Show>
+				<button type="button" class="status-action" onClick={props.onOpenSettings}>settings</button>
 			</div>
 		</aside>
 	);

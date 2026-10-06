@@ -64,6 +64,10 @@ export function SessionPage() {
 		void navigate({ to: "/s/$sessionId", params: { sessionId: id } });
 	};
 
+	const goToSettings = () => {
+		void navigate({ to: "/settings" });
+	};
+
 	return (
 		<Show
 			when={!me.isError && !config.isError}
@@ -76,6 +80,7 @@ export function SessionPage() {
 						avatarUrl={me.data!.avatarUrl}
 						activeSessionId={sessionId()}
 						onSelect={goToSession}
+						onOpenSettings={goToSettings}
 					/>
 					<main class="main">
 						<StatusBar
@@ -84,6 +89,7 @@ export function SessionPage() {
 							avatarUrl={me.data!.avatarUrl}
 							contextWindow={config.data!.contextTokens}
 							onSignOut={() => void signOut()}
+							onOpenSettings={goToSettings}
 						/>
 						<ChatView
 							model={config.data!.model}
