@@ -156,6 +156,12 @@ export async function handleSendMessage(
 		services.runs.attachHandle(sessionId, await openSessionHandle(services, sessionId), services.user.id);
 	}
 
+	// Fail fast with a clear message rather than starting a run that can only
+	// error out: a provider cannot be built without the user's API key.
+	if (!await services.userSettings.getApiKey(services.user.id)) {
+		return error(400, "No API key configured. Add one in Settings.");
+	}
+
 	try {
 		services.runs.startMessage(sessionId, body.content);
 	} catch (err) {

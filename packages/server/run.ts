@@ -33,7 +33,7 @@ interface PendingApproval {
 export class RunManager {
 	private readonly config: ServerConfig;
 	private readonly sessionStore: SessionStore;
-	private readonly provider: LLMProvider;
+	private readonly providerFor: (ownerId: string) => Promise<LLMProvider | null>;
 
 	private readonly activeRuns = new Set<string>();
 	private readonly aborts = new Map<string, AbortController>();
@@ -52,10 +52,14 @@ export class RunManager {
 	private readonly tokens = new Map<string, number>();
 	private readonly cost = new Map<string, number>();
 
-	constructor(options: { config: ServerConfig; sessionStore: SessionStore; provider: LLMProvider }) {
+	constructor(options: {
+		config: ServerConfig;
+		sessionStore: SessionStore;
+		providerFor: (ownerId: string) => Promise<LLMProvider | null>;
+	}) {
 		this.config = options.config;
 		this.sessionStore = options.sessionStore;
-		this.provider = options.provider;
+		this.providerFor = options.providerFor;
 	}
 
 	isRunning(sessionId: string): boolean {
@@ -169,11 +173,12 @@ export class RunManager {
 
 		// Get or open the handle for this session. The handle stays cached so
 		// token/cost tracking persists across runs.
-		const handle = this.handles.get(sessionId)?.handle;
-		if (!handle) {
+		const entry = this.handles.get(sessionId);
+		if (!entry) {
 			this.activeRuns.delete(sessionId);
 			throw new Error(`No open session handle for ${sessionId}`);
 		}
+		const { handle, ownerId } = entry;
 
 		const ac = new AbortController();
 		this.aborts.set(sessionId, ac);
@@ -186,6 +191,13 @@ export class RunManager {
 		let finished: ServerEvent = { type: "run_finished", reason: "completed" };
 
 		try {
+			// Build the provider from the owner's stored key. Per-user keys live in
+			// the database, so a run without one is a configuration error.
+			const provider = await this.providerFor(ownerId);
+			if (!provider) {
+				throw new Error("No API key configured. Add one in Settings.");
+			}
+
 			// Re-validate the workspace before every run: the directory may have
 			// been deleted or replaced by a symlink since the session was created.
 			const storedCwd = handle.getHeader().cwd;
@@ -217,7 +229,7 @@ export class RunManager {
 			);
 
 			await runAgentLoop(messages, {
-				provider: this.provider,
+				provider,
 				tools,
 				model: this.config.model,
 				systemPrompt: SYSTEM_PROMPT,

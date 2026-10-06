@@ -1,8 +1,7 @@
 /** Server configuration — read once from the environment at startup. */
 
-import { join } from "@std/path/join";
 import { resolve } from "@std/path/resolve";
-import { homeDir, relayDir } from "@vvtxn/relay/core/paths.ts";
+import { homeDir } from "@vvtxn/relay/core/paths.ts";
 import { validateWorkspacePathSync } from "@vvtxn/relay/core/workspace.ts";
 
 /** Deployment mode selected by `RELAY_ENV`. */
@@ -15,8 +14,6 @@ export interface ServerConfig {
 	port: number;
 	/** Hostname to bind. Localhost-only by default (single-user local server). */
 	hostname: string;
-	/** API key for the LLM provider. */
-	apiKey: string;
 	/** Base URL for the LLM provider. */
 	baseURL: string;
 	/** Model passed to the provider. */
@@ -84,28 +81,8 @@ export function isLoopbackHost(host: string): boolean {
 	return host === "localhost" || host === "::1" || host === "[::1]" || host.startsWith("127.");
 }
 
-/** Reads the API key from the CLI's auth file (~/.relay/auth.json). Returns null when absent. */
-function readApiKeyFromAuthFile(): string | null {
-	try {
-		const raw = Deno.readTextFileSync(join(relayDir(), "auth.json"));
-		const parsed = JSON.parse(raw) as { apiKey?: unknown };
-		return typeof parsed.apiKey === "string" && parsed.apiKey.length > 0 ? parsed.apiKey : null;
-	} catch {
-		return null;
-	}
-}
-
-function resolveApiKey(env: Record<string, string | undefined>, readApiKey: () => string | null): string {
-	const fromEnv = env.LLM_API_KEY;
-	if (fromEnv) return fromEnv;
-	const fromFile = readApiKey();
-	if (fromFile) return fromFile;
-	throw new Error("LLM_API_KEY is required (or run the CLI once to create ~/.relay/auth.json)");
-}
-
 export function serverConfigFromEnv(
 	env: Record<string, string | undefined> = Deno.env.toObject(),
-	readApiKey: () => string | null = readApiKeyFromAuthFile,
 ): ServerConfig {
 	const port = positiveInt(env.RELAY_PORT, DEFAULT_PORT, "RELAY_PORT", 65_535);
 	const hostname = env.RELAY_HOST ?? DEFAULT_HOSTNAME;
@@ -157,7 +134,6 @@ export function serverConfigFromEnv(
 		relayEnv: env.RELAY_ENV === "production" ? "production" : "development",
 		port,
 		hostname,
-		apiKey: resolveApiKey(env, readApiKey),
 		baseURL: env.LLM_BASE_URL ?? DEFAULT_BASE_URL,
 		model: env.LLM_MODEL ?? DEFAULT_MODEL,
 		temperature: Number(env.LLM_TEMPERATURE ?? 0.1),

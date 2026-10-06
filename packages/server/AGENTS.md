@@ -83,7 +83,10 @@ are the only new storage — sessions are already scoped by `ownerId`.
 
 ### API key
 
-`LLM_API_KEY` env wins; otherwise the CLI's `~/.relay/auth.json` is read (injectable reader for tests).
+The LLM API key is per user, stored in the `user_settings` table. It is plaintext (the server must present it verbatim
+as a Bearer token) and never returned to clients — `GET /api/settings` exposes only `{ set, hint }`. `RunManager` builds
+a provider from the owning user's key at run start; a missing key fails the run with a clear message, and
+`handleSendMessage` returns 400 before a doomed run begins.
 
 ### Static serving
 
@@ -108,6 +111,8 @@ no state behind.
 | `/api/auth/logout`           | POST   | Revoke the session + clear the cookie                 |
 | `/api/me`                    | GET    | Authenticated user                                    |
 | `/api/config`                | GET    | Model + context window for status displays            |
+| `/api/settings`              | GET    | Per-user API-key presence (masked)                    |
+| `/api/settings/api-key`      | PUT    | Set or clear the caller's LLM API key                 |
 | `/api/workspace`             | GET    | Server default cwd                                    |
 | `/api/workspaces`            | GET    | Distinct workspaces (cwds) with session counts        |
 | `/api/workspaces`            | POST   | Validate + register a workspace                       |
@@ -126,8 +131,7 @@ Payload types live in `@vvtxn/client/protocol.ts` — never redeclare them here.
 
 ## Environment
 
-- `LLM_API_KEY` (or `~/.relay/auth.json` fallback), `LLM_BASE_URL`, `LLM_MODEL`, `LLM_TEMPERATURE`, `LLM_MAX_TOKENS`,
-  `LLM_MAX_COMPLETION_TOKENS`
+- `LLM_BASE_URL`, `LLM_MODEL`, `LLM_TEMPERATURE`, `LLM_MAX_TOKENS`, `LLM_MAX_COMPLETION_TOKENS`
 - `TURSO_DB_URL`, `TURSO_DB_TOKEN`
 - Required: `GITHUB_APP_CLIENT_ID`, `GITHUB_APP_CLIENT_SECRET` (`GITHUB_CLIENT_ID`/`GITHUB_CLIENT_SECRET` still
   accepted); the server refuses to start without them

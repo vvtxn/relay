@@ -22,6 +22,7 @@ import {
 	handleValidateWorkspace,
 	handleWorkspace,
 } from "./workspace.ts";
+import { handleGetSettings, handleSetApiKey } from "./settings.ts";
 import { serveStatic } from "./static.ts";
 
 function health(): Response {
@@ -109,6 +110,8 @@ async function routeApi(
 ): Promise<Response> {
 	if (method === "GET" && path === "/api/me") return handleMe(services);
 	if (method === "GET" && path === "/api/config") return handleConfig(services);
+	if (method === "GET" && path === "/api/settings") return await handleGetSettings(services);
+	if (method === "PUT" && path === "/api/settings/api-key") return await handleSetApiKey(services, request);
 	if (method === "GET" && path === "/api/workspace") return handleWorkspace(services);
 	if (method === "GET" && path === "/api/workspaces") return await handleListWorkspaces(services);
 	if (method === "GET" && path === "/api/workspaces/validate") return await handleValidateWorkspace(services, url);
