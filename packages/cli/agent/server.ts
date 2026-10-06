@@ -310,8 +310,10 @@ export async function apiKeyStatus(serverUrl: string): Promise<ApiKeyStatus> {
 		});
 		if (response.status === 401) return { status: "unauthenticated" };
 		if (!response.ok) return { status: "unreachable", detail: `the server returned ${response.status}` };
-		const body = await response.json() as SettingsResponse;
-		return body.apiKey.set ? { status: "configured" } : { status: "missing" };
+		const body = await response.json() as Partial<SettingsResponse> | null;
+		// A malformed body counts as "missing": the TUI can only be entered once a
+		// key is confirmed, and the user can always re-save it.
+		return body?.apiKey?.set ? { status: "configured" } : { status: "missing" };
 	} catch (error) {
 		return { status: "unreachable", detail: error instanceof Error ? error.message : String(error) };
 	}
@@ -335,11 +337,20 @@ export async function ensureApiKey(state: ServerState): Promise<void> {
 		);
 	}
 
-	const settingsUrl = new URL("/settings", state.webUrl || state.url).toString();
+	// In development the web origin is Vite (e.g. localhost:5173); fall back to
+	// the web app the server itself serves when that is not running, so the user
+	// is never sent to a dead page.
+	let webOrigin = state.webUrl || state.url;
+	if (webOrigin !== state.url && !(await isReachable(webOrigin))) {
+		webOrigin = state.url;
+	}
+
+	const settingsUrl = new URL("/settings", webOrigin).toString();
 	console.log(`No API key configured. Opening ${settingsUrl} — add one to continue.`);
 	openBrowser(settingsUrl);
 
 	const deadline = Date.now() + API_KEY_TIMEOUT_MS;
+	let warned = false;
 	while (Date.now() < deadline) {
 		await delay(1_000);
 		const current = await apiKeyStatus(state.url);
@@ -350,8 +361,11 @@ export async function ensureApiKey(state: ServerState): Promise<void> {
 		if (current.status === "unauthenticated") {
 			throw new Error("Signed out while waiting for the API key. Run `relay` again.");
 		}
-		if (current.status === "unreachable") {
-			throw new Error(`Cannot reach the Relay server at ${state.url} (${current.detail}).`);
+		if (current.status === "unreachable" && !warned) {
+			// A transient blip (server restart) should not abort the wait; the
+			// user can still save the key once it is back.
+			warned = true;
+			console.log(`Lost contact with the server (${current.detail}); waiting for it to return…`);
 		}
 	}
 	throw new Error("Timed out waiting for an API key. Add one in the web Settings page, then run `relay` again.");
