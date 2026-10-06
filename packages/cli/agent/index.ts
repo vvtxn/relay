@@ -1,5 +1,5 @@
 import { startServer } from "@vvtxn/server/main.ts";
-import { ensureAuthenticated, ensureServer, printStatus, runWeb, stopServer } from "./server.ts";
+import { ensureApiKey, ensureAuthenticated, ensureServer, printStatus, runWeb, stopServer } from "./server.ts";
 import { runFontsCommand } from "./fonts.ts";
 import { runWorkspaceCommand } from "./workspace.ts";
 
@@ -31,6 +31,10 @@ try {
 			const state = await ensureServer({ cwd: Deno.cwd() });
 			Deno.env.set("RELAY_SERVER_URL", state.url);
 			await ensureAuthenticated(state);
+			// The agent needs an LLM API key, entered only in the web Settings
+			// page; block here until one is saved rather than opening a TUI that
+			// cannot send a message.
+			await ensureApiKey(state);
 			await import("./app.tsx");
 		}
 	}
