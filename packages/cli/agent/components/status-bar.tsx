@@ -1,4 +1,5 @@
 import { Box, Text } from "@/tui/render/components.tsx";
+import { space } from "@/tui/spacing.ts";
 import { theme } from "@/tui/theme.ts";
 
 // ---------------------------------------------------------------------------
@@ -20,7 +21,7 @@ function TokenBar({ tokenCount, contextWindow }: { tokenCount: number; contextWi
 	const color = ratio >= 0.8 ? theme.error : ratio >= 0.5 ? theme.warning : theme.success;
 
 	return (
-		<Box flexDirection="row" gap={1}>
+		<Box flexDirection="row" gap={space.inline}>
 			<Text color={theme.textDim}>tokens</Text>
 			<Text color={filled > 0 ? color : theme.textDim}>
 				{"█".repeat(filled)}
@@ -47,8 +48,14 @@ export function StatusBar(
 	},
 ) {
 	return (
-		<Box flexDirection="row" justifyContent="space-between">
-			<Box flexDirection="row" gap={1}>
+		<Box
+			flexDirection="row"
+			justifyContent="space-between"
+			bgColor={theme.surface}
+			paddingX={space.gutter}
+			paddingY={space.cardY}
+		>
+			<Box flexDirection="row" gap={space.inline}>
 				<Text bold color={theme.brand}>
 					Relay
 				</Text>
@@ -56,9 +63,9 @@ export function StatusBar(
 				{branchName && <Text color={theme.textFaint}>on {branchName}</Text>}
 				{userName && <Text color={theme.textDim}>as {userName}</Text>}
 			</Box>
-			<Box flexDirection="row" gap={1}>
+			<Box flexDirection="row" gap={space.inline}>
 				<TokenBar tokenCount={tokenCount} contextWindow={contextWindow} />
-				<Box flexDirection="row" gap={1}>
+				<Box flexDirection="row" gap={space.inline}>
 					<Text color={theme.textDim}>cost:</Text>
 					<Text color={theme.success}>{totalCost.toFixed(2)}$</Text>
 				</Box>

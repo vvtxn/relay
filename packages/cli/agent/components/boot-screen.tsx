@@ -1,4 +1,5 @@
 import { Box, Spinner, Text } from "@/tui/render/components.tsx";
+import { space } from "@/tui/spacing.ts";
 import { theme } from "@/tui/theme.ts";
 
 /** Shown while authentication and the initial session are being resolved. */
@@ -9,10 +10,10 @@ export function BootScreen() {
 			flexDirection="column"
 			justifyContent="center"
 			alignItems="center"
-			gap={1}
+			gap={space.block}
 			bgColor={theme.background}
 		>
-			<Box flexDirection="row" gap={1}>
+			<Box flexDirection="row" gap={space.inline}>
 				<Spinner color={theme.accent} />
 				<Text color={theme.textDim}>Signing in...</Text>
 			</Box>
@@ -28,7 +29,7 @@ export function BootError({ message }: { message: string }) {
 			flexDirection="column"
 			justifyContent="center"
 			alignItems="center"
-			gap={1}
+			gap={space.block}
 			bgColor={theme.background}
 		>
 			<Text color={theme.error} bold>Authentication failed</Text>

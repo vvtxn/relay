@@ -1,4 +1,5 @@
 import { Box, Text } from "../components.tsx";
+import { space } from "@/tui/spacing.ts";
 import { theme } from "@/tui/theme.ts";
 import type { useApprovalPrompt } from "../hooks/approval.ts";
 
@@ -11,7 +12,9 @@ export function ApprovalPrompt(props: ApprovalPromptProps) {
 	const { approval, width = 72 } = props;
 	const pending = approval.pending.value;
 
-	if (!pending) return <Box />;
+	// Absolute so a closed prompt stays out of the parent's flex flow (see
+	// CommandPalette).
+	if (!pending) return <Box position="absolute" />;
 
 	return (
 		<Box
@@ -28,32 +31,33 @@ export function ApprovalPrompt(props: ApprovalPromptProps) {
 				width={width}
 				bgColor={theme.surfaceElevated}
 				flexDirection="column"
-				padding={1}
-				gap={1}
+				paddingX={space.overlayX}
+				paddingY={space.overlayY}
+				gap={space.block}
 			>
 				<Text bold color={theme.warning}>
 					Approval required
 				</Text>
-				<Box flexDirection="row" gap={1}>
+				<Box flexDirection="row" gap={space.inline}>
 					<Text bold color={theme.text}>
 						{pending.toolName}
 					</Text>
 					<Text color={theme.textMuted}>{pending.summary}</Text>
 				</Box>
-				<Box flexDirection="row" gap={2}>
-					<Box flexDirection="row" gap={1}>
+				<Box flexDirection="row" gap={space.gutter}>
+					<Box flexDirection="row" gap={space.inline}>
 						<Text bold color={theme.success}>
 							y
 						</Text>
 						<Text color={theme.textDim}>allow once</Text>
 					</Box>
-					<Box flexDirection="row" gap={1}>
+					<Box flexDirection="row" gap={space.inline}>
 						<Text bold color={theme.accent}>
 							a
 						</Text>
 						<Text color={theme.textDim}>always allow</Text>
 					</Box>
-					<Box flexDirection="row" gap={1}>
+					<Box flexDirection="row" gap={space.inline}>
 						<Text bold color={theme.error}>
 							n
 						</Text>

@@ -1,4 +1,5 @@
 import { Box, Text } from "../components.tsx";
+import { space } from "@/tui/spacing.ts";
 import { theme } from "@/tui/theme.ts";
 
 // Monochrome brand mark — silver primary, no multicolor decoration.
@@ -25,11 +26,11 @@ export function WelcomeScreen(
 	{ version, subtitle = "Type a message to get started", hints, userName, model }: WelcomeScreenProps,
 ) {
 	return (
-		<Box flex flexDirection="column" justifyContent="center" alignItems="center" gap={1}>
+		<Box flex flexDirection="column" justifyContent="center" alignItems="center" gap={space.block}>
 			<Box flexDirection="column">
 				{LOGO.map(({ text, color }) => <Text key={text} color={color} bold>{text}</Text>)}
 			</Box>
-			<Box flexDirection="column" alignItems="center" gap={1}>
+			<Box flexDirection="column" alignItems="center" gap={space.block}>
 				<Text color={theme.textMuted}>v{version}</Text>
 				{model && <Text color={theme.textDim}>{model.split("/").pop()}</Text>}
 				{userName && <Text color={theme.textDim}>signed in as {userName}</Text>}

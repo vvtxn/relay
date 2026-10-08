@@ -51,8 +51,20 @@ export interface BoxProps extends BaseProps {
 	flexDirection?: "row" | "column" | "row-reverse" | "column-reverse";
 	/** Space between child elements */
 	gap?: number;
-	/** Inner padding */
+	/** Inner padding on all edges */
 	padding?: number;
+	/** Inner padding on the left and right edges (overrides `padding` horizontally) */
+	paddingX?: number;
+	/** Inner padding on the top and bottom edges (overrides `padding` vertically) */
+	paddingY?: number;
+	/** Inner padding on the top edge (overrides `padding` / `paddingY`) */
+	paddingTop?: number;
+	/** Inner padding on the right edge (overrides `padding` / `paddingX`) */
+	paddingRight?: number;
+	/** Inner padding on the bottom edge (overrides `padding` / `paddingY`) */
+	paddingBottom?: number;
+	/** Inner padding on the left edge (overrides `padding` / `paddingX`) */
+	paddingLeft?: number;
 	/** Width of the element */
 	width?: number;
 	/** Height of the element */

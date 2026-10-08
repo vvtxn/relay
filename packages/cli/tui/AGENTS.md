@@ -56,6 +56,7 @@ tui/
 │   ├── text-input-cursor.test.ts # Text input cursor tests
 │   ├── text-utils.test.ts      # Text utility tests
 │   └── wrap-text.test.ts       # Text wrapping tests (ANSI/wide-aware)
+├── spacing.ts                  # Terminal spacing scale + semantic layout roles
 └── theme.ts                    # Centralized color theme (hex colors for all UI elements)
 ```
 
@@ -81,6 +82,29 @@ the app background always fills the entire window. For hex colors the terminal i
 re-apply their background after any full SGR reset in child text, so nested surfaces survive styled markdown/mentions.
 `bgColor="default"` means transparent (inherits the parent). There are no borders: visual hierarchy comes from the
 background steps (`background` → `surface` → `surfaceElevated`) plus padding, not outlines.
+
+### Spacing (`spacing.ts`)
+
+Terminal spacing is measured in character cells. `spacing` is the raw scale (`none`, `xs: 1`, `sm: 2`, `md: 3`,
+`lg: 4`); `space` is the semantic role map every UI component should use instead of literal numbers:
+
+- `gutter` — the one horizontal page margin (2). Every top-level region aligns to it.
+- `section` — vertical gap between major regions (1).
+- `cardX` / `cardY` — inner padding of a full-bleed surface such as a message or a bar (2 / 1).
+- `block` — vertical gap between stacked children of a block (1).
+- `inline` — gap between an icon/bullet and its label, or adjacent row tokens (1).
+- `rail` — width of the colored left rail that marks a message card (1).
+- `overlayX` / `overlayY` — padding inside a floating panel (2 / 1).
+
+Because horizontal and vertical space serve different purposes, `<Box>` supports `padding` plus `paddingX` / `paddingY`
+and the per-edge `paddingTop` / `paddingRight` / `paddingBottom` / `paddingLeft` overrides (edge > axis > all). Surfaces
+are **full-bleed** — they span the terminal width and carry the gutter in their own `paddingX`; never nest a padded
+surface inside another padded container, or the insets double and columns misalign. Regions are separated by a blank row
+showing the base background, not by padding on their outer edges.
+
+Because regions are separated with `gap`, an overlay that is _closed_ must not occupy a slot in the flow: a closed
+`CommandPalette` / `ApprovalPrompt` renders `<Box position="absolute" />` (not a plain empty `<Box />`), otherwise each
+closed overlay consumes a `gap` row and lifts the composer off the bottom of the screen.
 
 ### Core Classes
 
@@ -119,7 +143,7 @@ Supports flexbox properties on `<Box>`:
 - `justifyContent` (flex-start/center/flex-end/space-between/space-around/space-evenly)
 - `alignItems` (flex-start/center/flex-end/stretch/baseline)
 - `flexWrap` (wrap/wrap-reverse/nowrap)
-- `gap`, `padding`
+- `gap`, `padding`, `paddingX`, `paddingY`, `paddingTop`, `paddingRight`, `paddingBottom`, `paddingLeft`
 - `width`, `height`
 - `bgColor`
 - `position` (relative/absolute), `top`, `left`, `right`, `bottom`
