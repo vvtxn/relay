@@ -159,3 +159,41 @@ Deno.test("Box - bgColor fills the entire box rect including edges", () => {
 		}
 	}
 });
+
+/** Find the first cell holding `char`, returning its coordinates. */
+function findChar(terminal: Terminal, char: string): { x: number; y: number } | null {
+	for (let y = 0; y < terminal.currentBuffer.length; y++) {
+		const row = terminal.currentBuffer[y]!;
+		for (let x = 0; x < row.length; x++) {
+			if (row[x]!.char === char) return { x, y };
+		}
+	}
+	return null;
+}
+
+Deno.test("Box - paddingX and paddingY inset children independently", () => {
+	const { stdout } = fakeStdout({ columns: 12, rows: 4, isTTY: false });
+	const terminal = new Terminal(stdout, { defaultBg: "#0A0A0A" });
+	const renderer = new Renderer(terminal);
+
+	renderer.commitRender(
+		box({ flex: true, flexDirection: "column", paddingX: 2, paddingY: 1 }, text("x")),
+	);
+
+	assertEquals(findChar(terminal, "x"), { x: 2, y: 1 });
+});
+
+Deno.test("Box - per-edge padding overrides paddingX / paddingY", () => {
+	const { stdout } = fakeStdout({ columns: 12, rows: 5, isTTY: false });
+	const terminal = new Terminal(stdout, { defaultBg: "#0A0A0A" });
+	const renderer = new Renderer(terminal);
+
+	renderer.commitRender(
+		box(
+			{ flex: true, flexDirection: "column", paddingX: 1, paddingY: 1, paddingLeft: 3, paddingTop: 2 },
+			text("x"),
+		),
+	);
+
+	assertEquals(findChar(terminal, "x"), { x: 3, y: 2 });
+});

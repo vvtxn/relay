@@ -1,4 +1,5 @@
 import { Box, Text, TextInput } from "../components.tsx";
+import { space } from "@/tui/spacing.ts";
 import { theme } from "@/tui/theme.ts";
 import type { CommandPaletteItem } from "../hooks/command-palette.ts";
 import type { useCommandPalette } from "../hooks/command-palette.ts";
@@ -13,7 +14,9 @@ export interface CommandPaletteProps {
 export function CommandPalette(props: CommandPaletteProps) {
 	const { palette, width = 60, placeholder = "Type a command...", title = "Commands" } = props;
 
-	if (!palette.open.value) return <Box />;
+	// Absolute so a closed palette stays out of the parent's flex flow — an
+	// in-flow empty box would consume a `gap` row and lift the composer.
+	if (!palette.open.value) return <Box position="absolute" />;
 
 	return (
 		<Box
@@ -30,8 +33,9 @@ export function CommandPalette(props: CommandPaletteProps) {
 				width={width}
 				bgColor={theme.surfaceElevated}
 				flexDirection="column"
-				padding={1}
-				gap={1}
+				paddingX={space.overlayX}
+				paddingY={space.overlayY}
+				gap={space.block}
 			>
 				<Text bold color={theme.textDim}>{title}</Text>
 				<TextInput
@@ -40,13 +44,13 @@ export function CommandPalette(props: CommandPaletteProps) {
 					placeholder={placeholder}
 					placeholderColor={theme.textDim}
 					focused
-					width={width - 2}
+					width={width - space.overlayX * 2}
 				/>
 				<Box flexDirection="column">
 					{palette.matches.map((item: CommandPaletteItem, i: number) => {
 						const isSelected = i === palette.selectedIndex.value;
 						return (
-							<Box key={item.id} flexDirection="row" justifyContent="space-between" gap={1}>
+							<Box key={item.id} flexDirection="row" justifyContent="space-between" gap={space.inline}>
 								<Text color={isSelected ? theme.text : theme.textMuted} bold={isSelected}>
 									{item.title}
 								</Text>

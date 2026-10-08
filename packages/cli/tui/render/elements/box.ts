@@ -1,8 +1,28 @@
 import Y from "yoga-layout";
+import type { Node as YogaNode } from "yoga-layout";
 import { applyInheritedBackground, toBgAnsi } from "@/tui/core/primitives/color.ts";
 import { fillPositions } from "@/tui/core/primitives/fill.ts";
-import type { BoxInstance, ElementHandler, Position } from "../types/index.ts";
+import type { BoxInstance, BoxProps, ElementHandler, Position } from "../types/index.ts";
 import type { LayoutHandler } from "./index.ts";
+
+/**
+ * Apply box padding to a Yoga node, resolving the edge overrides.
+ *
+ * `padding` sets every edge, `paddingX` / `paddingY` override an axis, and the
+ * per-edge props override both. This lets a full-bleed surface keep a wide
+ * horizontal gutter while staying tight vertically — one number for both made
+ * surfaces either cramped or bloated. `extraRight` reserves additional space on
+ * the right (e.g. a scrollbar).
+ */
+export function applyBoxPadding(yogaNode: YogaNode, props: BoxProps, extraRight = 0) {
+	const all = props.padding ?? 0;
+	const x = props.paddingX ?? all;
+	const y = props.paddingY ?? all;
+	yogaNode.setPadding(Y.EDGE_LEFT, props.paddingLeft ?? x);
+	yogaNode.setPadding(Y.EDGE_RIGHT, (props.paddingRight ?? x) + extraRight);
+	yogaNode.setPadding(Y.EDGE_TOP, props.paddingTop ?? y);
+	yogaNode.setPadding(Y.EDGE_BOTTOM, props.paddingBottom ?? y);
+}
 
 const FLEX_DIRECTION_MAP = {
 	row: Y.FLEX_DIRECTION_ROW,
@@ -46,7 +66,7 @@ export const BoxLayout: LayoutHandler<BoxInstance> = (instance) => {
 		const isRow = props.flexDirection === "row" || props.flexDirection === "row-reverse";
 		yogaNode.setGap(isRow ? Y.GUTTER_COLUMN : Y.GUTTER_ROW, props.gap);
 	}
-	yogaNode.setPadding(Y.EDGE_ALL, props.padding ?? undefined);
+	applyBoxPadding(yogaNode, props);
 	if (props.width !== undefined) yogaNode.setWidth(props.width);
 	else yogaNode.setWidthAuto();
 	if (props.height !== undefined) yogaNode.setHeight(props.height);

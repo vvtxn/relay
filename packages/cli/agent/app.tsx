@@ -28,6 +28,7 @@ import { inputManager } from "@/tui/core/input.ts";
 import { useProjectFiles } from "./hooks/project-files.ts";
 import { getClient, serverUrl } from "./client.ts";
 import { openBrowser } from "./open.ts";
+import { space } from "@/tui/spacing.ts";
 import { theme } from "@/tui/theme.ts";
 import { VERSION } from "../version.ts";
 import { StatusBar } from "./components/status-bar.tsx";
@@ -428,7 +429,7 @@ function App({ onQuit, user, initialSessionId, info }: AppProps) {
 	const messages = viewMessages(stream.value);
 
 	return (
-		<Box flex flexDirection="column" padding={1} bgColor={theme.background}>
+		<Box flex flexDirection="column" gap={space.section} bgColor={theme.background}>
 			<StatusBar
 				tokenCount={stream.value.tokens}
 				totalCost={stream.value.cost}
@@ -448,15 +449,17 @@ function App({ onQuit, user, initialSessionId, info }: AppProps) {
 					/>
 				)
 				: (
-					<ScrollArea flex flexDirection="column" padding={1} gap={1} scrollbar focused autoScroll>
+					<ScrollArea flex flexDirection="column" scrollbar focused autoScroll>
 						{messages.map((msg, i) => <MessageView key={i} msg={msg} />)}
 					</ScrollArea>
 				)}
 
-			<Box height={1} />
 			<Box
 				bgColor={theme.surface}
-				padding={1}
+				flexDirection="column"
+				paddingX={space.cardX}
+				paddingY={space.cardY}
+				gap={space.cardY}
 			>
 				<TextInput
 					value={input.value}
@@ -465,37 +468,37 @@ function App({ onQuit, user, initialSessionId, info }: AppProps) {
 					placeholderColor={theme.textDim}
 					focused
 				/>
-			</Box>
 
-			<Box flexDirection="row" gap={1}>
-				<Text color={theme.brand} bold>
-					{mode.value}
-				</Text>
-				{stream.value.running
-					? (
-						<>
-							<Spinner color={theme.accent} />
-							<Text color={theme.textMuted} bold italic>
-								{formatStatus(stream.value.status)}
+				<Box flexDirection="row" gap={space.inline}>
+					<Text color={theme.brand} bold>
+						{mode.value}
+					</Text>
+					{stream.value.running
+						? (
+							<>
+								<Spinner color={theme.accent} />
+								<Text color={theme.textMuted} bold italic>
+									{formatStatus(stream.value.status)}
+								</Text>
+								{escPrimed.value
+									? (
+										<Text color={theme.warning} bold>
+											Press Esc again to cancel
+										</Text>
+									)
+									: (
+										<Text color={theme.textDim} italic>
+											Esc to cancel
+										</Text>
+									)}
+							</>
+						)
+						: (
+							<Text color={theme.textFaint} italic>
+								@ files • / commands • i/Esc mode
 							</Text>
-							{escPrimed.value
-								? (
-									<Text color={theme.warning} bold>
-										Press Esc again to cancel
-									</Text>
-								)
-								: (
-									<Text color={theme.textDim} italic>
-										Esc to cancel
-									</Text>
-								)}
-						</>
-					)
-					: (
-						<Text color={theme.textFaint} italic>
-							@ files • / commands • i/Esc mode
-						</Text>
-					)}
+						)}
+				</Box>
 			</Box>
 
 			<CommandPalette palette={palette} />
