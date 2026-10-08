@@ -9,7 +9,7 @@ starts (or reuses) a background server before running the TUI.
 ```
 agent/
 ├── index.ts              # Entry: relay | relay web | serve | stop | status | fonts | workspace
-├── server.ts             # Background-server supervisor (ensureServer/stop/status) + auth helpers
+├── server.ts             # Background-server supervisor (ensureServer/stop/status) + auth + API-key gates
 ├── open.ts               # openBrowser(url) helper
 ├── workspace.ts          # relay workspace add|list|remove (register without the TUI)
 ├── fonts.ts              # relay fonts install|status|path (shared font for the terminal)
@@ -73,10 +73,11 @@ ask. Switching sessions denies any pending ask server-side so runs never hang.
 
 `index.ts` ensures a server exists (see above), then sets `RELAY_SERVER_URL` before importing `app.tsx`. It then checks
 `/api/me` (using the token handed over by a browser login in `~/.relay/session.json`); if not signed in it opens the web
-client and waits for the sign-in to complete. `bootstrap()` then health-checks the server, fetches `/api/me` +
-`/api/config`, and creates a session for `Deno.cwd()`. `Root` renders `BootScreen` (loading) or `BootError` (friendly
-failure) and mounts `App` only once a user, session, and server info exist. `info.webUrl` powers the "Open in Browser"
-command.
+client and waits for the sign-in to complete (`ensureAuthenticated`). It then checks `/api/settings` — if no LLM API key
+is configured it opens the web Settings page and waits (`ensureApiKey`), so the TUI never starts in an unusable state.
+`bootstrap()` then health-checks the server, fetches `/api/me` + `/api/config`, and creates a session for `Deno.cwd()`.
+`Root` renders `BootScreen` (loading) or `BootError` (friendly failure) and mounts `App` only once a user, session, and
+server info exist. `info.webUrl` powers the "Open in Browser" command.
 
 ### Cancellation
 
@@ -88,8 +89,9 @@ AbortController; `run_finished(cancelled)` arrives on the stream like any other 
 - `RELAY_SERVER_URL` env overrides `~/.relay/config.json` `serverUrl` (default `http://127.0.0.1:7433`)
 - `config.json` is auto-created with defaults on first run
 
-The LLM API key lives server-side only (`LLM_API_KEY` env or `~/.relay/auth.json` fallback read by the server). The CLI
-never prompts for one.
+The LLM API key is stored per user in the database and set from the web app's Settings page. The CLI never prompts for
+one: at startup (`ensureApiKey`) it opens the Settings page and waits until a key is saved, so the TUI cannot start
+without one.
 
 ### UI Components
 

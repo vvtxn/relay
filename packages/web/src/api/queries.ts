@@ -15,6 +15,12 @@ export const configQuery = queryOptions({
 	staleTime: Infinity,
 });
 
+/** Per-user settings (API key presence). Mutations invalidate this key. */
+export const settingsQuery = queryOptions({
+	queryKey: queryKeys.settings,
+	queryFn: () => runApi((api) => api.getSettings()),
+});
+
 export const workspaceQuery = queryOptions({
 	queryKey: queryKeys.workspace,
 	queryFn: () => runApi((api) => api.workspace()),

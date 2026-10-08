@@ -10,7 +10,6 @@ function fakeConfig(): ServerConfig {
 		relayEnv: "development",
 		port: 0,
 		hostname: "127.0.0.1",
-		apiKey: "test",
 		baseURL: "http://localhost",
 		model: "test",
 		temperature: 0.1,
@@ -85,7 +84,11 @@ function fakeStore(): SessionStore {
 }
 
 function makeManager(): RunManager {
-	return new RunManager({ config: fakeConfig(), sessionStore: fakeStore(), provider: fakeProvider() });
+	return new RunManager({
+		config: fakeConfig(),
+		sessionStore: fakeStore(),
+		providerFor: () => Promise.resolve(fakeProvider()),
+	});
 }
 
 Deno.test("RunManager - isRunning is false before any run", () => {
@@ -161,7 +164,11 @@ Deno.test("RunManager - second message on a running session throws RunConflictEr
 			await new Promise((resolve) => setTimeout(resolve, 300));
 		},
 	};
-	const runs = new RunManager({ config: fakeConfig(), sessionStore: fakeStore(), provider: slowProvider });
+	const runs = new RunManager({
+		config: fakeConfig(),
+		sessionStore: fakeStore(),
+		providerFor: () => Promise.resolve(slowProvider),
+	});
 	runs.attachHandle("s1", fakeHandle(), "user-1");
 
 	runs.startMessage("s1", "first");
@@ -197,7 +204,11 @@ Deno.test("RunManager - cancel aborts the run and emits run_finished", async () 
 			throw new Error("aborted");
 		},
 	};
-	const runs = new RunManager({ config: fakeConfig(), sessionStore: fakeStore(), provider: slowProvider });
+	const runs = new RunManager({
+		config: fakeConfig(),
+		sessionStore: fakeStore(),
+		providerFor: () => Promise.resolve(slowProvider),
+	});
 	runs.attachHandle("s1", fakeHandle(), "user-1");
 
 	const events: ServerEvent[] = [];
@@ -234,7 +245,11 @@ Deno.test("RunManager - cancel immediately after startMessage aborts the run", a
 			throw new Error("aborted");
 		},
 	};
-	const runs = new RunManager({ config: fakeConfig(), sessionStore: fakeStore(), provider: slowProvider });
+	const runs = new RunManager({
+		config: fakeConfig(),
+		sessionStore: fakeStore(),
+		providerFor: () => Promise.resolve(slowProvider),
+	});
 	runs.attachHandle("s1", fakeHandle(), "user-1");
 
 	const events: ServerEvent[] = [];

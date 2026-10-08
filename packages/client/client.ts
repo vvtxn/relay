@@ -15,6 +15,8 @@ import type {
 	SendMessageResponse,
 	ServerEvent,
 	SessionListResponse,
+	SetApiKeyRequest,
+	SettingsResponse,
 	StatusResponse,
 	WorkspaceResponse,
 	WorkspacesResponse,
@@ -76,6 +78,15 @@ export class RelayClient {
 
 	async getConfig(): Promise<ConfigResponse> {
 		return await this.get("/api/config");
+	}
+
+	async getSettings(): Promise<SettingsResponse> {
+		return await this.get("/api/settings");
+	}
+
+	/** Set or (with null) clear the caller's LLM API key. */
+	async setApiKey(apiKey: string | null): Promise<StatusResponse> {
+		return await this.put("/api/settings/api-key", { apiKey } satisfies SetApiKeyRequest);
 	}
 
 	async listSessions(cwd: string): Promise<SessionListResponse> {
@@ -151,6 +162,16 @@ export class RelayClient {
 	private async post(path: string, body: unknown): Promise<any> {
 		const response = await this.doFetch(`${this.baseUrl}${path}`, {
 			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify(body),
+		});
+		if (!response.ok) throw await this.toError(response);
+		return await response.json();
+	}
+
+	private async put(path: string, body: unknown): Promise<any> {
+		const response = await this.doFetch(`${this.baseUrl}${path}`, {
+			method: "PUT",
 			headers: { "Content-Type": "application/json" },
 			body: JSON.stringify(body),
 		});

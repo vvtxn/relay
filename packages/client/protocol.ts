@@ -44,6 +44,23 @@ export interface ConfigResponse {
 	webUrl: string;
 }
 
+/**
+ * Per-user settings. The API key itself is never returned — clients learn only
+ * whether one is set and a short masked hint so they can display it.
+ */
+export interface SettingsResponse {
+	apiKey: {
+		set: boolean;
+		/** Last few characters of the stored key, or null when unset. */
+		hint: string | null;
+	};
+}
+
+/** Set the caller's LLM API key, or clear it by sending null/empty. */
+export interface SetApiKeyRequest {
+	apiKey: string | null;
+}
+
 export interface SessionListResponse {
 	sessions: SessionSummary[];
 }

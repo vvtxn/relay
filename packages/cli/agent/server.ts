@@ -8,6 +8,7 @@
  */
 
 import { dirname, fromFileUrl, join } from "@std/path";
+import type { SettingsResponse } from "@vvtxn/client/protocol.ts";
 import { readStoredSession } from "@vvtxn/relay/core/auth/session-file.ts";
 import { relayDir } from "@vvtxn/relay/core/paths.ts";
 import { openBrowser } from "./open.ts";
@@ -17,6 +18,7 @@ const HEALTH_TIMEOUT_MS = 1_000;
 const START_TIMEOUT_MS = 10_000;
 const STOP_TIMEOUT_MS = 5_000;
 const SIGN_IN_TIMEOUT_MS = 10 * 60_000;
+const API_KEY_TIMEOUT_MS = 10 * 60_000;
 
 export interface ServerState {
 	url: string;
@@ -287,6 +289,86 @@ export async function ensureAuthenticated(state: ServerState): Promise<void> {
 		}
 	}
 	throw new Error("Sign-in timed out. Open the web client, sign in, then run `relay` again.");
+}
+
+export type ApiKeyStatus =
+	| { status: "configured" }
+	/** Signed in, but no key has been saved yet. */
+	| { status: "missing" }
+	/** The stored token was rejected (or none is stored). */
+	| { status: "unauthenticated" }
+	/** The server could not be reached or failed to answer. */
+	| { status: "unreachable"; detail: string };
+
+/** Probe `/api/settings` for whether the caller has an LLM API key configured. */
+export async function apiKeyStatus(serverUrl: string): Promise<ApiKeyStatus> {
+	const token = readStoredSession()?.token;
+	try {
+		const response = await fetch(`${serverUrl}/api/settings`, {
+			...(token ? { headers: { Authorization: `Bearer ${token}` } } : {}),
+			signal: AbortSignal.timeout(5_000),
+		});
+		if (response.status === 401) return { status: "unauthenticated" };
+		if (!response.ok) return { status: "unreachable", detail: `the server returned ${response.status}` };
+		const body = await response.json() as Partial<SettingsResponse> | null;
+		// A malformed body counts as "missing": the TUI can only be entered once a
+		// key is confirmed, and the user can always re-save it.
+		return body?.apiKey?.set ? { status: "configured" } : { status: "missing" };
+	} catch (error) {
+		return { status: "unreachable", detail: error instanceof Error ? error.message : String(error) };
+	}
+}
+
+/**
+ * The agent cannot run without an LLM API key, and the key is only ever entered
+ * in the web Settings page. Open that page and wait for the key to be saved, so
+ * the terminal never drops into the TUI in an unusable state.
+ */
+export async function ensureApiKey(state: ServerState): Promise<void> {
+	const status = await apiKeyStatus(state.url);
+	if (status.status === "configured") return;
+	if (status.status === "unauthenticated") {
+		throw new Error("Not signed in. Run `relay` again to sign in.");
+	}
+	if (status.status === "unreachable") {
+		throw new Error(
+			`Cannot reach the Relay server at ${state.url} (${status.detail}). ` +
+				`Check ${logPath()}, then run \`relay stop\` and \`relay\` again.`,
+		);
+	}
+
+	// In development the web origin is Vite (e.g. localhost:5173); fall back to
+	// the web app the server itself serves when that is not running, so the user
+	// is never sent to a dead page.
+	let webOrigin = state.webUrl || state.url;
+	if (webOrigin !== state.url && !(await isReachable(webOrigin))) {
+		webOrigin = state.url;
+	}
+
+	const settingsUrl = new URL("/settings", webOrigin).toString();
+	console.log(`No API key configured. Opening ${settingsUrl} — add one to continue.`);
+	openBrowser(settingsUrl);
+
+	const deadline = Date.now() + API_KEY_TIMEOUT_MS;
+	let warned = false;
+	while (Date.now() < deadline) {
+		await delay(1_000);
+		const current = await apiKeyStatus(state.url);
+		if (current.status === "configured") {
+			console.log("API key saved.");
+			return;
+		}
+		if (current.status === "unauthenticated") {
+			throw new Error("Signed out while waiting for the API key. Run `relay` again.");
+		}
+		if (current.status === "unreachable" && !warned) {
+			// A transient blip (server restart) should not abort the wait; the
+			// user can still save the key once it is back.
+			warned = true;
+			console.log(`Lost contact with the server (${current.detail}); waiting for it to return…`);
+		}
+	}
+	throw new Error("Timed out waiting for an API key. Add one in the web Settings page, then run `relay` again.");
 }
 
 /** Stop the background server recorded in the state file. */ export async function stopServer(): Promise<void> {

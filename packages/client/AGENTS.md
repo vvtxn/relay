@@ -21,9 +21,10 @@ client/
 ### Protocol (`protocol.ts`)
 
 The single source of truth for the server↔client contract. All types are plain JSON so any runtime can consume them.
-REST payloads cover health, auth info, identity (`MeResponse` includes an optional `avatarUrl`), workspace, sessions
-CRUD, files, and approvals. `ServerEvent` mirrors the agent runner callbacks 1:1 plus server lifecycle events
-(`run_state` snapshot, `approval_required/resolved`, `run_finished`).
+REST payloads cover health, auth info, identity (`MeResponse` includes an optional `avatarUrl`), per-user settings
+(`SettingsResponse` carries only `{ set, hint }` for the stored API key), workspace, sessions CRUD, files, and
+approvals. `ServerEvent` mirrors the agent runner callbacks 1:1 plus server lifecycle events (`run_state` snapshot,
+`approval_required/resolved`, `run_finished`).
 
 ### SSE (`sse.ts`)
 

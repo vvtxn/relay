@@ -53,6 +53,14 @@ written when the server binds a non-loopback host.
 - These are user/machine-specific, so they belong in the gitignored `.env.<mode>.local` files, not the committed
   `.env.<mode>` defaults.
 
+## Stored API keys
+
+Each user's LLM API key is stored in the `user_settings` table in plaintext: the server must present it verbatim as a
+`Bearer` token, so it cannot be hashed like a session token. Reads never return the key — `GET /api/settings` exposes
+only whether one is set and a masked hint. Writes require an authenticated session and pass the same `Origin`/CSRF check
+as other state-changing routes. Treat the database credentials (`TURSO_DB_*`) as the secret protecting it, and treat a
+database dump as exposing every key it contains.
+
 ## CSRF
 
 State-changing `/api/*` requests are rejected when an `Origin` header is present and does not match `RELAY_PUBLIC_URL`

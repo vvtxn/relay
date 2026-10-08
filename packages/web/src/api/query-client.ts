@@ -18,6 +18,7 @@ export const queryClient = new QueryClient({
 export const queryKeys = {
 	me: ["me"] as const,
 	config: ["config"] as const,
+	settings: ["settings"] as const,
 	workspace: ["workspace"] as const,
 	sessions: (cwd: string) => ["sessions", cwd] as const,
 	workspaces: ["workspaces"] as const,

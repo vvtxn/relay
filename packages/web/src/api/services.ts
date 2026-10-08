@@ -12,6 +12,7 @@ import type {
 	SendMessageResponse,
 	ServerEvent,
 	SessionListResponse,
+	SettingsResponse,
 	StatusResponse,
 	WorkspaceResponse,
 	WorkspacesResponse,
@@ -51,6 +52,8 @@ export interface ApiShape {
 	me(): Effect.Effect<MeResponse, RelayError>;
 	workspace(): Effect.Effect<WorkspaceResponse, RelayError>;
 	getConfig(): Effect.Effect<ConfigResponse, RelayError>;
+	getSettings(): Effect.Effect<SettingsResponse, RelayError>;
+	setApiKey(apiKey: string | null): Effect.Effect<StatusResponse, RelayError>;
 	listSessions(cwd: string): Effect.Effect<SessionListResponse, RelayError>;
 	listWorkspaces(): Effect.Effect<WorkspacesResponse, RelayError>;
 	validateWorkspace(cwd: string): Effect.Effect<WorkspaceValidateResponse, RelayError>;
@@ -76,6 +79,8 @@ export const ApiLive = Layer.succeed(Api, {
 	me: () => tryRelay(() => client.me()),
 	workspace: () => tryRelay(() => client.workspace()),
 	getConfig: () => tryRelay(() => client.getConfig()),
+	getSettings: () => tryRelay(() => client.getSettings()),
+	setApiKey: (apiKey) => tryRelay(() => client.setApiKey(apiKey)),
 	listSessions: (cwd) => tryRelay(() => client.listSessions(cwd)),
 	listWorkspaces: () => tryRelay(() => client.listWorkspaces()),
 	validateWorkspace: (cwd) => tryRelay(() => client.validateWorkspace(cwd)),

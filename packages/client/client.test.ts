@@ -93,6 +93,8 @@ Deno.test("RelayClient - builds correct request URLs", async () => {
 	await client.sendMessage("abc123", "hello");
 	await client.approve("abc123", "tool-1", "allow");
 	await client.cancel("abc123");
+	await client.getSettings();
+	await client.setApiKey("sk-test");
 
 	assertEquals(calls, [
 		{ url: "http://localhost:7433/api/health", method: "GET" },
@@ -108,6 +110,8 @@ Deno.test("RelayClient - builds correct request URLs", async () => {
 		{ url: "http://localhost:7433/api/sessions/abc123/messages", method: "POST" },
 		{ url: "http://localhost:7433/api/sessions/abc123/approve", method: "POST" },
 		{ url: "http://localhost:7433/api/sessions/abc123/cancel", method: "POST" },
+		{ url: "http://localhost:7433/api/settings", method: "GET" },
+		{ url: "http://localhost:7433/api/settings/api-key", method: "PUT" },
 	]);
 });
 

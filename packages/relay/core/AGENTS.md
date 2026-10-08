@@ -21,6 +21,7 @@ core/
 │   ├── github.ts         # GitHubAuthProvider (profile → identity)
 │   ├── db.ts             # DatabaseUserStore: provider identity → user, profile columns
 │   ├── sessions.ts       # DatabaseAuthSessionStore: opaque hashed session tokens
+│   ├── settings.ts       # DatabaseUserSettingsStore: per-user LLM API key (plaintext)
 │   └── service.ts        # authenticate(): provider + user store → AuthenticatedUser
 ├── system-prompt.ts      # Re-exports the default system prompt (raw .md import)
 ├── system-prompt.md      # Default system prompt for coding agents (shared across clients)

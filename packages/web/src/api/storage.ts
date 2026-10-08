@@ -2,6 +2,10 @@
 
 const SERVER_URL_KEY = "relay.serverUrl";
 const CWD_KEY = "relay.cwd";
+const THEME_KEY = "relay.theme";
+
+/** The two palettes the web client offers; dark is the default. */
+export type ThemePreference = "dark" | "light";
 
 /**
  * Empty means same-origin. That is the default so the app works in both dev
@@ -46,4 +50,13 @@ export function readStoredCwd(): string | null {
 
 export function writeStoredCwd(cwd: string): void {
 	write(CWD_KEY, cwd);
+}
+
+/** Persisted palette preference; anything other than "light" means dark. */
+export function readStoredTheme(): ThemePreference {
+	return read(THEME_KEY) === "light" ? "light" : "dark";
+}
+
+export function writeStoredTheme(mode: ThemePreference): void {
+	write(THEME_KEY, mode);
 }
