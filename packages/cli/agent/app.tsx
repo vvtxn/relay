@@ -470,7 +470,8 @@ function App({ onQuit, user, initialSessionId, info }: AppProps) {
 			<Box height={1} />
 			<Box
 				bgColor={theme.surface}
-				padding={1}
+				paddingX={1}
+				paddingY={1}
 			>
 				<TextInput
 					value={input.value}
@@ -481,7 +482,7 @@ function App({ onQuit, user, initialSessionId, info }: AppProps) {
 				/>
 			</Box>
 
-			<Box flexDirection="row" gap={1}>
+			<Box flexDirection="row" gap={1} paddingTop={1}>
 				<Text color={theme.brand} bold>
 					{mode.value}
 				</Text>

@@ -46,7 +46,13 @@ export const BoxLayout: LayoutHandler<BoxInstance> = (instance) => {
 		const isRow = props.flexDirection === "row" || props.flexDirection === "row-reverse";
 		yogaNode.setGap(isRow ? Y.GUTTER_COLUMN : Y.GUTTER_ROW, props.gap);
 	}
-	yogaNode.setPadding(Y.EDGE_ALL, props.padding ?? undefined);
+	// Resolve each edge independently: explicit side > axis shorthand > all-edge
+	// padding. Setting every edge (rather than EDGE_ALL then overrides) keeps
+	// stale values from leaking when a directional prop is removed.
+	yogaNode.setPadding(Y.EDGE_TOP, props.paddingTop ?? props.paddingY ?? props.padding);
+	yogaNode.setPadding(Y.EDGE_BOTTOM, props.paddingBottom ?? props.paddingY ?? props.padding);
+	yogaNode.setPadding(Y.EDGE_LEFT, props.paddingLeft ?? props.paddingX ?? props.padding);
+	yogaNode.setPadding(Y.EDGE_RIGHT, props.paddingRight ?? props.paddingX ?? props.padding);
 	if (props.width !== undefined) yogaNode.setWidth(props.width);
 	else yogaNode.setWidthAuto();
 	if (props.height !== undefined) yogaNode.setHeight(props.height);
