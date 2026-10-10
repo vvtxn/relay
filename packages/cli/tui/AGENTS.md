@@ -26,6 +26,7 @@ tui/
 │   ├── index.ts                # Public render API re-exports
 │   ├── jsx-runtime.ts          # Custom JSX runtime
 │   ├── jsx-dev-runtime.ts      # JSX dev runtime
+│   ├── memo.ts                 # memo() — pure-component skip for the reconciler
 │   ├── hooks/                  # React-like hooks
 │   │   ├── index.ts            # Re-exports all hooks
 │   │   ├── signals.ts          # useSignal, useSignalEffect, hook lifecycle
@@ -71,6 +72,27 @@ tui/
 6. **Terminal Output**: `Terminal.render()` writes positions to a double-buffered character grid
 7. **Differential Flush**: Only changed cells are written to stdout, batched into contiguous runs (one cursor move per
    run, styles emitted only on change)
+
+### Render-Cost Model
+
+Every signal change re-runs the whole tree (one root effect; no per-component effects), so the framework keeps unchanged
+work off the per-frame path with four layers — large sessions must stay cheap on every keystroke, spinner tick, and
+streamed delta:
+
+1. **`memo()` components** (`render/memo.ts`): pure presentational components wrapped in `memo()` are not re-invoked
+   while their props are shallow-equal (by reference) to the last render; the renderer reuses the previous output VNode.
+   Memoized components must not read signals or use hooks — a signal read inside them is tracked by the root effect, and
+   skipping the invocation would drop the update.
+2. **Yoga layout skip**: `reconcile` only re-applies an element's layout handlers when its own props (excluding
+   `children`/`key`) changed. Yoga setters are FFI calls and dominate large-tree commits otherwise.
+3. **Yoga child-list skip**: `reconcileChildren` leaves the Yoga child list untouched when it is unchanged —
+   `removeChild`/`insertChild` churn dirties nodes and forces a full re-layout of the subtree.
+4. **Primitive caches**: `parseMarkdown` and the Markdown formatted-lines cache are content-keyed LRUs; `wrapText` is an
+   LRU keyed by text (+one width per entry) since Yoga measure functions and element paints both wrap the same strings.
+   Cached results must be treated as immutable.
+
+Mounting a fresh subtree (first paint of a long session) remains O(content) — instance + Yoga node creation and the
+first measure pass — and the ScrollArea culls painting to the viewport.
 
 ### Full-Bleed Backgrounds
 
@@ -142,7 +164,10 @@ All exported from `render/components.tsx`:
 - **`TextInput`** - Text input field with cursor, placeholder, and vim mode support
 - **`Spinner`** - Animated spinner (default 80ms interval, 10 frames)
 - **`ScrollArea`** - Scrollable container (extends BoxProps) with `autoScroll`, `scrollbar`, and `scrollStep`
-- **`Markdown`** - Renders markdown content as styled Text lines via `parseMarkdown()`
+- **`Markdown`** - Renders markdown content as styled Text lines via `parseMarkdown()` (memoized: parse + format are
+  cached per content string)
+- **`memo(component)`** - Marks a pure presentational component so the renderer skips re-invocation while its props are
+  shallow-equal (see Render-Cost Model)
 - **`WelcomeScreen`** - Welcome screen with version display, re-exported from `components/welcome-screen.tsx`
 - **`CommandPalette`** - Re-exported from `components/command-palette.tsx`
 - **`ApprovalPrompt`** - Modal tool-approval overlay (y allow / a always / n deny), re-exported from
@@ -196,6 +221,8 @@ All exported from `render/hooks/index.ts`:
 - All coordinates are integer character positions
 - Text editing logic is centralized in `hooks/text-utils.ts` (exports `TextState` and operations like `insertChar`,
   `deleteBackward`, `moveCursor`, etc.)
+- Wrap long-lived presentational components in `memo()` (from `@/tui/render/components.tsx` or `@/tui/render/index.ts`)
+  so idle frames skip re-invoking them; never wrap signal- or hook-driven components (see Render-Cost Model)
 
 ## Task Completion Checklist
 

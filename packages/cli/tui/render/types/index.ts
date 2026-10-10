@@ -1,5 +1,6 @@
 import type { Node as YogaNode } from "yoga-layout";
 import type { HookStore } from "../hooks/signals.ts";
+import type { VNode } from "../jsx-runtime.ts";
 
 /** Primitive children that render as text */
 export type PrimitiveChild = string | number;
@@ -180,6 +181,16 @@ export interface BaseInstance<T extends string = string, P extends BaseProps = B
 	componentType?: unknown;
 	/** Hook state store for function components */
 	hookStore?: HookStore;
+	/**
+	 * `memo()` identity for this instance's owner. Kept separate from
+	 * `componentType` (which nested reconcilation may overwrite with an inner
+	 * wrapper like `Box`) so the memo check stays stable. See `memo.ts`.
+	 */
+	memoComponent?: unknown;
+	/** Props of the last memoized invocation (memo components only) */
+	memoProps?: Record<string, unknown>;
+	/** Direct output VNode of the last memoized invocation (memo components only) */
+	memoOutput?: VNode | null;
 }
 
 /** All valid element type strings */

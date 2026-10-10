@@ -96,10 +96,15 @@ without one.
 ### UI Components
 
 - `Root` — Switches between BootScreen, BootError, and App based on the boot signal
-- `App` — Signals, event folding, palettes, approval handling
+- `App` — Signals, event folding, palettes, approval handling; while a thread's history loads it shows a "Loading
+  thread…" hint instead of the welcome screen (`loadingSession` signal)
 - `StatusBar` — Model (from server), branch, user, token bar, cost
 - `MessageView` / `ToolCallView` / `DiffView` (components/chat.tsx) — Shared display contract from
-  `@vvtxn/relay/core/display.ts`; `UIMessage` is re-exported from there (single definition)
+  `@vvtxn/relay/core/display.ts`; `UIMessage` is re-exported from there (single definition). Turns are labeled (`you` in
+  info, `relay` in brand, mirroring the web's role headers) and separated by the scroll gap — no per-message panels.
+  Tool calls render as single rows (`├`/`└` tree glyphs, name, summarized args, one-line output) with diffs indented
+  under `│`. All three views are wrapped in `memo()` (pure functions of props) so idle frames and streamed deltas skip
+  re-rendering unchanged messages
 
 ### Fonts (`fonts.ts`)
 
@@ -148,3 +153,5 @@ After concluding that a task is complete, always run these commands from the rep
 - Session switching resets signals and lets the session `useSignalEffect` re-subscribe + refetch
 - `@mention` file listing comes from `useProjectFiles` (server endpoint), keyed per session
 - `entriesToUIMessages` renders persisted sessions — do not duplicate the conversion locally
+- Keep chat views pure and `memo()`-wrapped; message objects keep identity across streamed deltas, which is what makes
+  idle frames and deltas skip unchanged messages

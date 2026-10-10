@@ -129,8 +129,36 @@ function colorizeCodeLine(line: string, language: string | undefined): MarkdownS
 	return [{ text: line, code: true, color: theme.codeBlock }];
 }
 
-/** Parse markdown text into structured lines */
+const PARSE_CACHE_LIMIT = 256;
+const parseCache = new Map<string, MarkdownLine[]>();
+
+/**
+ * Parse markdown text into structured lines.
+ *
+ * Memoized with a small LRU: components re-run on every commit, so the same
+ * content string is parsed once per frame without this cache — the single
+ * most expensive per-frame step for long sessions. Callers must treat the
+ * returned lines and segments as immutable.
+ */
 export function parseMarkdown(content: string): MarkdownLine[] {
+	const cached = parseCache.get(content);
+	if (cached) {
+		// Refresh recency so hot content survives evictions.
+		parseCache.delete(content);
+		parseCache.set(content, cached);
+		return cached;
+	}
+
+	const lines = parseMarkdownContent(content);
+	parseCache.set(content, lines);
+	if (parseCache.size > PARSE_CACHE_LIMIT) {
+		const oldest = parseCache.keys().next().value;
+		if (oldest !== undefined) parseCache.delete(oldest);
+	}
+	return lines;
+}
+
+function parseMarkdownContent(content: string): MarkdownLine[] {
 	const lines = content.split("\n");
 	const result: MarkdownLine[] = [];
 	let inCodeBlock = false;
