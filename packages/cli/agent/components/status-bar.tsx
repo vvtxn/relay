@@ -47,7 +47,14 @@ export function StatusBar(
 	},
 ) {
 	return (
-		<Box flexDirection="row" justifyContent="space-between" paddingX={2} paddingTop={1} paddingBottom={1}>
+		<Box
+			flexDirection="row"
+			justifyContent="space-between"
+			flexWrap="wrap"
+			paddingX={2}
+			paddingTop={1}
+			paddingBottom={1}
+		>
 			<Box flexDirection="row" gap={1}>
 				<Text bold color={theme.brand}>
 					Relay
