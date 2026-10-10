@@ -76,8 +76,6 @@ body {
 /* ------------------------------------------------------------------ */
 
 .workspace-list,
-.tool-output,
-.diff,
 .mention-list,
 .chat {
 	scrollbar-width: thin;
@@ -85,8 +83,6 @@ body {
 }
 
 .workspace-list::-webkit-scrollbar,
-.tool-output::-webkit-scrollbar,
-.diff::-webkit-scrollbar,
 .mention-list::-webkit-scrollbar,
 .chat::-webkit-scrollbar {
 	width: 10px;
@@ -94,16 +90,12 @@ body {
 }
 
 .workspace-list::-webkit-scrollbar-track,
-.tool-output::-webkit-scrollbar-track,
-.diff::-webkit-scrollbar-track,
 .mention-list::-webkit-scrollbar-track,
 .chat::-webkit-scrollbar-track {
 	background: transparent;
 }
 
 .workspace-list::-webkit-scrollbar-thumb,
-.tool-output::-webkit-scrollbar-thumb,
-.diff::-webkit-scrollbar-thumb,
 .mention-list::-webkit-scrollbar-thumb,
 .chat::-webkit-scrollbar-thumb {
 	background: var(--relay-border, #303030);
@@ -113,8 +105,6 @@ body {
 }
 
 .workspace-list::-webkit-scrollbar-thumb:hover,
-.tool-output::-webkit-scrollbar-thumb:hover,
-.diff::-webkit-scrollbar-thumb:hover,
 .mention-list::-webkit-scrollbar-thumb:hover,
 .chat::-webkit-scrollbar-thumb:hover {
 	background: var(--relay-border-label, #808080);
@@ -764,92 +754,12 @@ body {
 	color: var(--relay-text, #f2f2f2);
 }
 
-.tool-list {
-	display: flex;
-	flex-direction: column;
-	gap: 0.5rem;
-}
-
-.tool-call {
-	display: flex;
-	flex-direction: column;
-	gap: 0.3rem;
+.tool-summary {
+	color: var(--relay-text-muted, #c0c0c0);
+	font-size: 0.85rem;
 	border-left: 2px solid var(--relay-border, #303030);
 	padding-left: 0.6rem;
-}
-
-.tool-head {
-	display: flex;
-	gap: 0.5rem;
-	align-items: baseline;
-}
-
-.tool-name {
-	color: var(--relay-brand, #c0c0c0);
-	font-weight: 700;
-	font-size: 0.8rem;
-	letter-spacing: 0.12em;
-	text-transform: uppercase;
-	white-space: nowrap;
-}
-
-.tool-args {
-	color: var(--relay-text-muted, #c0c0c0);
-	font-size: 0.92rem;
-	word-break: break-all;
-}
-
-.tool-output {
-	margin: 0;
-	color: var(--relay-text-muted, #c0c0c0);
-	font-family: inherit;
-	font-size: 0.85rem;
-	white-space: pre-wrap;
 	word-break: break-word;
-	max-height: 240px;
-	overflow: auto;
-}
-
-/* ------------------------------------------------------------------ */
-/* Diff                                                                */
-/* ------------------------------------------------------------------ */
-
-.diff {
-	display: flex;
-	flex-direction: column;
-	font-size: 0.85rem;
-	overflow-x: auto;
-	border: 1px solid var(--relay-border, #303030);
-	border-radius: 4px;
-}
-
-.diff-line {
-	display: flex;
-	gap: 0.5rem;
-	white-space: pre;
-	padding: 0 0.4rem;
-}
-
-.diff-line.add {
-	color: var(--relay-success, #a8b0a8);
-}
-
-.diff-line.del {
-	color: var(--relay-error, #b0a0a0);
-}
-
-.diff-line.ctx {
-	color: var(--relay-text-dim, #808080);
-}
-
-.diff-no {
-	width: 3.5ch;
-	text-align: right;
-	color: var(--relay-text-faint, #606060);
-}
-
-.diff-prefix {
-	width: 1ch;
 }
 
 /* ------------------------------------------------------------------ */

@@ -11,6 +11,7 @@ export {
 	getToolDisplayOutput,
 	parseDiffLines,
 	summarizeToolArgs,
+	summarizeToolCalls,
 	TOOL_DISPLAY_NAMES,
 } from "./display.ts";
 export type { DiffLine, UIMessage, UIToolCall } from "./display.ts";

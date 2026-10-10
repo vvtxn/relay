@@ -18,7 +18,7 @@ agent/
 ├── config.ts             # RelayConfig: serverUrl (env RELAY_SERVER_URL or ~/.relay/config.json)
 ├── components/
 │   ├── boot-screen.tsx   # BootScreen (loading) and BootError shown while the server is resolved
-│   ├── chat.tsx          # MessageView, ToolCallView, DiffView; re-exports shared UIMessage
+│   ├── chat.tsx          # MessageView (user/agent turns + tool-call summary); re-exports UIMessage
 │   └── status-bar.tsx    # StatusBar, TokenBar (context window arrives from /api/config)
 └── hooks/
     └── project-files.ts  # useProjectFiles hook (file listing from the server)
@@ -99,12 +99,11 @@ without one.
 - `App` — Signals, event folding, palettes, approval handling; while a thread's history loads it shows a "Loading
   thread…" hint instead of the welcome screen (`loadingSession` signal)
 - `StatusBar` — Model (from server), branch, user, token bar, cost
-- `MessageView` / `ToolCallView` / `DiffView` (components/chat.tsx) — Shared display contract from
-  `@vvtxn/relay/core/display.ts`; `UIMessage` is re-exported from there (single definition). Turns are labeled (`you` in
-  info, `relay` in brand, mirroring the web's role headers) and separated by the scroll gap — no per-message panels.
-  Tool calls render as single rows (`├`/`└` tree glyphs, name, summarized args, one-line output) with diffs indented
-  under `│`. All three views are wrapped in `memo()` (pure functions of props) so idle frames and streamed deltas skip
-  re-rendering unchanged messages
+- `MessageView` (components/chat.tsx) — Shared display contract from `@vvtxn/relay/core/display.ts`; `UIMessage` is
+  re-exported from there (single definition). User turns are marked with a `│` bar (borderLabel), agent turns with a `●`
+  (brand), and turns are separated by the scroll gap — no per-message panels. Tool calls are collapsed by
+  `summarizeToolCalls()` into one summary line on a `surface` panel instead of a row per call. Wrapped in `memo()` (pure
+  function of props) so idle frames and streamed deltas skip re-rendering unchanged messages
 
 ### Fonts (`fonts.ts`)
 

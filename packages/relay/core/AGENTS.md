@@ -9,7 +9,7 @@ core/
 ├── index.ts              # Internal barrel re-exports (see packages/relay/mod.ts for public API)
 ├── agent.ts              # Agent loop (async generator yielding AgentEvents)
 ├── runner.ts             # runAgentLoop() convenience wrapper with callbacks
-├── display.ts            # Display utilities: UIMessage, UIToolCall, parseDiffLines, arg/output formatting
+├── display.ts            # Display utilities: UIMessage, UIToolCall, parseDiffLines, tool-call summaries
 ├── theme.ts              # Graphite/Silver design tokens shared by terminal + web clients
 ├── fonts.ts              # Shared font identity: web faces, CSS stack, terminal install files
 ├── assets/fonts/         # Bundled font files + license (see its README for the swap procedure)
@@ -107,6 +107,7 @@ Shared across all clients (TUI, web). Deliberately dependency-free so browser bu
 - `summarizeToolArgs()` — Converts JSON args to human-readable summary (path, pattern, command, etc.)
 - `getToolDisplayName()` — Maps internal tool names to display labels (e.g. `read_file` → "read")
 - `getToolDisplayOutput()` — Formats tool output as concise summaries for display
+- `summarizeToolCalls()` — Collapses a turn's tool calls into one line (e.g. "Searched 3 files. Read 2 files.")
 - `abbreviateHome()` / `expandHome()` — Replace a home-directory prefix with `~` for display and back
 - `parseDiffLines()` — Parses unified diff into structured `DiffLine[]` (without color assignment)
 

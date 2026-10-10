@@ -146,6 +146,63 @@ export function getToolDisplayOutput(tool: UIToolCall): string | null {
 }
 
 // ---------------------------------------------------------------------------
+// Tool call summarization
+// ---------------------------------------------------------------------------
+
+function formatCount(count: number, singular: string, plural: string): string {
+	return `${count} ${count === 1 ? singular : plural}`;
+}
+
+/**
+ * Collapse a turn's tool calls into one human-readable line, e.g.
+ * "Searched 3 files. Read 2 files. Edited 1 file." Calls are grouped by action
+ * (first-seen order) and counted, so a long burst collapses to a single line
+ * instead of a row/card per call. `grep` reports the number of distinct files
+ * that matched, falling back to the number of searches when output is absent.
+ */
+export function summarizeToolCalls(toolCalls: UIToolCall[]): string {
+	if (toolCalls.length === 0) return "";
+
+	const order: string[] = [];
+	const counts = new Map<string, number>();
+	const searchedFiles = new Set<string>();
+
+	for (const tool of toolCalls) {
+		if (!counts.has(tool.name)) order.push(tool.name);
+		counts.set(tool.name, (counts.get(tool.name) ?? 0) + 1);
+		if (tool.name === "grep" && tool.output) {
+			for (const line of tool.output.split("\n")) {
+				if (!line) continue;
+				const file = line.split(":")[0];
+				if (file) searchedFiles.add(file);
+			}
+		}
+	}
+
+	const phrases = order.map((name) => {
+		const count = counts.get(name) ?? 0;
+		switch (name) {
+			case "grep":
+				return `Searched ${formatCount(searchedFiles.size || count, "file", "files")}`;
+			case "read_file":
+				return `Read ${formatCount(count, "file", "files")}`;
+			case "write_file":
+				return `Wrote ${formatCount(count, "file", "files")}`;
+			case "edit_file":
+				return `Edited ${formatCount(count, "file", "files")}`;
+			case "bash":
+				return `Ran ${formatCount(count, "command", "commands")}`;
+			default: {
+				const label = getToolDisplayName(name);
+				return `${label.charAt(0).toUpperCase()}${label.slice(1)} ${formatCount(count, "time", "times")}`;
+			}
+		}
+	});
+
+	return `${phrases.join(". ")}.`;
+}
+
+// ---------------------------------------------------------------------------
 // Path abbreviation
 // ---------------------------------------------------------------------------
 
