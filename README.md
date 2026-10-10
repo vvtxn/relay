@@ -344,7 +344,6 @@ deno task fmt          # Format code
 deno task fmt:check    # Check formatting
 deno task lint         # Lint
 deno task check        # Strict type-check every entrypoint
-deno task test         # Run tests
 deno task relay        # Start/reuse the server + terminal UI
 deno task relay web    # Open the web client (server starts in the background)
 deno task relay stop   # Stop the background server

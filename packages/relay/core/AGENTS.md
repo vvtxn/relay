@@ -36,23 +36,11 @@ core/
 │   ├── edit.ts           # File editing (find-and-replace)
 │   ├── diff.ts           # Unified diff generation via git diff
 │   └── grep.ts           # Text search (ripgrep-style)
-├── sessions/             # Session persistence
-│   ├── index.ts          # Public exports
-│   ├── manager.ts        # Session CRUD (create, list, load, save, delete)
-│   ├── paths.ts          # Session storage paths (~/.relay/sessions/)
-│   └── types.ts          # Session types
-└── tests/
-    ├── agent.test.ts     # Agent loop tests
-    ├── approval.test.ts  # Tool approval wrapper tests
-    ├── bash.test.ts      # Bash tool tests
-    ├── context.test.ts     # Context trimming tests
-    ├── edit.test.ts        # Edit tool tests
-    ├── read.test.ts        # Read tool tests
-    ├── runner.test.ts      # Runner callback tests
-    ├── session.test.ts   # Session management tests
-    ├── workspace.test.ts   # Workspace helper tests
-    ├── workspace-tools.test.ts # Workspace-rooted tool tests
-    └── write.test.ts       # Write tool tests
+└── sessions/             # Session persistence
+    ├── index.ts          # Public exports
+    ├── manager.ts        # Session CRUD (create, list, load, save, delete)
+    ├── paths.ts          # Session storage paths (~/.relay/sessions/)
+    └── types.ts          # Session types
 ```
 
 ## Key Concepts
@@ -158,7 +146,7 @@ needs no changes and the model can react. Handlers waiting on user input should 
 `sessions/` provides storage-neutral conversation contracts and adapters:
 
 - `DatabaseSessionStore` stores shared sessions and ordered messages in the database
-- `FileSessionStore` preserves the JSONL implementation for local tests and fallback tooling
+- `FileSessionStore` preserves the JSONL implementation for fallback tooling
 - Session ownership and workspace are explicit in `SessionScope`
 
 ### Workspace Helpers (`workspace.ts`)
@@ -184,7 +172,6 @@ After concluding that a task is complete, always run these commands from the rep
 1. `deno task fmt` — auto-format all code
 2. `deno task lint` — check for lint errors
 3. `deno task check` — strict type-check of every entrypoint
-4. `deno task test` — run the test suite
 
 If any command fails, fix the issues and re-run until all pass cleanly.
 

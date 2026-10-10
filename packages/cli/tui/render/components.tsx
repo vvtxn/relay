@@ -13,6 +13,7 @@ import { toAnsi } from "@/tui/core/primitives/color.ts";
 import { type MarkdownSegment, parseMarkdown } from "@/tui/core/primitives/parse-markdown.ts";
 import { useScrollArea } from "./hooks/scroll-area.ts";
 import { useSignal, useSignalEffect } from "./hooks/signals.ts";
+import { memo } from "./memo.ts";
 import type {
 	BoxProps,
 	MarkdownProps,
@@ -21,6 +22,8 @@ import type {
 	TextInputProps,
 	TextProps,
 } from "./types/index.ts";
+
+export { memo };
 
 const SPINNER_FRAME_COUNT = 10;
 
@@ -88,9 +91,38 @@ export { CommandPalette } from "./components/command-palette.tsx";
 export { WelcomeScreen } from "./components/welcome-screen.tsx";
 export { ApprovalPrompt } from "./components/approval-prompt.tsx";
 
-export function Markdown(props: MarkdownProps) {
+const FORMATTED_CACHE_LIMIT = 256;
+const formattedLinesCache = new Map<string, string[]>();
+
+/**
+ * Parsed + ANSI-formatted lines for one markdown content string, memoized with
+ * a small LRU: the same content would otherwise be re-parsed and re-formatted
+ * on every commit. Callers must treat the returned array as immutable.
+ */
+function formattedMarkdownLines(content: string): string[] {
+	const cached = formattedLinesCache.get(content);
+	if (cached) {
+		formattedLinesCache.delete(content);
+		formattedLinesCache.set(content, cached);
+		return cached;
+	}
+
+	const lines = parseMarkdown(content).map((line) => line.segments.map(formatSegment).join(""));
+	formattedLinesCache.set(content, lines);
+	if (formattedLinesCache.size > FORMATTED_CACHE_LIMIT) {
+		const oldest = formattedLinesCache.keys().next().value;
+		if (oldest !== undefined) formattedLinesCache.delete(oldest);
+	}
+	return lines;
+}
+
+/**
+ * Markdown content rendered as styled Text lines. Pure: memoized so unchanged
+ * content skips re-parsing, re-formatting, and VNode churn across commits.
+ */
+export const Markdown = memo(function Markdown(props: MarkdownProps) {
 	const content = childrenToString(props.children);
-	const lines = parseMarkdown(content);
+	const lines = formattedMarkdownLines(content);
 
 	return (
 		<Box
@@ -100,9 +132,8 @@ export function Markdown(props: MarkdownProps) {
 			{...(props.flex !== undefined ? { flex: props.flex } : {})}
 		>
 			{lines.map((line, i) => {
-				const formattedLine = line.segments.map(formatSegment).join("");
-				return <Text key={i}>{formattedLine}</Text>;
+				return <Text key={i}>{line}</Text>;
 			})}
 		</Box>
 	);
-}
+});

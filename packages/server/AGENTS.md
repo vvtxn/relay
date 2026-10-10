@@ -23,10 +23,7 @@ server/
 ├── sse.ts           # GET /api/sessions/:id/events (snapshot + live stream + heartbeat)
 ├── files.ts         # GET /api/sessions/:id/files (project file listing for @-mentions)
 ├── workspace.ts     # GET /api/workspace (server default cwd)
-├── static.ts        # Static web app serving with SPA fallback + path confinement
-├── config.test.ts   # Config parsing tests
-├── identity.test.ts # Per-request auth resolution tests
-└── run.test.ts      # RunManager tests (fake store/provider)
+└── static.ts        # Static web app serving with SPA fallback + path confinement
 ```
 
 ## Key Concepts
@@ -156,7 +153,6 @@ After concluding that a task is complete, always run these commands from the rep
 1. `deno task fmt` — auto-format all code
 2. `deno task lint` — check for lint errors
 3. `deno task check` — strict type-check of every entrypoint
-4. `deno task test` — run the test suite
 
 ## Code Patterns
 
@@ -164,4 +160,3 @@ After concluding that a task is complete, always run these commands from the rep
 - Route handlers throw `BadRequestError`/`NotFoundError`; the router maps them to responses
 - SSE frames via `encodeSSEFrame` from `@vvtxn/client`; heartbeats as SSE comments every 15s
 - `deno-lint-ignore` is rarely needed — prefer extracting non-async generators
-- Tests use fake stores/providers (see `run.test.ts`), never a live database

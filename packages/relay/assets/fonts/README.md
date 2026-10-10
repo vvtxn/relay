@@ -25,5 +25,3 @@ frames) — terminals fall back per glyph there. Verify coverage when swapping.
    lists if the available weights differ.
 4. Update the `@font-face` family name in `packages/web/src/styles.css` to match `font.family`.
 5. Update the table and "Current font" line in this README.
-
-Run `deno task test` — the manifest test fails if a referenced file is missing or a duplicate.

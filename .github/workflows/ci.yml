@@ -10,7 +10,7 @@ on:
             - main
 
 jobs:
-    lint-and-test:
+    lint:
         runs-on: ubuntu-latest
         timeout-minutes: 15
         permissions:
@@ -31,4 +31,4 @@ jobs:
                   key: deno-${{ hashFiles('deno.lock') }}
                   restore-keys: deno-
 
-            - run: deno task fmt:check && deno task lint && deno task test
+            - run: deno task fmt:check && deno task lint

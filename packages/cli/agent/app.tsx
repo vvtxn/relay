@@ -110,6 +110,8 @@ function App({ onQuit, user, initialSessionId, info }: AppProps) {
 	});
 	const currentAsk = useSignal<{ sessionId: string; toolCallId: string } | null>(null);
 	const remotelyResolved = useSignal<Set<string>>(new Set());
+	/** Session id whose history is still loading — shows a hint instead of the welcome screen. */
+	const loadingSession = useSignal<string | null>(null);
 
 	const pushStream = () => {
 		stream.value = sync.value.pending;
@@ -153,8 +155,10 @@ function App({ onQuit, user, initialSessionId, info }: AppProps) {
 			};
 			syncStream(true);
 			branchName.value = response.branch;
+			loadingSession.value = null;
 		} catch {
 			// Keep the current view on transient failures
+			loadingSession.value = null;
 		}
 	};
 
@@ -320,6 +324,7 @@ function App({ onQuit, user, initialSessionId, info }: AppProps) {
 		sync.value.pending = resetSessionStreamState();
 		syncStream(true);
 		branchName.value = null;
+		loadingSession.value = id;
 		// History + stream arrive via the session effect (refresh + subscribe)
 	};
 
@@ -331,6 +336,7 @@ function App({ onQuit, user, initialSessionId, info }: AppProps) {
 			sync.value.pending = resetSessionStreamState();
 			syncStream(true);
 			branchName.value = null;
+			loadingSession.value = null;
 		} catch (error) {
 			showError(error instanceof Error ? error.message : String(error));
 		}
@@ -440,12 +446,20 @@ function App({ onQuit, user, initialSessionId, info }: AppProps) {
 
 			{messages.length === 0
 				? (
-					<WelcomeScreen
-						version={VERSION}
-						userName={user.name}
-						model={info.model}
-						hints="Enter to send • @ for files • / for commands • PageUp/PageDown to scroll • i/Esc to toggle mode"
-					/>
+					loadingSession.value !== null
+						? (
+							<Box flex flexDirection="column" justifyContent="center" alignItems="center">
+								<Text color={theme.textDim} italic>Loading thread…</Text>
+							</Box>
+						)
+						: (
+							<WelcomeScreen
+								version={VERSION}
+								userName={user.name}
+								model={info.model}
+								hints="Enter to send • @ for files • / for commands • PageUp/PageDown to scroll • i/Esc to toggle mode"
+							/>
+						)
 				)
 				: (
 					<ScrollArea flex flexDirection="column" padding={1} gap={1} scrollbar focused autoScroll>

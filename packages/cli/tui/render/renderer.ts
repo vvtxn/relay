@@ -13,6 +13,7 @@ import {
 	setCurrentStore,
 } from "./hooks/signals.ts";
 import { Fragment, type VNode } from "./jsx-runtime.ts";
+import { isMemoized } from "./memo.ts";
 import type { Instance, Position, RenderContext } from "./types/index.ts";
 
 interface ReconcileCtx {
@@ -20,6 +21,41 @@ interface ReconcileCtx {
 	nextIndex: number;
 	oldKeyMap: Map<string | number, number>;
 	consumed: Set<number>;
+}
+
+/**
+ * Shallow prop compare ignoring `children` and `key`: children are matched
+ * separately by reconciliation and never affect an element's own Yoga style.
+ * Gates redundant re-application of Yoga layout setters — the dominant cost
+ * when large trees re-commit with unchanged props.
+ */
+function layoutPropsEqual(a: object, b: object): boolean {
+	if (a === b) return true;
+	const aProps = a as Record<string, unknown>;
+	const bProps = b as Record<string, unknown>;
+	const aKeys = Object.keys(aProps).filter((k) => k !== "children" && k !== "key");
+	const bKeys = Object.keys(bProps).filter((k) => k !== "children" && k !== "key");
+	if (aKeys.length !== bKeys.length) return false;
+	for (const k of aKeys) {
+		if (aProps[k] !== bProps[k]) return false;
+	}
+	return true;
+}
+
+/**
+ * Full shallow prop compare (children included, by reference). Gates
+ * memoized component re-invocation — see `memo.ts` for the contract.
+ */
+function memoPropsEqual(a: object, b: object): boolean {
+	if (a === b) return true;
+	const aProps = a as Record<string, unknown>;
+	const bProps = b as Record<string, unknown>;
+	const aKeys = Object.keys(aProps);
+	if (aKeys.length !== Object.keys(bProps).length) return false;
+	for (const k of aKeys) {
+		if (aProps[k] !== bProps[k]) return false;
+	}
+	return true;
 }
 
 export class Renderer {
@@ -56,14 +92,20 @@ export class Renderer {
 
 	mountInstance(vnode: VNode, hookStore?: HookStore): Instance {
 		if (typeof vnode.type === "function") {
+			const componentType = vnode.type;
+			const memoProps = vnode.props as Record<string, unknown>;
 			const store = hookStore ?? createHookStore();
 			setCurrentStore(store);
+			let firstOutput: VNode | undefined;
 			while (typeof vnode.type === "function") {
-				vnode = (vnode.type as any)(vnode.props);
+				const resolved = (vnode.type as any)(vnode.props);
+				if (firstOutput === undefined) firstOutput = resolved;
+				vnode = resolved;
 			}
 			clearCurrentStore();
 			const instance = this.mountInstance(vnode);
 			instance.hookStore = store;
+			this.recordMemoState(instance, componentType, memoProps, firstOutput);
 			return instance;
 		}
 
@@ -116,10 +158,14 @@ export class Renderer {
 		let vnode = child as VNode;
 		if (typeof vnode.type === "function") {
 			const componentType = vnode.type;
+			const memoProps = vnode.props as Record<string, unknown>;
 			const store = createHookStore();
 			setCurrentStore(store);
+			let firstOutput: VNode | undefined;
 			while (typeof vnode.type === "function") {
-				vnode = (vnode.type as any)(vnode.props);
+				const resolved = (vnode.type as any)(vnode.props);
+				if (firstOutput === undefined) firstOutput = resolved;
+				vnode = resolved;
 			}
 			clearCurrentStore();
 
@@ -136,6 +182,7 @@ export class Renderer {
 			const childInstance = this.mountInstance(vnode);
 			childInstance.componentType = componentType;
 			childInstance.hookStore = store;
+			this.recordMemoState(childInstance, componentType, memoProps, firstOutput);
 			parent.children.push(childInstance);
 			parent.yogaNode.insertChild(childInstance.yogaNode, parent.children.length - 1);
 			return;
@@ -156,12 +203,48 @@ export class Renderer {
 		parent.yogaNode.insertChild(childInstance.yogaNode, parent.children.length - 1);
 	}
 
+	/**
+	 * Record memo state on the output instance for a memoized component. The
+	 * reconciler reuses it to skip re-invocation while props stay shallow-equal.
+	 * The stored output is the component's *direct* output VNode (which may be
+	 * another component, e.g. `<Box>`), so a hit re-reconciles that output
+	 * without re-running the memoized body. See `memo.ts` for the contract.
+	 */
+	private recordMemoState(
+		instance: Instance,
+		componentType: unknown,
+		props: Record<string, unknown>,
+		output: VNode | null | undefined,
+	) {
+		if (!isMemoized(componentType) || !output) return;
+		instance.memoComponent = componentType;
+		instance.memoProps = props;
+		instance.memoOutput = output;
+	}
+
+	/** True when a memoized component's previous output can be reused verbatim. */
+	private canReuseMemo(existing: Instance | null, componentType: unknown, props: object): existing is Instance {
+		const reusable = !!existing &&
+			existing.memoComponent === componentType &&
+			existing.memoProps !== undefined && existing.memoOutput !== undefined && existing.memoOutput !== null &&
+			memoPropsEqual(existing.memoProps, props);
+		return reusable;
+	}
+
 	// --- Reconcile path: diff VNode against existing Instance tree ---
 
 	reconcile(vnode: VNode, existing: Instance | null): Instance | null {
 		if (typeof vnode.type === "function") {
+			const componentType = vnode.type;
+			// Memo fast path: pure component with unchanged props reuses its
+			// previous output (see memo.ts).
+			if (isMemoized(componentType) && this.canReuseMemo(existing, componentType, vnode.props)) {
+				return this.reconcile(existing.memoOutput!, existing);
+			}
+			const memoProps = vnode.props as Record<string, unknown>;
 			const store = existing?.hookStore ?? createHookStore();
 			setCurrentStore(store);
+			let firstOutput: VNode | undefined;
 			while (typeof vnode.type === "function") {
 				const resolved = (vnode.type as any)(vnode.props);
 				if (!resolved) {
@@ -169,12 +252,14 @@ export class Renderer {
 					if (existing) this.freeYogaNodes(existing);
 					return null;
 				}
+				if (firstOutput === undefined) firstOutput = resolved;
 				vnode = resolved;
 			}
 			clearCurrentStore();
 			const instance = this.reconcile(vnode, existing);
 			if (!instance) return null;
 			instance.hookStore = store;
+			this.recordMemoState(instance, componentType, memoProps, firstOutput);
 			return instance;
 		}
 
@@ -192,9 +277,12 @@ export class Renderer {
 			return this.mountInstance(vnode);
 		}
 
-		existing.props = vnode.props;
 		const element = getElement(type);
-		element.layout(existing);
+		const propsUnchanged = layoutPropsEqual(existing.props, vnode.props);
+		existing.props = vnode.props;
+		// Yoga setter calls are FFI and dominate large-tree commits; only the
+		// element's own props (children reconcile separately) require them.
+		if (!propsUnchanged) element.layout(existing);
 
 		if (element.hasChildren) {
 			this.reconcileChildren(vnode, existing);
@@ -233,16 +321,25 @@ export class Renderer {
 			}
 		}
 
-		parentInstance.children = newChildren;
+		// Skip the Yoga child-list rebuild when it is unchanged: removing and
+		// re-inserting children dirties the node and forces a full re-layout
+		// of the subtree (plus FFI churn) even when every child kept its
+		// position. `parentInstance.children` is kept in sync with the Yoga
+		// child list by mount and reconcile, so a JS compare is enough.
+		const unchanged = oldChildren.length === newChildren.length &&
+			newChildren.every((child, i) => child === oldChildren[i]);
+		if (!unchanged) {
+			const childCount = parentInstance.yogaNode.getChildCount();
+			for (let i = childCount - 1; i >= 0; i--) {
+				parentInstance.yogaNode.removeChild(parentInstance.yogaNode.getChild(i));
+			}
+			for (let i = 0; i < newChildren.length; i++) {
+				const child = newChildren[i];
+				if (child) parentInstance.yogaNode.insertChild(child.yogaNode, i);
+			}
+		}
 
-		const childCount = parentInstance.yogaNode.getChildCount();
-		for (let i = childCount - 1; i >= 0; i--) {
-			parentInstance.yogaNode.removeChild(parentInstance.yogaNode.getChild(i));
-		}
-		for (let i = 0; i < newChildren.length; i++) {
-			const child = newChildren[i];
-			if (child) parentInstance.yogaNode.insertChild(child.yogaNode, i);
-		}
+		parentInstance.children = newChildren;
 	}
 
 	private consumeOldChild(ctx: ReconcileCtx, key: string | number | undefined | null): Instance | null {
@@ -278,12 +375,15 @@ export class Renderer {
 				const text = child.toString();
 
 				if (oldChild && oldChild.type === ElementType.TEXT) {
-					const oldText = oldChild.props.children;
-					oldChild.props = { children: text };
-					const element = getElement(ElementType.TEXT);
-					element.layout(oldChild);
-					if (oldText !== text && oldChild.props.height === undefined) {
-						oldChild.yogaNode.markDirty();
+					const oldProps = oldChild.props as Record<string, unknown>;
+					const unchanged = oldProps.children === text && Object.keys(oldProps).length === 1;
+					if (!unchanged) {
+						oldChild.props = { children: text };
+						const element = getElement(ElementType.TEXT);
+						element.layout(oldChild);
+						if (oldProps.children !== text && oldChild.props.height === undefined) {
+							oldChild.yogaNode.markDirty();
+						}
 					}
 					newChildren.push(oldChild);
 				} else {
@@ -359,7 +459,19 @@ export class Renderer {
 							newChildren.push(inst);
 						}
 					} else {
+						// Memo fast path: pure component with unchanged props
+						// reuses its previous output (see memo.ts).
+						if (isMemoized(componentType) && this.canReuseMemo(oldChild, componentType, vnode.props)) {
+							const inst = this.reconcile(oldChild.memoOutput!, oldChild);
+							if (inst) {
+								inst.componentType = componentType;
+								newChildren.push(inst);
+							}
+							continue;
+						}
 						store = oldChild?.hookStore ?? createHookStore();
+						const memoProps = vnode.props as Record<string, unknown>;
+						let firstOutput: VNode | undefined;
 						setCurrentStore(store);
 						while (typeof vnode.type === "function") {
 							const resolved = (vnode.type as any)(vnode.props);
@@ -367,6 +479,7 @@ export class Renderer {
 								vnode = null as any;
 								break;
 							}
+							if (firstOutput === undefined) firstOutput = resolved;
 							vnode = resolved;
 						}
 						clearCurrentStore();
@@ -386,6 +499,7 @@ export class Renderer {
 							if (inst) {
 								if (componentType) inst.componentType = componentType;
 								inst.hookStore = store;
+								this.recordMemoState(inst, componentType, memoProps, firstOutput);
 								newChildren.push(inst);
 							}
 						}

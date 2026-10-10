@@ -127,12 +127,39 @@ export function wrapTextWithOffsets(text: string, width: number): LineWithOffset
 	return lines.length > 0 ? lines : [{ line: "", startIndex: 0 }];
 }
 
+interface WrapCacheEntry {
+	width: number;
+	lines: string[];
+}
+
+const WRAP_CACHE_LIMIT = 2048;
+const wrapCache = new Map<string, WrapCacheEntry>();
+
 /**
  * Wraps text to a specified visible width, preferring word boundaries and
  * preserving multiple/leading spaces.
+ *
+ * Memoized with a small LRU keyed by the text (one width per entry): Yoga
+ * measure functions and element paints wrap the same strings on every commit,
+ * so unchanged text must not re-run the per-character tokenizer. Callers must
+ * treat the returned array as immutable.
  */
 export function wrapText(text: string, width: number): string[] {
-	return wrapTextWithOffsets(text, width).map((l) => l.line);
+	const cached = wrapCache.get(text);
+	if (cached && cached.width === width) {
+		// Refresh recency so on-screen lines survive evictions.
+		wrapCache.delete(text);
+		wrapCache.set(text, cached);
+		return cached.lines;
+	}
+
+	const lines = wrapTextWithOffsets(text, width).map((l) => l.line);
+	wrapCache.set(text, { width, lines });
+	if (wrapCache.size > WRAP_CACHE_LIMIT) {
+		const oldest = wrapCache.keys().next().value;
+		if (oldest !== undefined) wrapCache.delete(oldest);
+	}
+	return lines;
 }
 
 /**
