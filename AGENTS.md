@@ -165,7 +165,6 @@ Follow [Conventional Commits](https://www.conventionalcommits.org/) with these t
 - `style(lint)` - Lint fixes
 - `docs` - Documentation or README updates
 - `chore` - Maintenance tasks (e.g., `chore: version bump`)
-- `test` - Adding or updating tests
 
 Use scopes when relevant: `feat(agent):`, `fix(tui):`, `refactor(core):`, `feat(diffs):`, `fix(command-palette):`, etc.
 

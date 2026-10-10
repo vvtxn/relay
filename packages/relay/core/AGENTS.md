@@ -146,7 +146,7 @@ needs no changes and the model can react. Handlers waiting on user input should 
 `sessions/` provides storage-neutral conversation contracts and adapters:
 
 - `DatabaseSessionStore` stores shared sessions and ordered messages in the database
-- `FileSessionStore` preserves the JSONL implementation for local tests and fallback tooling
+- `FileSessionStore` preserves the JSONL implementation for fallback tooling
 - Session ownership and workspace are explicit in `SessionScope`
 
 ### Workspace Helpers (`workspace.ts`)
