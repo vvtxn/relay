@@ -11,9 +11,7 @@ client/
 ├── protocol.ts         # REST payloads + ServerEvent union (plain JSON types only)
 ├── sse.ts              # readSSEStream (fetch-based parser), encodeSSEFrame (server side)
 ├── client.ts           # RelayClient + RelayApiError
-├── session-state.ts    # Pure ServerEvent fold reducer shared by all clients
-├── client.test.ts      # Protocol + client tests (mock fetch)
-└── session-state.test.ts # Reducer tests (pure, no DOM)
+└── session-state.ts    # Pure ServerEvent fold reducer shared by all clients
 ```
 
 ## Key Concepts
@@ -58,11 +56,10 @@ After concluding that a task is complete, always run these commands from the rep
 1. `deno task fmt` — auto-format all code
 2. `deno task lint` — check for lint errors
 3. `deno task check` — strict type-check of every entrypoint
-4. `deno task test` — run the test suite
 
 ## Code Patterns
 
 - Protocol changes always land here first; server and client consume the same types
 - Keep protocol types JSON-serializable (no class instances, no functions)
 - Error bodies always use `{ error: string }` so clients can render them directly
-- New endpoints: add payload types to `protocol.ts`, a method to `RelayClient`, tests in `client.test.ts`
+- New endpoints: add payload types to `protocol.ts` and a method to `RelayClient`

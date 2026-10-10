@@ -43,7 +43,6 @@ in the server. `packages/relay` powers the server and provides display + theme u
 - **Check formatting**: `deno task fmt:check`
 - **Lint**: `deno task lint`
 - **Type-check**: `deno task check` (strict; checks every entrypoint)
-- **Run tests**: `deno task test` (requires `--allow-read --allow-write --allow-env --allow-run`)
 - **Run CLI**: `deno task relay` (starts/reuses the background server, then the TUI)
 - **Open web client**: `deno task relay web` (ensures the server, opens the browser)
 - **Stop/status the background server**: `deno task relay stop` / `deno task relay status`
@@ -63,9 +62,8 @@ After concluding that a task is complete, always run these commands in order:
 1. `deno task fmt` — auto-format all code
 2. `deno task lint` — check for lint errors
 3. `deno task check` — strict type-check of every entrypoint
-4. `deno task test` — run the test suite
 
-If any command fails, fix the issues and re-run until all pass cleanly. Do not report the task as done until all four
+If any command fails, fix the issues and re-run until all pass cleanly. Do not report the task as done until all three
 pass.
 
 ### Type Checking

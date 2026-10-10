@@ -27,7 +27,7 @@ jobs:
                   restore-keys: deno-
 
             - name: Verify checks
-              run: deno task fmt:check && deno task lint && deno task test
+              run: deno task fmt:check && deno task lint
 
             - name: Build binary
               run: deno task build

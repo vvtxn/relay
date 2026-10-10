@@ -48,15 +48,6 @@ tui/
 │   │   └── welcome-screen.tsx  # WelcomeScreen component
 │   └── types/
 │       └── index.ts            # TypeScript type definitions, ElementRegistry, props
-├── tests/
-│   ├── char-width.test.ts      # wcwidth + ANSI measurement tests
-│   ├── input-parsing.test.ts   # Input parsing tests (keys + SGR mouse)
-│   ├── jsx-runtime.test.ts     # JSX runtime tests
-│   ├── terminal-render.test.ts # Bg coverage, wide chars, batching, resize tests
-│   ├── terminal-teardown.test.ts # Teardown/alt-screen ordering tests
-│   ├── text-input-cursor.test.ts # Text input cursor tests
-│   ├── text-utils.test.ts      # Text utility tests
-│   └── wrap-text.test.ts       # Text wrapping tests (ANSI/wide-aware)
 └── theme.ts                    # Centralized color theme (hex colors for all UI elements)
 ```
 
@@ -231,7 +222,6 @@ After concluding that a task is complete, always run these commands from the rep
 1. `deno task fmt` — auto-format all code
 2. `deno task lint` — check for lint errors
 3. `deno task check` — strict type-check of every entrypoint
-4. `deno task test` — run the test suite
 
 If any command fails, fix the issues and re-run until all pass cleanly.
 

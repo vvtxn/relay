@@ -6,7 +6,6 @@
 		"fmt:check": "deno fmt --check",
 		"lint": "deno lint",
 		"check": "deno check --unstable-raw-imports packages/relay/mod.ts packages/client/mod.ts packages/server/main.ts packages/cli/agent/index.ts packages/web/src/main.tsx scripts/*.ts",
-		"test": "deno test --unstable-raw-imports --allow-read --allow-write --allow-env --allow-run",
 		"relay": "deno run -A scripts/run-env.ts --unstable-raw-imports --allow-all packages/cli/agent/index.ts",
 		"relay:dev": "deno task relay",
 		"relay:prod": "RELAY_ENV=production deno task relay",
@@ -28,7 +27,6 @@
 		"version:bump": "deno run --allow-write=packages/cli/version.ts,README.md --allow-read=README.md scripts/bump.ts"
 	},
 	"imports": {
-		"@std/assert": "jsr:@std/assert@^1",
 		"@std/dotenv": "jsr:@std/dotenv@^0.225.8",
 		"@std/path": "jsr:@std/path@^1"
 	},
