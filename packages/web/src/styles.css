@@ -577,6 +577,7 @@ body {
 	display: flex;
 	align-items: center;
 	gap: 0.5rem;
+	min-width: 0;
 }
 
 .status-stat-key {
@@ -588,6 +589,7 @@ body {
 .status-stat-value {
 	color: var(--relay-text-muted, #c0c0c0);
 	font-variant-numeric: tabular-nums;
+	white-space: nowrap;
 }
 
 .status-sep {
