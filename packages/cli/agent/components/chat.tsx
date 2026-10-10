@@ -71,7 +71,7 @@ export const MessageView = memo(function MessageView({ msg }: { key?: number; ms
 	if (msg.role === "user") {
 		return (
 			<Box flexDirection="row" gap={1}>
-				<Text color={theme.info} bold>you</Text>
+				<Text color={theme.borderLabel}>│</Text>
 				<Text flex color={theme.text}>{msg.content}</Text>
 			</Box>
 		);
@@ -83,11 +83,15 @@ export const MessageView = memo(function MessageView({ msg }: { key?: number; ms
 	if (!hasText && toolCalls.length === 0) return null;
 
 	return (
-		<Box flexDirection="column">
-			<Text color={theme.brand} bold>relay</Text>
-			{hasText && <Markdown flex>{msg.content.trim()}</Markdown>}
+		<Box flexDirection="column" gap={1}>
+			{hasText && (
+				<Box flexDirection="row" gap={1}>
+					<Text color={theme.brand} bold>●</Text>
+					<Markdown flex>{msg.content.trim()}</Markdown>
+				</Box>
+			)}
 			{toolCalls.length > 0 && (
-				<Box flexDirection="column">
+				<Box flexDirection="column" gap={1} bgColor={theme.surface} padding={1}>
 					{toolCalls.map((tool, i) => <ToolCallView key={i} tool={tool} last={i === toolCalls.length - 1} />)}
 				</Box>
 			)}
