@@ -41,6 +41,12 @@ export interface Theme {
 	blockquote: string;
 	listBullet: string;
 	hr: string;
+
+	toolRead: string;
+	toolWrite: string;
+	toolEdit: string;
+	toolGrep: string;
+	toolRun: string;
 }
 
 export const theme: Theme = {
@@ -74,6 +80,12 @@ export const theme: Theme = {
 	blockquote: "#808080",
 	listBullet: "#808080",
 	hr: "#303030",
+
+	toolRead: "#9FB6C4",
+	toolWrite: "#A7C4A7",
+	toolEdit: "#C4B394",
+	toolGrep: "#B4A7C4",
+	toolRun: "#C4A7A7",
 };
 
 /**
@@ -112,6 +124,12 @@ export const lightTheme: Theme = {
 	blockquote: "#6A6A6A",
 	listBullet: "#6A6A6A",
 	hr: "#D6D6D6",
+
+	toolRead: "#41647A",
+	toolWrite: "#3F6B3F",
+	toolEdit: "#7A6636",
+	toolGrep: "#5E4B7A",
+	toolRun: "#7A4B4B",
 };
 
 /** Named palettes for clients that let the user pick one. */

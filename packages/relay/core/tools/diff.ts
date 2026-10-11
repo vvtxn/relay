@@ -2,9 +2,11 @@
  * Generate a unified diff between two strings.
  *
  * Pure-TypeScript Myers diff with common prefix/suffix stripping
- * and minimal allocations. Returns synchronously.
+ * and minimal allocations. Returns synchronously. When `fileName` is given
+ * the patch carries git-style headers so renderers can name the file and
+ * infer its syntax-highlighting language.
  */
-export function generateDiff(oldText: string, newText: string): string | undefined {
+export function generateDiff(oldText: string, newText: string, fileName?: string): string | undefined {
 	if (oldText === newText) return undefined;
 
 	const oldLines = oldText.split("\n");
@@ -31,7 +33,13 @@ export function generateDiff(oldText: string, newText: string): string | undefin
 	const hunks = buildHunks(edits, oldSlice, newSlice, prefix, 3);
 	if (hunks.length === 0) return undefined;
 
-	return "--- a\n+++ b\n" + hunks.join("\n");
+	// `a/` prefix mirrors git's convention; strip any absolute prefix so the
+	// header reads like a repository-relative path.
+	const displayPath = fileName?.replace(/^\/+/, "");
+	const header = displayPath
+		? `diff --git a/${displayPath} b/${displayPath}\n--- a/${displayPath}\n+++ b/${displayPath}`
+		: "--- a\n+++ b";
+	return `${header}\n${hunks.join("\n")}`;
 }
 
 // ---------------------------------------------------------------------------

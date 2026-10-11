@@ -297,12 +297,18 @@ export class RunManager {
 							content: assistantMessage.content,
 							...(assistantMessage.tool_calls?.length && { toolCalls: assistantMessage.tool_calls }),
 						});
+						// Draft tool calls carry the full results (including isError),
+						// which the LLM-facing tool messages don't preserve.
+						const results = this.draftToolCalls.get(sessionId) ?? [];
+						const resultById = new Map(results.map((tc) => [tc.id, tc.result]));
 						for (const tr of toolResults) {
+							const result = tr.tool_call_id ? resultById.get(tr.tool_call_id) : undefined;
 							await handle.append({
 								type: "tool_result",
 								toolCallId: tr.tool_call_id!,
 								toolName: tr.name!,
 								content: tr.content!,
+								...(result?.isError ? { isError: true } : {}),
 							});
 						}
 						this.emit(sessionId, { type: "turn_complete" });
