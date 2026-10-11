@@ -5,12 +5,7 @@ import { MessageView } from "./MessageView.tsx";
 
 const NEAR_BOTTOM_PX = 64;
 
-export function ChatView(props: {
-	model: string;
-	version: string;
-	userName?: string | undefined;
-	avatarUrl?: string | undefined;
-}) {
+export function ChatView(props: { model: string; version: string }) {
 	let scrollRef: HTMLDivElement | undefined;
 	const messages = createMemo(() => viewMessages(streamState()));
 	const [stuck, setStuck] = createSignal(true);
@@ -53,9 +48,7 @@ export function ChatView(props: {
 						</div>
 					}
 				>
-					<For each={messages()}>
-						{(msg) => <MessageView msg={msg} userName={props.userName} avatarUrl={props.avatarUrl} />}
-					</For>
+					<For each={messages()}>{(msg) => <MessageView msg={msg} />}</For>
 				</Show>
 			</div>
 			<Show when={!stuck()}>

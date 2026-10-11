@@ -17,6 +17,7 @@ web/
     ├── router.tsx   # Code-based routes: "/" boot → "/s/$sessionId" (+ its "/settings" overlay)
     ├── theme.ts     # applyTheme(mode): palette + color-scheme → --relay-* CSS variables
     ├── version.ts   # Display version
+    ├── highlight.ts # Shared Shiki bridge (lazy grammars; pierre-dark/light, light-dark())
     ├── styles.css   # Layout + components, all colors via var(--relay-*)
     ├── api/
     │   ├── client.ts      # RelayClient singleton (credentials: include, localStorage server URL)
@@ -39,8 +40,11 @@ web/
     └── components/
         ├── Sidebar.tsx         # Workspace switcher, session list, new chat
         ├── ChatView.tsx        # Message list + in-flight draft + auto-scroll
-        ├── MessageView.tsx     # User bubble / agent markdown + tool-call summary
-        ├── Markdown.tsx        # marked tokens → Solid vnodes (no innerHTML)
+        ├── MessageView.tsx     # Terminal-style turn: `│` user / `●` agent gutter, tool panel below
+        ├── Markdown.tsx        # markdown-it token stream → Solid vnodes (no innerHTML)
+        ├── CodeBlock.tsx       # Fenced code block highlighted by the shared Shiki instance
+        ├── ToolCalls.tsx       # Per-call rows: tool accents, grep matches, output previews
+        ├── DiffBlock.tsx       # Unified diffs via @pierre/diffs (plain-line fallback)
         ├── Composer.tsx        # Textarea + @-mention picker + send/stop
         ├── ApprovalDialog.tsx  # allow / always / deny overlay
         ├── StatusBar.tsx       # Branch, tokens, cost, user, sign out
@@ -122,10 +126,27 @@ mounted and its stream connected behind it, so opening/closing settings is insta
 `/settings` route serves CLI deep links (the CLI blocks until a key is set) and returns to the last opened session
 (`relay.sessionId` in localStorage) or the boot flow.
 
-### Markdown
+### Markdown and code highlighting
 
-`Markdown.tsx` lexes with `marked` and renders tokens to Solid elements. Raw HTML is rendered as text and links use
-`rel="noreferrer noopener"` — LLM output is untrusted and is never injected via `innerHTML`.
+`Markdown.tsx` lexes with `markdown-it` (`html: false`) and walks the token stream into Solid elements — raw HTML is
+rendered as text and links use `rel="noreferrer noopener"`, because LLM output is untrusted and is never injected via
+`innerHTML`. A small core rule adds GFM task-list checkboxes, and fenced blocks become `CodeBlock.tsx` components.
+
+`highlight.ts` owns the one Shiki instance: it borrows `@pierre/diffs`' shared highlighter (JavaScript regex engine, no
+WASM; any bundled grammar resolved lazily on first use) with the `pierre-dark` / `pierre-light` themes. Tokens are
+highlighted once with `defaultColor: "light-dark()"`, so switching the app palette needs no re-highlight. Unknown
+languages stay plain text.
+
+### Messages and tool calls
+
+Turn rendering is a web-native take on the terminal client: user turns carry an `info` left border, agent turns
+`brand`, turns are separated by the chat gap, and tool activity is the only element on a background (`surface`) panel.
+Each tool call is a single collapsed row — per-tool accent border (from the shared theme's `toolRead`, `toolWrite`, …
+tokens), display name, argument, and a short result stat (`3 matches in 2 files`, `+4 −3`, `40 lines`, `error`, or a
+pulsing `running…`). Clicking a row expands the full result: edit/write diffs render through `@pierre/diffs` (see
+`DiffBlock.tsx`; falls back to `parseDiffLines` coloring when a patch cannot be parsed), grep output is split into
+colored file/line/text, and other results show as preformatted text. Collapsed by default is deliberate — long outputs
+stay one line unless the reader asks for them.
 
 ### File mentions
 
@@ -160,7 +181,9 @@ different server (which must then allow this browser origin). The legacy absolut
 
 - `solid-js` (1.x), `@tanstack/solid-query`, `@tanstack/solid-router` (npm)
 - `effect` (v4) — services, layers, streams, runtime, typed errors
-- `marked` — markdown lexer (rendered safely to vnodes)
+- `markdown-it` — markdown lexer (rendered safely to vnodes)
+- `shiki` — syntax highlighting; the shared instance also colors code in diffs
+- `@pierre/diffs` — Shiki-based unified diff rendering for edit/write tool calls
 - `vite-plugin-solid` — Solid compiler plugin; Vite itself comes from `vite-plus`
 - `@vvtxn/client` — protocol, RelayClient, shared session-state reducer
 - `@vvtxn/relay` — `display.ts` helpers and `theme.ts` tokens (browser-pure)

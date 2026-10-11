@@ -703,38 +703,22 @@ body {
 	color: var(--relay-code-inline, #b8b8b8);
 }
 
+/* Turns are separated by the chat gap and distinguished by a left border
+ * accent per role (no glyphs, no panels); only tool activity (`.tool-panel`)
+ * sits on a background. */
 .message {
-	display: flex;
-	flex-direction: column;
-	gap: 0.55rem;
 	width: 100%;
-	padding: 0.7rem 0.9rem;
-	border: 1px solid var(--relay-border, #303030);
-	border-left-width: 3px;
-	border-radius: 6px;
-}
-
-.message-head {
-	display: flex;
-	align-items: center;
-	gap: 0.45rem;
-}
-
-.message-role {
-	font-size: 0.72rem;
-	font-weight: 700;
-	letter-spacing: 0.14em;
-	text-transform: uppercase;
-	color: var(--relay-text-dim, #808080);
+	min-width: 0;
+	border-left: 2px solid var(--relay-border, #303030);
+	padding-left: 0.7rem;
 }
 
 .message.user {
 	border-left-color: var(--relay-info, #a8a8b0);
-	background: var(--relay-surface-elevated, #181818);
 }
 
-.message.user .message-role {
-	color: var(--relay-info, #a8a8b0);
+.message.agent {
+	border-left-color: var(--relay-brand, #c0c0c0);
 }
 
 .message-body {
@@ -743,25 +727,237 @@ body {
 	word-break: break-word;
 }
 
-.message.agent {
-	border-left-color: var(--relay-brand, #c0c0c0);
+.message-content {
+	display: flex;
+	flex-direction: column;
+	gap: 0.65rem;
+}
+
+/* ------------------------------------------------------------------ */
+/* Tool calls                                                          */
+/* ------------------------------------------------------------------ */
+
+.tool-panel {
+	display: flex;
+	flex-direction: column;
+	gap: 0.55rem;
 	background: var(--relay-surface, #101010);
+	border-radius: 6px;
+	padding: 0.6rem 0.75rem;
 }
 
-.message.agent .message-role {
-	color: var(--relay-brand, #c0c0c0);
-}
-
-.agent-text {
-	color: var(--relay-text, #f2f2f2);
-}
-
-.tool-summary {
-	color: var(--relay-text-muted, #c0c0c0);
-	font-size: 0.85rem;
+.tool-call {
+	display: flex;
+	flex-direction: column;
+	gap: 0.35rem;
+	min-width: 0;
 	border-left: 2px solid var(--relay-border, #303030);
-	padding-left: 0.6rem;
+	padding-left: 0.55rem;
+}
+
+/* The header is a button (rows expand on click) but reads as a line of text. */
+.tool-call-head {
+	display: flex;
+	align-items: baseline;
+	gap: 0.45rem;
+	width: 100%;
+	min-width: 0;
+	margin: 0;
+	padding: 0.15rem 0.35rem;
+	background: none;
+	border: none;
+	border-radius: 4px;
+	color: inherit;
+	font-family: inherit;
+	font-size: 0.86rem;
+	text-align: left;
+}
+
+.tool-call-head:disabled {
+	color: inherit;
+	cursor: default;
+}
+
+.tool-call[data-details] .tool-call-head {
+	cursor: pointer;
+}
+
+.tool-call[data-details] .tool-call-head:hover {
+	background: var(--relay-surface-elevated, #181818);
+}
+
+/* Per-tool accents — a colored left border per action, graphite chrome. */
+.tool-call[data-tool="read_file"] {
+	border-left-color: var(--relay-tool-read, #9fb6c4);
+}
+
+.tool-call[data-tool="write_file"] {
+	border-left-color: var(--relay-tool-write, #a7c4a7);
+}
+
+.tool-call[data-tool="edit_file"] {
+	border-left-color: var(--relay-tool-edit, #c4b394);
+}
+
+.tool-call[data-tool="grep"] {
+	border-left-color: var(--relay-tool-grep, #b4a7c4);
+}
+
+.tool-call[data-tool="bash"] {
+	border-left-color: var(--relay-tool-run, #c4a7a7);
+}
+
+.tool-call[data-error] {
+	border-left-color: var(--relay-error, #b0a0a0);
+}
+
+.tool-call[data-error] .tool-call-name {
+	color: var(--relay-error, #b0a0a0);
+}
+
+.tool-call-name {
+	font-weight: 700;
+	letter-spacing: 0.06em;
+	color: var(--relay-text-muted, #c0c0c0);
+}
+
+.tool-call-arg {
+	flex: 1;
+	min-width: 0;
+	color: var(--relay-text-dim, #808080);
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.tool-call-status {
+	color: var(--relay-text-faint, #606060);
+	font-size: 0.78rem;
+	animation: relay-pulse 1.4s ease-in-out infinite;
+}
+
+/* Collapsed-row result stat: "12 matches in 3 files", "+4 −2", "error", … */
+.tool-call-badge {
+	flex-shrink: 0;
+	color: var(--relay-text-faint, #606060);
+	font-size: 0.78rem;
+	font-variant-numeric: tabular-nums;
+	white-space: nowrap;
+}
+
+.tool-call[data-error] .tool-call-badge {
+	color: var(--relay-error, #b0a0a0);
+}
+
+.tool-call-badge .badge-add {
+	color: var(--relay-success, #a8b0a8);
+}
+
+.tool-call-badge .badge-del {
+	color: var(--relay-error, #b0a0a0);
+}
+
+.tool-call-chevron {
+	flex-shrink: 0;
+	align-self: center;
+	color: var(--relay-text-faint, #606060);
+	font-size: 0.9rem;
+	line-height: 1;
+	transition: transform 0.15s ease;
+}
+
+.tool-call[data-expanded] .tool-call-chevron {
+	transform: rotate(90deg);
+}
+
+.tool-call-details {
+	display: flex;
+	flex-direction: column;
+	gap: 0.4rem;
+	min-width: 0;
+	padding: 0 0.35rem 0.15rem;
+}
+
+@keyframes relay-pulse {
+	50% {
+		opacity: 0.35;
+	}
+}
+
+.tool-output {
+	min-width: 0;
+	font-size: 0.82rem;
+}
+
+.tool-output pre {
+	margin: 0;
+	font-family: inherit;
+	font-size: inherit;
+	line-height: 1.5;
+	white-space: pre-wrap;
 	word-break: break-word;
+	color: var(--relay-text-dim, #808080);
+}
+
+.tool-output[data-error] pre {
+	color: var(--relay-error, #b0a0a0);
+}
+
+.grep-output {
+	display: flex;
+	flex-direction: column;
+	gap: 0.05rem;
+}
+
+.grep-match {
+	min-width: 0;
+	white-space: pre-wrap;
+	word-break: break-word;
+}
+
+.grep-file {
+	color: var(--relay-tool-grep, #b4a7c4);
+}
+
+.grep-line-number {
+	color: var(--relay-text-faint, #606060);
+}
+
+.grep-text {
+	color: var(--relay-text-dim, #808080);
+}
+
+/* @pierre/diffs renders inside a shadow root; these custom properties pierce
+ * it. The canvas follows the panel surface so diffs read as part of it. */
+.diff-file {
+	margin-top: 0.15rem;
+	border-radius: 4px;
+	overflow: hidden;
+	font-size: 0.85rem;
+	--diffs-font-family: var(--relay-font-mono);
+	--diffs-light-bg: var(--relay-surface, #101010);
+	--diffs-dark-bg: var(--relay-surface, #101010);
+}
+
+.diff-plain {
+	margin: 0;
+	font-family: inherit;
+	font-size: 0.82rem;
+	line-height: 1.5;
+	white-space: pre-wrap;
+	word-break: break-word;
+}
+
+.diff-plain-line[data-kind="add"] {
+	color: var(--relay-success, #a8b0a8);
+}
+
+.diff-plain-line[data-kind="del"] {
+	color: var(--relay-error, #b0a0a0);
+}
+
+.diff-plain-line[data-kind="ctx"] {
+	color: var(--relay-text-faint, #606060);
 }
 
 /* ------------------------------------------------------------------ */
@@ -809,16 +1005,38 @@ body {
 	padding: 0.05rem 0.3rem;
 }
 
+/* Fenced code blocks render through the shared Shiki highlighter; token
+ * colors come from inline `light-dark()` styles, so only the frame lives here. */
+.code-shell {
+	position: relative;
+}
+
+.code-lang {
+	position: absolute;
+	top: 0.4rem;
+	right: 0.55rem;
+	color: var(--relay-text-faint, #606060);
+	font-size: 0.68rem;
+	letter-spacing: 0.08em;
+	pointer-events: none;
+}
+
 .markdown pre.code-block {
 	background: var(--relay-surface-elevated, #181818);
 	border: 1px solid var(--relay-border, #303030);
 	border-radius: 4px;
-	padding: 0.6rem;
+	padding: 0.6rem 3rem 0.6rem 0.6rem;
 	overflow-x: auto;
 }
 
 .markdown pre.code-block code {
 	color: var(--relay-code-block, #c0c0c0);
+}
+
+.markdown li input[type="checkbox"] {
+	margin-right: 0.4rem;
+	accent-color: var(--relay-accent, #d8d8d8);
+	vertical-align: middle;
 }
 
 .markdown hr {
