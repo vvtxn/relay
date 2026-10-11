@@ -1,7 +1,6 @@
-import { For, Show } from "solid-js";
-import type { UIMessage } from "@vvtxn/relay/core/display.ts";
+import { Show } from "solid-js";
+import { summarizeToolCalls, type UIMessage } from "@vvtxn/relay/core/display.ts";
 import { Markdown } from "./Markdown.tsx";
-import { ToolCallView } from "./ToolCallView.tsx";
 
 export function MessageView(props: {
 	msg: UIMessage;
@@ -36,9 +35,7 @@ export function MessageView(props: {
 				</div>
 			</Show>
 			<Show when={toolCalls().length > 0}>
-				<div class="tool-list">
-					<For each={toolCalls()}>{(tool) => <ToolCallView tool={tool} />}</For>
-				</div>
+				<div class="tool-summary">{summarizeToolCalls(toolCalls())}</div>
 			</Show>
 		</article>
 	);

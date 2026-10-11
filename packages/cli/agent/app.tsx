@@ -468,9 +468,29 @@ function App({ onQuit, user, initialSessionId, info }: AppProps) {
 				)}
 
 			<Box height={1} />
+			{stream.value.running && (
+				<Box flexDirection="row" gap={1} paddingBottom={1}>
+					<Spinner color={theme.accent} />
+					<Text color={theme.textMuted} bold italic>
+						{formatStatus(stream.value.status)}
+					</Text>
+					{escPrimed.value
+						? (
+							<Text color={theme.warning} bold>
+								Press Esc again to cancel
+							</Text>
+						)
+						: (
+							<Text color={theme.textDim} italic>
+								Esc to cancel
+							</Text>
+						)}
+				</Box>
+			)}
 			<Box
 				bgColor={theme.surface}
-				padding={1}
+				paddingX={1}
+				paddingY={1}
 			>
 				<TextInput
 					value={input.value}
@@ -481,35 +501,15 @@ function App({ onQuit, user, initialSessionId, info }: AppProps) {
 				/>
 			</Box>
 
-			<Box flexDirection="row" gap={1}>
+			<Box flexDirection="row" gap={1} paddingTop={1}>
 				<Text color={theme.brand} bold>
 					{mode.value}
 				</Text>
-				{stream.value.running
-					? (
-						<>
-							<Spinner color={theme.accent} />
-							<Text color={theme.textMuted} bold italic>
-								{formatStatus(stream.value.status)}
-							</Text>
-							{escPrimed.value
-								? (
-									<Text color={theme.warning} bold>
-										Press Esc again to cancel
-									</Text>
-								)
-								: (
-									<Text color={theme.textDim} italic>
-										Esc to cancel
-									</Text>
-								)}
-						</>
-					)
-					: (
-						<Text color={theme.textFaint} italic>
-							@ files • / commands • i/Esc mode
-						</Text>
-					)}
+				{!stream.value.running && (
+					<Text color={theme.textFaint} italic>
+						@ files • / commands • i/Esc mode
+					</Text>
+				)}
 			</Box>
 
 			<CommandPalette palette={palette} />

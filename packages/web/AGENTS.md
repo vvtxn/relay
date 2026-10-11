@@ -39,9 +39,7 @@ web/
     └── components/
         ├── Sidebar.tsx         # Workspace switcher, session list, new chat
         ├── ChatView.tsx        # Message list + in-flight draft + auto-scroll
-        ├── MessageView.tsx     # User bubble / agent markdown + tool calls
-        ├── ToolCallView.tsx    # Tool card: name, args summary, output, diff
-        ├── DiffView.tsx        # parseDiffLines → colored diff lines
+        ├── MessageView.tsx     # User bubble / agent markdown + tool-call summary
         ├── Markdown.tsx        # marked tokens → Solid vnodes (no innerHTML)
         ├── Composer.tsx        # Textarea + @-mention picker + send/stop
         ├── ApprovalDialog.tsx  # allow / always / deny overlay
