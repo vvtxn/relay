@@ -14,13 +14,13 @@ web/
 ├── dist/            # Build output (gitignored) — served by the server in production
 └── src/
     ├── main.tsx     # render + apply theme + QueryClientProvider + RouterProvider
-    ├── router.tsx   # Code-based routes: "/" boot → "/s/$sessionId"
+    ├── router.tsx   # Code-based routes: "/" boot → "/s/$sessionId" (+ its "/settings" overlay)
     ├── theme.ts     # applyTheme(mode): palette + color-scheme → --relay-* CSS variables
     ├── version.ts   # Display version
     ├── styles.css   # Layout + components, all colors via var(--relay-*)
     ├── api/
     │   ├── client.ts      # RelayClient singleton (credentials: include, localStorage server URL)
-    │   ├── storage.ts     # localStorage helpers (server URL, cwd)
+    │   ├── storage.ts     # localStorage helpers (server URL, cwd, session id)
     │   ├── services.ts    # Effect Api + SessionStream services, RelayError, AppLayer
     │   ├── runtime.ts     # ManagedRuntime + runApi/fork/interrupt helpers
     │   ├── query-client.ts# QueryClient + query key helpers
@@ -29,13 +29,13 @@ web/
     │   └── bootstrap.ts   # Effect program: health → me → config → workspace → session
     ├── auth/auth.ts       # OAuth seam: login/logout URLs, redirect helpers
     ├── state/
-    │   ├── session.ts     # Live stream store + reconnect fiber + query invalidation
+    │   ├── session.ts     # Live stream store (survives navigation) + reconnect fiber + query invalidation
     │   ├── workspace.ts   # Active cwd signal (persisted)
     │   └── theme.ts       # Palette preference (persisted; dark default)
     ├── pages/
     │   ├── BootPage.tsx   # Runs bootstrap, seeds query cache, redirects to a session
     │   ├── SessionPage.tsx# Hydrates session, starts stream, composes the shell
-    │   └── SettingsPage.tsx # Account + appearance + API key, in grouped sections
+    │   └── SettingsPage.tsx # Account + appearance + API key; overlay under `/s/:id` and standalone `/settings`
     └── components/
         ├── Sidebar.tsx         # Workspace switcher, session list, new chat
         ├── ChatView.tsx        # Message list + in-flight draft + auto-scroll
@@ -57,23 +57,45 @@ web/
 - `api/queries.ts` / `api/mutations.ts` run those Effect programs into Promise-returning TanStack functions. Query owns
   caching, dedup, retries, and invalidation for REST; it does **not** cache the live stream.
 - `state/session.ts` forks a reconnect loop onto the runtime: consume the stream, and on end/failure back off (500ms →
-  5s) and resubscribe. The fiber is interrupted on navigation. Every event is folded with `applyServerEvent` from
-  `@vvtxn/client/session-state.ts` into a Solid signal.
+  5s) and resubscribe. Every event is folded with `applyServerEvent` from `@vvtxn/client/session-state.ts` into a
+  module-level Solid signal.
+- The session route's loader (`router.tsx`) `ensureQueryData`s the persisted snapshot before rendering; with
+  `defaultPreload: "intent"` link hovers warm it. `ensureSession(id, snapshot)` seeds the store only on the first entry
+  per session, and `startStream(id)` is idempotent — refetches and re-renders never reset live state or restart the
+  stream. The fiber is interrupted only when the session route unmounts.
 - `run_finished` invalidates the session + sessions queries so persisted entries replace the live view.
+
+### Navigation performance
+
+TanStack Router commits navigation inside a Solid transition, and Solid holds a transition open until every query
+resource created during it settles — an eagerly fetching `useQuery` on mount therefore delays *any* navigation by a
+round trip. Keep these rules in mind:
+
+- The session route's loader (`router.tsx`) fetches a **fresh** snapshot (`fetchQuery` +
+  `staleReloadMode: "blocking"`), so a stale router/query cache never paints; a just-created or still-streamed session
+  resolves from cache with no request.
+- `BootPage` seeds me/config/sessions/workspaces into the query cache and prefetches settings, so the first session
+  render needs no fetches.
+- Queries not needed for first paint stay lazy: the mention file list is only enabled while the picker is open
+  (prefetched on composer focus).
+- Leaving a session stops its stream and invalidates that snapshot, so returning to it always refetches — the stream is
+  the only witness of events while detached. The previous view stays on screen while the loader resolves.
+- `defaultPreload: "intent"` warms session loaders and workspace session lists on hover.
 
 ### Boot flow
 
-`api/bootstrap.ts` is an Effect program: health-check (`Cannot reach the Relay server at ...`), load identity + config,
-resolve cwd (localStorage or `GET /api/workspace`), then open the most recent session or create one. `BootPage` runs it
-via `createResource`, seeds the Query cache, and redirects to `/s/$sessionId`.
+`api/bootstrap.ts` is an Effect program: health-check (`Cannot reach the Relay server at ...`), load identity, then fetch
+config + the default workspace + validate the persisted workspace in parallel, then open the most recent session or
+create one. `BootPage` runs it via `createResource`, seeds the Query cache, and redirects to `/s/$sessionId`.
 
 ### Auth (GitHub OAuth)
 
 `api/client.ts` sends `credentials: "include"` on every request so the session cookie flows automatically. `bootstrap`
 treats a 401 as a first-class `{ kind: "unauthenticated" }` outcome; `BootPage` renders `LoginScreen`, a "Continue with
-GitHub" button linking to `/api/auth/login`. `SessionPage` redirects to `/` on a 401 or a missing/foreign session.
-`auth/auth.ts` centralizes the login/logout URLs (`VITE_RELAY_LOGIN_URL` / `VITE_RELAY_LOGOUT_URL`, defaulting to
-`/api/auth/*`). `MeResponse.avatarUrl` is shown in the status bar and sidebar.
+GitHub" button linking to `/api/auth/login`. The session route's loader redirects to `/` for a missing, foreign, or
+unauthorized session (the page keeps a redirect effect as a backstop). `auth/auth.ts` centralizes the login/logout URLs
+(`VITE_RELAY_LOGIN_URL` / `VITE_RELAY_LOGOUT_URL`, defaulting to `/api/auth/*`). `MeResponse.avatarUrl` is shown in the
+status bar and sidebar.
 
 ### Theming
 
@@ -88,13 +110,17 @@ Typography is shared too: `packages/relay/core/fonts.ts` names the family and CS
 sets `--relay-font-mono` from `font.cssStack`; the value in `:root` is only a no-JS fallback. The terminal installs the
 same font via `relay fonts install` — see `packages/relay/assets/fonts/README.md` before swapping it.
 
-### Settings (`/settings`)
+### Settings (`/s/:sessionId/settings` and `/settings`)
 
-A dedicated, auth-guarded route (`pages/SettingsPage.tsx`) with grouped sections: **Account** (identity from `/api/me`,
-sign out), **Appearance** (dark/light switch, applied instantly and persisted locally), and **API key**. The key is
-per-user, stored in the server database, and the only place a key is entered; `GET /api/settings` returns just
-`{ set, hint }` and the page never echoes the key back. Entry points are the user chip in the sidebar footer and the
-status bar (the CLI also opens this page and blocks until a key is set).
+`pages/SettingsPage.tsx` renders one auth-guarded `SettingsPanel` with grouped sections: **Account** (identity from
+`/api/me`, sign out), **Appearance** (dark/light switch, applied instantly and persisted locally), and **API key**. The
+key is per-user, stored in the server database, and the only place a key is entered; `GET /api/settings` returns just
+`{ set, hint }` and the page never echoes the key back.
+
+In-app entry points (sidebar chip, status bar) open the **nested overlay** `/s/:sessionId/settings`: the chat stays
+mounted and its stream connected behind it, so opening/closing settings is instant and nothing is lost. The standalone
+`/settings` route serves CLI deep links (the CLI blocks until a key is set) and returns to the last opened session
+(`relay.sessionId` in localStorage) or the boot flow.
 
 ### Markdown
 
@@ -103,8 +129,9 @@ status bar (the CLI also opens this page and blocks until a key is set).
 
 ### File mentions
 
-Typing `@` in the composer opens a picker backed by `GET /api/sessions/:id/files` (TanStack query). Selecting a file
-inserts `@path`; the server expands mentions into `<attached_context>` blocks before the run.
+Typing `@` in the composer opens a picker backed by `GET /api/sessions/:id/files` (TanStack query, enabled only while
+the picker is open; the composer prefetches it on focus). Selecting a file inserts `@path`; the server expands mentions
+into `<attached_context>` blocks before the run.
 
 ### Workspaces
 
@@ -132,7 +159,7 @@ different server (which must then allow this browser origin). The legacy absolut
 ## Dependencies
 
 - `solid-js` (1.x), `@tanstack/solid-query`, `@tanstack/solid-router` (npm)
-- `effect` (v3) — services, layers, streams, runtime, typed errors
+- `effect` (v4) — services, layers, streams, runtime, typed errors
 - `marked` — markdown lexer (rendered safely to vnodes)
 - `vite-plugin-solid` — Solid compiler plugin; Vite itself comes from `vite-plus`
 - `@vvtxn/client` — protocol, RelayClient, shared session-state reducer

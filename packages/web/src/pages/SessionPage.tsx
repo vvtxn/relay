@@ -1,5 +1,5 @@
 import { createEffect, onCleanup, Show } from "solid-js";
-import { useNavigate, useParams } from "@tanstack/solid-router";
+import { Outlet, useChildMatches, useNavigate, useParams } from "@tanstack/solid-router";
 import { useQuery } from "@tanstack/solid-query";
 import { configQuery, meQuery, sessionQuery } from "#/api/queries.ts";
 import { RelayError } from "#/api/services.ts";
@@ -10,7 +10,7 @@ import { ChatView } from "#/components/ChatView.tsx";
 import { Composer } from "#/components/Composer.tsx";
 import { Sidebar } from "#/components/Sidebar.tsx";
 import { StatusBar } from "#/components/StatusBar.tsx";
-import { hydrateSession, resetSession, startStream, stopStream } from "#/state/session.ts";
+import { ensureSession, startStream, stopStream } from "#/state/session.ts";
 import { setHomeDir } from "#/state/workspace.ts";
 import { VERSION } from "#/version.ts";
 
@@ -21,11 +21,16 @@ function errorMessage(error: unknown): string {
 export function SessionPage() {
 	const params = useParams({ from: "/s/$sessionId" });
 	const navigate = useNavigate();
+	const childMatches = useChildMatches();
 	const sessionId = () => params().sessionId;
 
 	const me = useQuery(() => meQuery);
 	const config = useQuery(() => configQuery);
 	const session = useQuery(() => sessionQuery(sessionId()));
+
+	// The settings route renders on top of the chat; the chat stays mounted (and
+	// its stream connected) so closing settings is instant and nothing is lost.
+	const settingsOpen = () => childMatches().some((match) => match.routeId === "/s/$sessionId/settings");
 
 	// Auth seam: a 401 sends the user back through the boot/login flow.
 	createEffect(() => {
@@ -35,8 +40,8 @@ export function SessionPage() {
 	});
 
 	// A session can vanish or belong to another identity (e.g. after switching
-	// the server auth subject). Send the user back to boot, which opens a valid
-	// session for the current user, instead of hanging on the loading screen.
+	// the server auth subject). The route loader catches this first; this stays
+	// as a backstop for errors raised after mount.
 	createEffect(() => {
 		if (session.isError) {
 			void navigate({ to: "/", replace: true });
@@ -48,24 +53,24 @@ export function SessionPage() {
 		if (home) setHomeDir(home);
 	});
 
-	// Load persisted entries first, then attach the live stream so the run_state
-	// snapshot is not clobbered by hydration.
+	// Seed persisted entries once per session, then keep the live stream as the
+	// source of truth. Refetches must never reset state or restart the stream.
 	createEffect(() => {
 		const id = sessionId();
 		const data = session.data;
 		if (!id || !data) return;
-		resetSession();
-		hydrateSession(data.entries, data.tokens, data.cost);
+		ensureSession(id, data);
 		startStream(id);
-		onCleanup(stopStream);
 	});
+
+	onCleanup(stopStream);
 
 	const goToSession = (id: string) => {
 		void navigate({ to: "/s/$sessionId", params: { sessionId: id } });
 	};
 
 	const goToSettings = () => {
-		void navigate({ to: "/settings" });
+		void navigate({ to: "/s/$sessionId/settings", params: { sessionId: sessionId() } });
 	};
 
 	return (
@@ -74,7 +79,7 @@ export function SessionPage() {
 			fallback={<BootError message={errorMessage(me.error ?? config.error)} />}
 		>
 			<Show when={me.data && config.data && session.data} fallback={<BootScreen />}>
-				<div class="app">
+				<div class="app" inert={settingsOpen()}>
 					<Sidebar
 						userName={me.data!.name}
 						avatarUrl={me.data!.avatarUrl}
@@ -101,6 +106,7 @@ export function SessionPage() {
 						<ApprovalDialog sessionId={sessionId()} />
 					</main>
 				</div>
+				<Outlet />
 			</Show>
 		</Show>
 	);

@@ -3,6 +3,7 @@
 const SERVER_URL_KEY = "relay.serverUrl";
 const CWD_KEY = "relay.cwd";
 const THEME_KEY = "relay.theme";
+const SESSION_ID_KEY = "relay.sessionId";
 
 /** The two palettes the web client offers; dark is the default. */
 export type ThemePreference = "dark" | "light";
@@ -50,6 +51,15 @@ export function readStoredCwd(): string | null {
 
 export function writeStoredCwd(cwd: string): void {
 	write(CWD_KEY, cwd);
+}
+
+/** The last session the user opened in this browser, for "back to chat" links. */
+export function readStoredSessionId(): string | null {
+	return read(SESSION_ID_KEY);
+}
+
+export function writeStoredSessionId(id: string): void {
+	write(SESSION_ID_KEY, id);
 }
 
 /** Persisted palette preference; anything other than "light" means dark. */

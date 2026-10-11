@@ -10,11 +10,11 @@ export function runApi<A>(f: (api: ApiShape) => Effect.Effect<A, RelayError>): P
 }
 
 /** Fork an effect onto the runtime, returning its fiber for interruption. */
-export function fork<A, E>(effect: Effect.Effect<A, E, Api | SessionStream>): Fiber.RuntimeFiber<A, E> {
+export function fork<A, E>(effect: Effect.Effect<A, E, Api | SessionStream>): Fiber.Fiber<A, E> {
 	return runtime.runFork(effect);
 }
 
 /** Interrupt a fiber previously returned by {@link fork}. */
-export function interrupt(fiber: Fiber.RuntimeFiber<unknown, unknown>): void {
+export function interrupt(fiber: Fiber.Fiber<unknown, unknown>): void {
 	void runtime.runPromise(Fiber.interrupt(fiber)).catch(() => {});
 }

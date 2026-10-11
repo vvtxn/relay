@@ -1,8 +1,9 @@
 import { createEffect, createSignal, Show } from "solid-js";
-import { useNavigate } from "@tanstack/solid-router";
+import { useNavigate, useParams } from "@tanstack/solid-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/solid-query";
 import { meQuery, settingsQuery } from "#/api/queries.ts";
 import { setApiKey } from "#/api/mutations.ts";
+import { readStoredSessionId } from "#/api/storage.ts";
 import { RelayError } from "#/api/services.ts";
 import { queryKeys } from "#/api/query-client.ts";
 import { signOut } from "#/auth/auth.ts";
@@ -10,7 +11,7 @@ import { BootScreen } from "#/components/BootScreen.tsx";
 import { setTheme, theme } from "#/state/theme.ts";
 import { VERSION } from "#/version.ts";
 
-export function SettingsPage() {
+function SettingsPanel(props: { onBack: () => void }) {
 	const navigate = useNavigate();
 	const queryClient = useQueryClient();
 	const me = useQuery(() => meQuery);
@@ -59,7 +60,7 @@ export function SettingsPage() {
 			{(user) => (
 				<div class="settings">
 					<header class="settings-header">
-						<button type="button" class="status-action" onClick={() => void navigate({ to: "/" })}>
+						<button type="button" class="status-action" onClick={props.onBack}>
 							← chat
 						</button>
 						<span class="settings-title">Settings</span>
@@ -180,4 +181,37 @@ export function SettingsPage() {
 			)}
 		</Show>
 	);
+}
+
+/**
+ * Nested under `/s/:sessionId`: rendered on top of the live chat so the
+ * session, its stream, and the composer keep running behind it.
+ */
+export function SessionSettingsRoute() {
+	const params = useParams({ from: "/s/$sessionId/settings" });
+	const navigate = useNavigate();
+	return (
+		<div class="settings-overlay">
+			<SettingsPanel
+				onBack={() => void navigate({ to: "/s/$sessionId", params: { sessionId: params().sessionId } })}
+			/>
+		</div>
+	);
+}
+
+/**
+ * Standalone page (CLI deep link to `/settings`). Returns to the last chat
+ * opened in this browser, falling back to the boot flow.
+ */
+export function SettingsPage() {
+	const navigate = useNavigate();
+	const onBack = () => {
+		const sessionId = readStoredSessionId();
+		if (sessionId) {
+			void navigate({ to: "/s/$sessionId", params: { sessionId } });
+			return;
+		}
+		void navigate({ to: "/" });
+	};
+	return <SettingsPanel onBack={onBack} />;
 }

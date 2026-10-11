@@ -1,8 +1,10 @@
 import { createEffect, createMemo, createSignal, For, Show } from "solid-js";
+import { Link } from "@tanstack/solid-router";
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/solid-query";
 import { abbreviateHome } from "@vvtxn/relay/core/display.ts";
 import type { SessionSummary, WorkspaceSummary } from "@vvtxn/relay/core/sessions/index.ts";
-import { sessionsQuery, workspacesQuery } from "#/api/queries.ts";
+import type { OpenSessionResponse } from "@vvtxn/client/protocol.ts";
+import { sessionsQuery, sessionQuery, workspacesQuery } from "#/api/queries.ts";
 import { createSession, registerWorkspace, validateWorkspace } from "#/api/mutations.ts";
 import { queryKeys } from "#/api/query-client.ts";
 import { appendError } from "#/state/session.ts";
@@ -76,9 +78,21 @@ export function Sidebar(props: {
 
 	const create = useMutation(() => ({
 		mutationFn: () => createSession(cwd()),
-		onSuccess: async (response) => {
-			await queryClient.invalidateQueries({ queryKey: ["sessions"] });
-			await queryClient.invalidateQueries({ queryKey: queryKeys.workspaces });
+		onSuccess: (response) => {
+			// Seed the empty session and open it immediately; the sidebar lists
+			// refresh in the background instead of delaying navigation.
+			queryClient.setQueryData<OpenSessionResponse>(queryKeys.session(response.id), {
+				header: response.header,
+				entries: [],
+				tokens: 0,
+				cost: 0,
+				branch: null,
+				running: false,
+			});
+			// Refresh that snapshot behind the scenes (e.g. to learn the branch).
+			void queryClient.prefetchQuery({ ...sessionQuery(response.id), staleTime: 0 });
+			void queryClient.invalidateQueries({ queryKey: ["sessions"] });
+			void queryClient.invalidateQueries({ queryKey: queryKeys.workspaces });
 			props.onSelect(response.id);
 		},
 		onError: (error) => appendError(error instanceof Error ? error.message : String(error)),
@@ -135,7 +149,7 @@ export function Sidebar(props: {
 					disabled={create.isPending}
 					onClick={() => create.mutate()}
 				>
-					New chat
+					{create.isPending ? "Creating…" : "New chat"}
 				</button>
 			</div>
 
@@ -160,6 +174,9 @@ export function Sidebar(props: {
 										type="button"
 										class="workspace-name-btn"
 										title={workspace.cwd}
+										onMouseEnter={() =>
+											void queryClient.prefetchQuery(sessionsQuery(workspace.cwd))
+										}
 										onClick={() => selectWorkspace(workspace.cwd)}
 									>
 										<span class="workspace-name">{workspaceName(workspace.cwd)}</span>
@@ -193,20 +210,20 @@ export function Sidebar(props: {
 												>
 													<For each={list()}>
 														{(session) => (
-															<button
-																type="button"
+															<Link
+																to="/s/$sessionId"
+																params={{ sessionId: session.reference }}
 																class={
 																	session.reference === props.activeSessionId
 																		? "session-item active"
 																		: "session-item"
 																}
-																onClick={() => props.onSelect(session.reference)}
 															>
 																<span class="session-preview">{preview(session)}</span>
 																<span class="session-time">
 																	{formatTimestamp(session.timestamp)}
 																</span>
-															</button>
+															</Link>
 														)}
 													</For>
 												</Show>

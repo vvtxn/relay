@@ -72,7 +72,7 @@ export interface ApiShape {
 	subscribe(sessionId: string, options: SubscribeOptions): AsyncIterable<ServerEvent>;
 }
 
-export class Api extends Context.Tag("relay/Api")<Api, ApiShape>() {}
+export class Api extends Context.Service<Api, ApiShape>()("relay/Api") {}
 
 export const ApiLive = Layer.succeed(Api, {
 	health: () => tryRelay(() => client.health()),
@@ -99,7 +99,7 @@ export interface SessionStreamShape {
 	events(sessionId: string, signal: AbortSignal): Stream.Stream<ServerEvent, RelayError>;
 }
 
-export class SessionStream extends Context.Tag("relay/SessionStream")<SessionStream, SessionStreamShape>() {}
+export class SessionStream extends Context.Service<SessionStream, SessionStreamShape>()("relay/SessionStream") {}
 
 export const SessionStreamLive = Layer.effect(
 	SessionStream,

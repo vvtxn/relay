@@ -7,18 +7,22 @@ export const meQuery = queryOptions({
 	queryKey: queryKeys.me,
 	queryFn: () => runApi((api) => api.me()),
 	staleTime: Infinity,
+	gcTime: Infinity,
 });
 
 export const configQuery = queryOptions({
 	queryKey: queryKeys.config,
 	queryFn: () => runApi((api) => api.getConfig()),
 	staleTime: Infinity,
+	gcTime: Infinity,
 });
 
 /** Per-user settings (API key presence). Mutations invalidate this key. */
 export const settingsQuery = queryOptions({
 	queryKey: queryKeys.settings,
 	queryFn: () => runApi((api) => api.getSettings()),
+	// Prefetched at boot; this app is the only writer (mutations invalidate).
+	staleTime: 5 * 60_000,
 });
 
 export const workspaceQuery = queryOptions({

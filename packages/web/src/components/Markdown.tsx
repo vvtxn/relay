@@ -1,4 +1,4 @@
-import { For, type JSX, Show } from "solid-js";
+import { createDeferred, For, type JSX, Show } from "solid-js";
 import { Dynamic } from "solid-js/web";
 import { marked, type Token, type Tokens } from "marked";
 import { safeUrl } from "./safe-url.ts";
@@ -137,7 +137,10 @@ function renderListItem(item: Tokens.ListItem, key: string): JSX.Element {
 }
 
 export function Markdown(props: { content: string }): JSX.Element {
-	const tokens = () => marked.lexer(props.content);
+	// Streaming deltas arrive per token; deferring the lex keeps long in-flight
+	// messages from being re-parsed on every delta.
+	const content = createDeferred(() => props.content, { timeoutMs: 100 });
+	const tokens = () => marked.lexer(content());
 	return (
 		<div class="markdown">
 			<For each={tokens()}>{(token, i) => renderBlock(token, `b-${i()}`)}</For>

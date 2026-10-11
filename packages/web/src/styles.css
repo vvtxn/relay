@@ -446,6 +446,7 @@ body {
 	flex-direction: column;
 	gap: 0.15rem;
 	text-align: left;
+	text-decoration: none;
 	background: transparent;
 	border: 1px solid transparent;
 	border-radius: 4px;
@@ -1016,6 +1017,14 @@ body {
 /* ------------------------------------------------------------------ */
 /* Settings                                                            */
 /* ------------------------------------------------------------------ */
+
+/* Covers the chat while keeping it mounted (and its stream connected). */
+.settings-overlay {
+	position: fixed;
+	inset: 0;
+	z-index: 40;
+	background: var(--relay-background, #0a0a0a);
+}
 
 .settings {
 	height: 100%;

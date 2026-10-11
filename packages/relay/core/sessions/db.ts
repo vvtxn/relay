@@ -171,6 +171,8 @@ export class DatabaseSessionStore implements SessionStore {
 	/** Distinct workspaces (registered + session cwds) for a user, most recently active first. */
 	async listWorkspaces(ownerId: string): Promise<WorkspaceSummary[]> {
 		const result = await this.execute({
+			// Order by the selected alias: Turso's engine rejects ORDER BY MAX(...)
+			// here ("misuse of aggregate function MAX()").
 			sql: `SELECT cwd, COALESCE(SUM(session_count), 0) AS session_count, MAX(last_activity) AS last_activity
 				FROM (
 					SELECT cwd, 0 AS session_count, created_at AS last_activity
@@ -183,7 +185,7 @@ export class DatabaseSessionStore implements SessionStore {
 					GROUP BY cwd
 				)
 				GROUP BY cwd
-				ORDER BY MAX(last_activity) DESC`,
+				ORDER BY last_activity DESC`,
 			args: [ownerId, ownerId],
 		});
 		return result.rows.map((row) => ({
