@@ -30,11 +30,17 @@ agent/
 
 1. An explicit `RELAY_SERVER_URL` is attached to, never managed.
 2. A healthy server recorded in `~/.relay/server.json` is reused.
-3. Otherwise a detached server is spawned (compiled: `relay serve`; source: `deno run … server/main.ts`) with
-   `RELAY_WORKSPACE=cwd`, and the CLI waits for `/api/health`.
+3. A healthy server answering on the preferred port is adopted even without a state file (e.g. a foreground
+   `relay serve`).
+4. Otherwise a detached server is spawned (compiled: `relay serve`; source: `deno run … server/main.ts`) with
+   `RELAY_WORKSPACE=cwd` and `RELAY_PORT` (explicit, else the default 7433 — never derived from `RELAY_PUBLIC_URL`).
 
-The server writes its own state file (`RELAY_STATE_FILE`) with its PID, port, and web URL; `relay stop` reads it and
-signals the process, `relay status` prints it. The server survives the CLI, so the browser stays available.
+The state file is the source of truth for the actual URL: the server writes it after binding, and the CLI discovers the
+port from it instead of assuming its own choice. The CLI waits until the server is healthy, the child exits (the error
+includes the server-log tail), or the timeout (120s, `RELAY_START_TIMEOUT_MS`) elapses. When the port is taken by
+something that is not a healthy Relay server, development starts a fallback server on a free port; production or an
+explicit `RELAY_PORT` fails with the bind error. `relay stop` reads the state file and signals the recorded process;
+`relay status` prints it. The server survives the CLI, so the browser stays available.
 
 `relay web` opens the browser (Vite origin in dev when reachable, else the server's bundled SPA) and returns unless
 `--foreground` is passed.

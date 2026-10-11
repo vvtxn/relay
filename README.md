@@ -77,7 +77,9 @@ cd relay
 
 Environment is layered and mode-based (`RELAY_ENV=development|production`). Committed non-secret defaults live in
 `.env.development` / `.env.production`; put secrets in the gitignored `.env.development.local` / `.env.production.local`
-(see `.env.example`). Precedence: process env > `.env.<mode>.local` > `.env.<mode>` > `.env.local` > `.env`.
+(see `.env.example`). Precedence: process env > `.env.<mode>.local` > `.env.<mode>` > `.env.local` > `.env`. Files
+resolve from the working directory, falling back to the current and then the main git worktree root, so linked worktrees
+load the main checkout's gitignored files.
 
 ```bash
 cp .env.example .env.development.local
@@ -95,6 +97,10 @@ deno task relay web      # open the web client in the browser
 deno task relay status   # show the background server
 deno task relay stop     # stop the background server
 ```
+
+The server listens on `RELAY_PORT` (default `7433`). In development, if that port is taken by something that is not a
+healthy Relay server, the CLI starts one on a free port and records the actual URL in `~/.relay/server.json` (the Vite
+dev proxy follows it). In production — or whenever `RELAY_PORT` is set explicitly — a taken port is a startup error.
 
 The terminal and the browser use the same font. The browser loads it automatically; for the terminal run
 `relay fonts install` (or `deno task relay fonts install`) and select the printed family in your terminal settings.

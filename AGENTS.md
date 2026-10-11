@@ -78,7 +78,9 @@ guaranteed.
 
 `RELAY_ENV` selects `development` (default) or `production`. Tasks run through `scripts/run-env.ts`, which merges env
 files with explicit precedence — **process env > `.env.<mode>.local` > `.env.<mode>` > `.env.local` > `.env`** (Deno's
-own multi-file `--env-file` precedence is ambiguous and it has no "if exists" variant).
+own multi-file `--env-file` precedence is ambiguous and it has no "if exists" variant). Files resolve relative to the
+working directory, falling back to the current worktree root and then the main worktree root, so gitignored secrets also
+load in linked worktrees.
 
 - `.env.development` / `.env.production` — committed non-secret mode defaults.
 - `.env.local`, `.env.<mode>.local` — gitignored secrets (`TURSO_*`, `GITHUB_APP_*`).

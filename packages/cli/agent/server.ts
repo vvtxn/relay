@@ -3,8 +3,16 @@
  *
  * `relay` and `relay web` call {@link ensureServer}: they attach to a healthy
  * server (tracked in `~/.relay/server.json`) or start one detached, so a single
- * backend serves every client. The server writes its own state file (PID, port,
- * web URL) at startup; the CLI only reads it.
+ * backend serves every client. The server binds its configured port, writes its
+ * own state file (PID, port, web URL) once listening, and the CLI discovers the
+ * actual URL from that file — it never assumes a port before the bind succeeds.
+ *
+ * Porting rules: `RELAY_PORT` (default 7433) is the only source for the listen
+ * port; `RELAY_PUBLIC_URL` is the browser-facing origin (Vite in development)
+ * and must never influence it. When the preferred port is taken by something
+ * that is not a healthy Relay server, development falls back to a free
+ * ephemeral port; production (or an explicit `RELAY_PORT`) fails with the
+ * server log so the conflict is fixed rather than hidden.
  */
 
 import { dirname, fromFileUrl, join } from "@std/path";
@@ -15,10 +23,18 @@ import { openBrowser } from "./open.ts";
 
 const DEFAULT_PORT = 7433;
 const HEALTH_TIMEOUT_MS = 1_000;
-const START_TIMEOUT_MS = 10_000;
+/** Cold starts (module compile + schema init) can far exceed the old 10s cap. */
+const DEFAULT_START_TIMEOUT_MS = 120_000;
 const STOP_TIMEOUT_MS = 5_000;
 const SIGN_IN_TIMEOUT_MS = 10 * 60_000;
 const API_KEY_TIMEOUT_MS = 10 * 60_000;
+const POLL_INTERVAL_MS = 100;
+/** How long to look for a server another process may be starting after a port conflict. */
+const CONFLICT_GRACE_MS = 3_000;
+/** Preferred port plus two fallback ports (fallback is development-only). */
+const MAX_START_ATTEMPTS = 3;
+/** Exit code the server uses when its port is taken (`EX_TEMPFAIL` from sysexits). */
+const EXIT_ADDR_IN_USE = 75;
 
 export interface ServerState {
 	url: string;
@@ -84,33 +100,52 @@ async function isHealthy(url: string): Promise<boolean> {
 	}
 }
 
+/** Port the background server should use: explicit `RELAY_PORT`, else the default. */
 function preferredPort(): number {
 	const explicit = Number(Deno.env.get("RELAY_PORT"));
 	if (Number.isInteger(explicit) && explicit > 0) return explicit;
-	const publicUrl = Deno.env.get("RELAY_PUBLIC_URL");
-	if (publicUrl) {
-		try {
-			const port = Number(new URL(publicUrl).port);
-			if (Number.isInteger(port) && port > 0) return port;
-		} catch {
-			// Not a URL — fall through to the default.
-		}
-	}
 	return DEFAULT_PORT;
 }
 
-/** Return the preferred port when free, otherwise a freshly chosen free one. */
-async function pickPort(preferred: number): Promise<number> {
-	try {
-		const server = Deno.serve({ port: preferred, hostname: "127.0.0.1", onListen: () => {} }, () => new Response());
-		await server.shutdown();
-		return preferred;
-	} catch {
-		const server = Deno.serve({ port: 0, hostname: "127.0.0.1", onListen: () => {} }, () => new Response());
-		const port = (server.addr as Deno.NetAddr).port;
-		await server.shutdown();
-		return port;
-	}
+/**
+ * Whether the CLI may start the server on a fallback ephemeral port when the
+ * preferred one is taken by something other than a healthy Relay server.
+ * Development convenience only: an explicit `RELAY_PORT` is always respected,
+ * and production deployments must surface a port conflict instead of hiding it.
+ */
+function portFallbackAllowed(): boolean {
+	const explicit = Number(Deno.env.get("RELAY_PORT"));
+	if (Number.isInteger(explicit) && explicit > 0) return false;
+	return Deno.env.get("RELAY_ENV") !== "production";
+}
+
+function startTimeoutMs(): number {
+	const raw = Number(Deno.env.get("RELAY_START_TIMEOUT_MS"));
+	return Number.isFinite(raw) && raw > 0 ? raw : DEFAULT_START_TIMEOUT_MS;
+}
+
+function loopbackUrl(port: number): string {
+	return `http://127.0.0.1:${port}`;
+}
+
+/** State for a healthy server the CLI attached to but did not spawn (no PID). */
+function adoptedState(url: string, port: number, cwd: string): ServerState {
+	return {
+		url,
+		port,
+		pid: 0,
+		startedAt: "",
+		cwd,
+		webUrl: (Deno.env.get("RELAY_PUBLIC_URL") ?? url).replace(/\/+$/, ""),
+	};
+}
+
+/** Bind an ephemeral port, release it, and return the number. */
+async function pickFreePort(): Promise<number> {
+	const server = Deno.serve({ port: 0, hostname: "127.0.0.1", onListen: () => {} }, () => new Response());
+	const port = (server.addr as Deno.NetAddr).port;
+	await server.shutdown();
+	return port;
 }
 
 /** Arguments that re-launch this program as a foreground server. */
@@ -120,7 +155,7 @@ function serverArgs(): string[] {
 	return ["run", "--unstable-raw-imports", "--allow-all", entry];
 }
 
-function spawnServer(port: number, cwd: string): void {
+function spawnServer(port: number, cwd: string): Deno.ChildProcess {
 	const stateFile = statePath();
 	Deno.mkdirSync(dirname(stateFile), { recursive: true });
 	Deno.mkdirSync(dirname(logPath()), { recursive: true });
@@ -131,11 +166,10 @@ function spawnServer(port: number, cwd: string): void {
 		RELAY_PORT: String(port),
 		RELAY_STATE_FILE: stateFile,
 	};
-	if (!env.RELAY_PUBLIC_URL) env.RELAY_PUBLIC_URL = `http://127.0.0.1:${port}`;
 
-	const args = serverArgs();
-	const child = detachCommand(env, args).spawn();
+	const child = detachCommand(env, serverArgs()).spawn();
 	child.unref();
+	return child;
 }
 
 /**
@@ -173,31 +207,105 @@ function detachCommand(env: Record<string, string>, args: string[]): Deno.Comman
 	});
 }
 
-async function waitForHealth(url: string, timeoutMs: number): Promise<boolean> {
-	const deadline = Date.now() + timeoutMs;
-	let wait = 50;
-	while (Date.now() < deadline) {
-		if (await isHealthy(url)) return true;
-		await delay(wait);
-		wait = Math.min(wait * 2, 500);
+/** Last lines of the background server log, for startup failure messages. */
+function readLogTail(maxLines = 15, maxBytes = 32 * 1024): string {
+	try {
+		const path = logPath();
+		const size = Deno.statSync(path).size;
+		const start = Math.max(0, size - maxBytes);
+		const file = Deno.openSync(path, { read: true });
+		try {
+			if (start > 0) file.seekSync(start, Deno.SeekMode.Start);
+			const buffer = new Uint8Array(size - start);
+			let read = 0;
+			while (read < buffer.length) {
+				const chunk = file.readSync(buffer.subarray(read));
+				if (chunk === null) break;
+				read += chunk;
+			}
+			// deno-lint-ignore no-control-regex -- strip ANSI color codes from the log tail
+			const text = new TextDecoder().decode(buffer.subarray(0, read)).replace(/\x1b\[[0-9;]*m/g, "");
+			const lines = text.split("\n");
+			if (start > 0) lines.shift();
+			return lines.filter((line) => line.trim() !== "").slice(-maxLines).join("\n").trim();
+		} finally {
+			file.close();
+		}
+	} catch {
+		return "";
 	}
-	return false;
 }
 
-async function waitForState(port: number, timeoutMs: number): Promise<ServerState | null> {
-	const deadline = Date.now() + timeoutMs;
+/** Build the error shown when the background server could not be started. */
+function startupFailure(detail: string): Error {
+	const parts = [`Relay server failed to start: ${detail}`];
+	const tail = readLogTail();
+	if (tail) parts.push("", "Last server log lines:", tail);
+	parts.push("", `Full log: ${logPath()}`);
+	return new Error(parts.join("\n"));
+}
+
+type StartOutcome =
+	/** A healthy server is reachable. */
+	| { kind: "started"; state: ServerState }
+	/** The spawned server exited because its port is taken. */
+	| { kind: "addr-in-use" }
+	/** The spawned server exited for another reason (bad config, missing env…). */
+	| { kind: "exited"; detail: string }
+	/** The timeout elapsed while the server was still starting. */
+	| { kind: "timeout"; detail: string };
+
+/** Wait until the spawned server is healthy, exits, or the timeout elapses. */
+async function awaitStart(child: Deno.ChildProcess, port: number, cwd: string): Promise<StartOutcome> {
+	const startedAt = Date.now();
+	const deadline = startedAt + startTimeoutMs();
+	const exit: { status: Deno.CommandStatus | null } = { status: null };
+	child.status.then((status) => {
+		exit.status = status;
+	}).catch(() => {});
+	let hintShown = false;
 	while (Date.now() < deadline) {
 		const state = readState();
-		if (state && state.port === port && state.pid > 0) return state;
-		await delay(50);
+		if (state && state.pid > 0 && await isHealthy(state.url)) return { kind: "started", state };
+		const url = loopbackUrl(port);
+		if (await isHealthy(url)) return { kind: "started", state: adoptedState(url, port, cwd) };
+		if (exit.status) {
+			if (exit.status.code === EXIT_ADDR_IN_USE) return { kind: "addr-in-use" };
+			return { kind: "exited", detail: `the server exited (code ${exit.status.code})` };
+		}
+		if (!hintShown && Date.now() - startedAt > 3_000) {
+			hintShown = true;
+			console.log("Waiting for the Relay server to start (the first run may take a while)…");
+		}
+		await delay(POLL_INTERVAL_MS);
 	}
-	return readState();
+	const timeout = startTimeoutMs();
+	return {
+		kind: "timeout",
+		detail: `the server did not become healthy within ${
+			timeout >= 1_000 ? `${Math.round(timeout / 1_000)}s` : `${timeout}ms`
+		}`,
+	};
+}
+
+/** After a port conflict, give a server another process is starting a moment to appear. */
+async function waitForRunningServer(preferred: number, cwd: string): Promise<ServerState | null> {
+	const deadline = Date.now() + CONFLICT_GRACE_MS;
+	while (Date.now() < deadline) {
+		const state = readState();
+		if (state && state.pid > 0 && await isHealthy(state.url)) return state;
+		const url = loopbackUrl(preferred);
+		if (await isHealthy(url)) return adoptedState(url, preferred, cwd);
+		await delay(150);
+	}
+	return null;
 }
 
 /**
  * Resolve a usable server. An explicit `RELAY_SERVER_URL` is attached to, never
- * managed. Otherwise a healthy background server is reused, or a new one is
- * started detached with `cwd` as its workspace.
+ * managed. Otherwise a healthy background server is reused (from the state file
+ * or discovered on the preferred port), or a new one is started detached with
+ * `cwd` as its workspace.
  */
 export async function ensureServer(options: { cwd: string }): Promise<ServerState> {
 	const explicit = Deno.env.get("RELAY_SERVER_URL");
@@ -218,14 +326,33 @@ export async function ensureServer(options: { cwd: string }): Promise<ServerStat
 	if (existing && await isHealthy(existing.url)) return existing;
 	if (existing) clearState();
 
-	const port = await pickPort(preferredPort());
-	spawnServer(port, options.cwd);
-	const url = `http://127.0.0.1:${port}`;
-	if (!(await waitForHealth(url, START_TIMEOUT_MS))) {
-		throw new Error(`Relay server failed to start; see ${logPath()}`);
+	// Adopt a healthy server on the preferred port even without a state file —
+	// for example a foreground `relay serve` started outside the supervisor.
+	const preferred = preferredPort();
+	if (await isHealthy(loopbackUrl(preferred))) return adoptedState(loopbackUrl(preferred), preferred, options.cwd);
+
+	const fallbackAllowed = portFallbackAllowed();
+	let port = preferred;
+	for (let attempt = 1;; attempt++) {
+		const outcome = await awaitStart(spawnServer(port, options.cwd), port, options.cwd);
+		if (outcome.kind === "started") return outcome.state;
+		if (outcome.kind === "exited") throw startupFailure(outcome.detail);
+		if (outcome.kind === "timeout") {
+			throw startupFailure(`${outcome.detail} (it may still be starting; run \`relay\` again to attach)`);
+		}
+
+		// The port was taken from under us: another CLI may be bringing a server
+		// up on it right now, so look before falling back.
+		const winner = await waitForRunningServer(preferred, options.cwd);
+		if (winner) return winner;
+		if (!fallbackAllowed || attempt >= MAX_START_ATTEMPTS) {
+			throw startupFailure(
+				`port ${port} is already in use and is not answering as a Relay server. ` +
+					`Stop the process holding it, or set RELAY_PORT to a free port.`,
+			);
+		}
+		port = await pickFreePort();
 	}
-	return await waitForState(port, 2_000) ??
-		{ url, port, pid: 0, startedAt: "", cwd: options.cwd, webUrl: Deno.env.get("RELAY_PUBLIC_URL") ?? url };
 }
 
 /** True when this CLI currently has valid credentials for the server. */
@@ -382,12 +509,15 @@ export async function ensureApiKey(state: ServerState): Promise<void> {
 		console.log("Relay server is not running (cleared stale state).");
 		return;
 	}
-	if (state.pid > 0) {
-		try {
-			Deno.kill(state.pid, "SIGTERM");
-		} catch (error) {
-			console.error(`Failed to signal the server: ${error instanceof Error ? error.message : error}`);
-		}
+	if (state.pid <= 0) {
+		clearState();
+		console.log(`The server at ${state.url} was not started by this CLI; stop it from its own process manager.`);
+		return;
+	}
+	try {
+		Deno.kill(state.pid, "SIGTERM");
+	} catch (error) {
+		console.error(`Failed to signal the server: ${error instanceof Error ? error.message : error}`);
 	}
 	const deadline = Date.now() + STOP_TIMEOUT_MS;
 	while (Date.now() < deadline && await isHealthy(state.url)) await delay(100);
