@@ -93,10 +93,14 @@ otherwise the bundled `packages/web/dist` (embedded in the compiled binary via `
 
 ### Background state
 
-When the CLI supervisor starts the server it sets `RELAY_STATE_FILE`; the server writes
-`{ url, port, pid, cwd,
-webUrl }` (mode `0600`) so `relay stop`/`relay status` can find it. A plain `relay serve` leaves
-no state behind.
+When the CLI supervisor starts the server it sets `RELAY_STATE_FILE`; once the listener is bound the server writes
+`{ url, port, pid, cwd, webUrl }` (mode `0600`, write-then-rename so readers never see a partial file) so
+`relay stop`/`relay status` can find it. A plain `relay serve` leaves no state behind.
+
+The configured port is bound strictly: when it is taken the server prints the conflict (stale server, `relay stop`,
+`RELAY_PORT`) and exits with code 75 (`EX_TEMPFAIL`). The CLI supervisor treats that as "another server may be
+starting": it adopts a healthy winner, or falls back to a free ephemeral port in development. The server itself never
+chooses a random port.
 
 ## API Surface
 

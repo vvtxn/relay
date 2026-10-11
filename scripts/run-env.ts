@@ -9,6 +9,7 @@
  * Mode:  `RELAY_ENV=development|production` (default: `development`)
  */
 
+import { join } from "@std/path";
 import { loadSync } from "@std/dotenv";
 
 export const MODES = ["development", "production"] as const;
@@ -27,7 +28,9 @@ export function envFileCandidates(mode: Mode): string[] {
  * Merge env files into one record with explicit precedence:
  * process env > `.env.<mode>.local` > `.env.<mode>` > `.env.local` > `.env`.
  *
- * `read` returns a file's parsed values, or `null` when it does not exist.
+ * `read` returns a file's parsed values, or `null` when it does not exist. It
+ * may consult several directories (see {@link envRoots}); the most specific
+ * location available for a given file wins.
  */
 export function resolveEnv(
 	mode: Mode,
@@ -59,14 +62,55 @@ function readEnvFile(path: string): Record<string, string> | null {
 	return loadSync({ envPath: path, export: false }) as Record<string, string>;
 }
 
+function gitOutput(cwd: string, args: string[]): string | null {
+	try {
+		const result = new Deno.Command("git", {
+			args: ["-C", cwd, ...args],
+			stdin: "null",
+			stdout: "piped",
+			stderr: "null",
+		}).outputSync();
+		return result.success ? new TextDecoder().decode(result.stdout) : null;
+	} catch {
+		return null;
+	}
+}
+
+/**
+ * Directories to read env files from, least to most specific: the main
+ * worktree, the current worktree root, then the working directory. Gitignored
+ * env files are not copied into linked worktrees, so falling back to the main
+ * checkout keeps tasks like `deno task relay` working there.
+ */
+export function envRoots(cwd: string): string[] {
+	const current = gitOutput(cwd, ["rev-parse", "--show-toplevel"])?.trim();
+	const mainLine = gitOutput(cwd, ["worktree", "list", "--porcelain"])
+		?.split("\n").find((line) => line.startsWith("worktree "));
+	const main = mainLine?.slice("worktree ".length).trim();
+	const roots = [main, current, cwd].filter((root): root is string => !!root);
+	return [...new Set(roots)];
+}
+
+/** Read a relative env file from the most specific root that has it. */
+function readEnvFromRoots(roots: string[], relative: string): Record<string, string> | null {
+	let found: Record<string, string> | null = null;
+	for (const root of roots) {
+		const values = readEnvFile(join(root, relative));
+		if (values) found = values;
+	}
+	return found;
+}
+
 /** Merge only the env files for a mode (no process environment). */
 export function loadEnvFiles(mode: Mode): Record<string, string> {
-	return resolveEnv(mode, readEnvFile, {});
+	const roots = envRoots(Deno.cwd());
+	return resolveEnv(mode, (path) => readEnvFromRoots(roots, path), {});
 }
 
 async function main(): Promise<void> {
 	const mode = resolveMode(Deno.env.get("RELAY_ENV"));
-	const merged = resolveEnv(mode, readEnvFile, Deno.env.toObject());
+	const roots = envRoots(Deno.cwd());
+	const merged = resolveEnv(mode, (path) => readEnvFromRoots(roots, path), Deno.env.toObject());
 	for (const [key, value] of Object.entries(merged)) Deno.env.set(key, value);
 	Deno.env.set("RELAY_ENV", mode);
 

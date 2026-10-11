@@ -1,8 +1,32 @@
 import { defineConfig } from "vite";
 import solid from "vite-plugin-solid";
 import path from "node:path";
+import { readFileSync } from "node:fs";
+import { homedir } from "node:os";
 
 const here = import.meta.dirname ?? ".";
+const DEFAULT_API_PORT = 7433;
+
+/**
+ * The API origin the dev proxy forwards to.
+ *
+ * The background server records its actual URL in `~/.relay/server.json` (the
+ * CLI may start it on a fallback port when the default is taken), so read that
+ * first and only fall back to the default. Start `relay` before Vite when the
+ * server is not on the default port.
+ */
+function relayApiTarget(): string {
+	try {
+		const state = JSON.parse(readFileSync(path.join(homedir(), ".relay", "server.json"), "utf8")) as {
+			url?: unknown;
+		};
+		if (typeof state.url === "string" && state.url.length > 0) return state.url;
+	} catch {
+		// No state file yet — fall through to the default.
+	}
+	const port = Deno.env.get("RELAY_PORT") ?? String(DEFAULT_API_PORT);
+	return `http://127.0.0.1:${port}`;
+}
 
 export default defineConfig({
 	plugins: [solid()],
@@ -19,7 +43,7 @@ export default defineConfig({
 		},
 		proxy: {
 			"/api": {
-				target: "http://127.0.0.1:7433",
+				target: relayApiTarget(),
 			},
 		},
 	},
