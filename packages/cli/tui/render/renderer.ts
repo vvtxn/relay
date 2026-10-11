@@ -278,11 +278,20 @@ export class Renderer {
 		}
 
 		const element = getElement(type);
-		const propsUnchanged = layoutPropsEqual(existing.props, vnode.props);
+		const previousProps = existing.props as Record<string, unknown>;
+		const propsUnchanged = layoutPropsEqual(previousProps, vnode.props);
+		// Layout handlers ignore `children` (reconciled separately), but elements
+		// whose measure function reads content from their props (e.g. `<Text>`)
+		// must still re-apply layout when only the children changed: the handler
+		// re-installs its measure function and marks the node dirty.
+		const childrenChanged = !element.hasChildren &&
+			previousProps.children !== (vnode.props as { children?: unknown }).children;
 		existing.props = vnode.props;
 		// Yoga setter calls are FFI and dominate large-tree commits; only the
 		// element's own props (children reconcile separately) require them.
-		if (!propsUnchanged) element.layout(existing);
+		if (!propsUnchanged || childrenChanged) {
+			element.layout(existing);
+		}
 
 		if (element.hasChildren) {
 			this.reconcileChildren(vnode, existing);

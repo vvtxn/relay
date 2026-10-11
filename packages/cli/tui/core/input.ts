@@ -1,5 +1,5 @@
 import process from "node:process";
-import { signal } from "@preact/signals-core";
+import { batch, signal } from "@preact/signals-core";
 import { CSI } from "@/tui/core/ansi.ts";
 
 export interface KeyEvent {
@@ -55,20 +55,26 @@ class InputManager {
 
 	private handleData = (data: string) => {
 		const sequences = this.splitSequences(data);
-		for (const seq of sequences) {
-			const event = this.parseKey(seq);
-			let consumed = false;
-			for (const handler of this.globalHandlers) {
-				if (handler(event) === true) {
-					consumed = true;
-					break;
+		// One render commit per stdin chunk: a single key handler often writes
+		// several signals (text + cursor) and a paste arrives as a burst of
+		// key events, so batch the whole dispatch instead of committing per
+		// signal write.
+		batch(() => {
+			for (const seq of sequences) {
+				const event = this.parseKey(seq);
+				let consumed = false;
+				for (const handler of this.globalHandlers) {
+					if (handler(event) === true) {
+						consumed = true;
+						break;
+					}
+				}
+				if (consumed) continue;
+				for (const handler of this.handlers) {
+					if (handler(event) === true) break;
 				}
 			}
-			if (consumed) continue;
-			for (const handler of this.handlers) {
-				if (handler(event) === true) break;
-			}
-		}
+		});
 	};
 
 	splitSequences(data: string): string[] {

@@ -8,7 +8,7 @@ import {
 	type SessionStreamState,
 	viewMessages,
 } from "@vvtxn/client/session-state.ts";
-import { signal } from "@preact/signals-core";
+import { batch, signal } from "@preact/signals-core";
 import { run } from "@/tui/render/index.ts";
 import {
 	ApprovalPrompt,
@@ -303,8 +303,10 @@ function App({ onQuit, user, initialSessionId, info }: AppProps) {
 			status: { kind: "thinking" },
 		};
 		syncStream(true);
-		input.value = "";
-		cursor.value = 0;
+		batch(() => {
+			input.value = "";
+			cursor.value = 0;
+		});
 
 		void (async () => {
 			try {
@@ -369,18 +371,22 @@ function App({ onQuit, user, initialSessionId, info }: AppProps) {
 			const start = fileMentionStart.value;
 			if (start !== null) {
 				const insertText = `@${item.title} `;
-				input.value = input.value.slice(0, start) + insertText + input.value.slice(start + 1);
-				cursor.value = start + insertText.length;
-				fileMentionStart.value = null;
+				batch(() => {
+					input.value = input.value.slice(0, start) + insertText + input.value.slice(start + 1);
+					cursor.value = start + insertText.length;
+					fileMentionStart.value = null;
+				});
 			}
 		},
 		onDismiss: () => {
 			projectFiles.cancelIndexing();
 			const start = fileMentionStart.value;
 			if (start !== null) {
-				input.value = input.value.slice(0, start) + input.value.slice(start + 1);
-				cursor.value = start;
-				fileMentionStart.value = null;
+				batch(() => {
+					input.value = input.value.slice(0, start) + input.value.slice(start + 1);
+					cursor.value = start;
+					fileMentionStart.value = null;
+				});
 			}
 		},
 	});
@@ -498,6 +504,7 @@ function App({ onQuit, user, initialSessionId, info }: AppProps) {
 					placeholder="Write a message..."
 					placeholderColor={theme.textDim}
 					focused
+					maxLines={8}
 				/>
 			</Box>
 

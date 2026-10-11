@@ -17,9 +17,9 @@ tui/
 │       ├── char-width.ts       # wcwidth (combining/wide) + ANSI-aware measurement
 │       ├── fill.ts             # Box background fill positions
 │       ├── format-text.ts      # Text styling (bold, italic, colors)
-│       ├── mentions.ts         # @mention detection and line formatting
+│       ├── mentions.ts         # @mention detection (source ranges)
 │       ├── parse-markdown.ts   # Markdown-to-segments parser
-│       └── wrap-text.ts        # ANSI/width-aware text wrapping utilities
+│       └── wrap-text.ts        # ANSI/width-aware wrapping; editing wrap + cursor mapping
 ├── render/                     # JSX rendering layer
 │   ├── renderer.ts             # Custom renderer with Yoga layout and reconciliation
 │   ├── components.tsx          # Box, Text, TextInput, Spinner, ScrollArea, Markdown
@@ -75,7 +75,9 @@ streamed delta:
    Memoized components must not read signals or use hooks — a signal read inside them is tracked by the root effect, and
    skipping the invocation would drop the update.
 2. **Yoga layout skip**: `reconcile` only re-applies an element's layout handlers when its own props (excluding
-   `children`/`key`) changed. Yoga setters are FFI calls and dominate large-tree commits otherwise.
+   `children`/`key`) changed — plus children-only changes for content-measured elements (`<Text>`), so they re-measure.
+   `setMeasureFunc` does not dirty a node in yoga-layout 3.x, so the handlers that install a measure function call
+   `markDirty()` themselves. Yoga setters are FFI calls and dominate large-tree commits otherwise.
 3. **Yoga child-list skip**: `reconcileChildren` leaves the Yoga child list untouched when it is unchanged —
    `removeChild`/`insertChild` churn dirties nodes and forces a full re-layout of the subtree.
 4. **Primitive caches**: `parseMarkdown` and the Markdown formatted-lines cache are content-keyed LRUs; `wrapText` is an
@@ -152,7 +154,9 @@ All exported from `render/components.tsx`:
 
 - **`Box`** - Flexbox container with background, padding, and positioning support
 - **`Text`** - Styled text with color, bold, italic, underline, strikethrough
-- **`TextInput`** - Text input field with cursor, placeholder, and vim mode support
+- **`TextInput`** - Text input field with cursor, placeholder, and vim mode support. Soft-wraps at word boundaries
+  (spaces kept at line ends, cursor mapped by source offsets), auto-grows up to `maxLines` and scrolls internally past
+  that; `height` pins a fixed viewport instead
 - **`Spinner`** - Animated spinner (default 80ms interval, 10 frames)
 - **`ScrollArea`** - Scrollable container (extends BoxProps) with `autoScroll`, `scrollbar`, and `scrollStep`
 - **`Markdown`** - Renders markdown content as styled Text lines via `parseMarkdown()` (memoized: parse + format are
@@ -211,7 +215,11 @@ All exported from `render/hooks/index.ts`:
 - Use `toAnsi(colorName)` from `@/tui/core/primitives/color.ts` for color conversion
 - All coordinates are integer character positions
 - Text editing logic is centralized in `hooks/text-utils.ts` (exports `TextState` and operations like `insertChar`,
-  `deleteBackward`, `moveCursor`, etc.)
+  `deleteBackward`, `moveCursor`, etc.); each operation writes value + cursor in one `batch()` so the UI commits once
+  per edit
+- Text inputs wrap with `wrapTextForEditing` + `cursorPositionInWrappedText` (`core/primitives/wrap-text.ts`): the wrap
+  preserves every source character and tracks spans, and the cursor is mapped from the same result the measurer and
+  painter use
 - Wrap long-lived presentational components in `memo()` (from `@/tui/render/components.tsx` or `@/tui/render/index.ts`)
   so idle frames skip re-invoking them; never wrap signal- or hook-driven components (see Render-Cost Model)
 

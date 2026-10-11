@@ -122,6 +122,12 @@ export interface TextInputProps extends BaseProps {
 	width?: number;
 	/** Fixed height in lines. If not set, height auto-scales based on content. */
 	height?: number;
+	/**
+	 * Maximum auto-height in lines before the field scrolls internally to keep
+	 * the cursor visible. Only used when `height` is not set; defaults to
+	 * unlimited.
+	 */
+	maxLines?: number;
 	/** Whether the input is focused */
 	focused?: boolean;
 	/** Cursor position within the input */

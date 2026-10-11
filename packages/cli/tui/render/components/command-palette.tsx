@@ -41,6 +41,7 @@ export function CommandPalette(props: CommandPaletteProps) {
 					placeholderColor={theme.textDim}
 					focused
 					width={width - 2}
+					maxLines={1}
 				/>
 				<Box flexDirection="column">
 					{palette.matches.map((item: CommandPaletteItem, i: number) => {
