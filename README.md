@@ -1,11 +1,11 @@
 # Relay v0.8.0
 
-A coding agent with a terminal UI, built with Deno and TypeScript.
+A coding agent with a terminal UI, built with Node.js and TypeScript.
 
-Relay is a monorepo (Deno workspace) containing a terminal UI framework powered by a custom JSX runtime and Yoga flexbox
+Relay is a monorepo (pnpm workspace) containing a terminal UI framework powered by a custom JSX runtime and Yoga flexbox
 layout, a browser client built with SolidJS, an OpenAI-compatible LLM API layer with streaming support, and an agentic
 loop with built-in tools. One agent runtime is hosted by an HTTP + SSE server; the terminal and web clients talk to it
-over the same wire protocol.
+over the same wire protocol. Tooling (format, lint, type-check, builds) runs through [Vite+](https://viteplus.dev/).
 
 > **Note — Project Transition**
 >
@@ -15,8 +15,8 @@ over the same wire protocol.
 > can be continued in the other.
 >
 > **No new release will be published for this work yet.** The latest GitHub Release (`v0.8.0`) predates all web
-> extension related changes and still reflects the old local-only agent with filesystem session storage. To use the new
-> shared-session behavior, build from source as described below.
+> extension related changes and still reflects the old local-only agent with filesystem session storage. Run the current
+> version from source as described below.
 
 ## Features
 
@@ -38,24 +38,14 @@ over the same wire protocol.
 
 ## Install
 
-> The published binary (`v0.8.0`) is the local-only agent from before the web extension changes. Session persistence in
-> that binary uses local JSONL files, not the shared database. Until a new release is published, build from source to
-> get the current behavior.
-
-Download the latest Linux binary from [GitHub Releases](https://github.com/vvtxn/relay/releases/latest):
-
-```bash
-curl -L https://github.com/vvtxn/relay/releases/latest/download/relay -o relay
-chmod +x relay
-sudo mv relay /usr/local/bin/
-```
-
-Or build the current version from source (see [Development](#development)):
+Relay is distributed as source — there is no compiled binary. Clone the repository, install dependencies, and run it
+with Node.js (see [Development](#development) for the full task list):
 
 ```bash
 git clone https://github.com/vvtxn/relay.git
 cd relay
-deno task build        # outputs dist/relay
+pnpm install
+pnpm relay
 ```
 
 The server reads each user's LLM API key from the database; users paste theirs in the web app's Settings page.
@@ -66,7 +56,8 @@ Server settings (`serverUrl` for the terminal client) are configured in `~/.rela
 
 ### Prerequisites
 
-- [Deno](https://deno.com/) v2+
+- [Node.js](https://nodejs.org/) v26.11.1+ (see `.node-version`)
+- [pnpm](https://pnpm.io/) v11+ (`corepack enable` or the standalone installer)
 
 ### Setup
 
@@ -92,10 +83,10 @@ The CLI is the entry point: it starts (or reuses) a background server, then runs
 the CLI exits, so you can hop into the browser anytime.
 
 ```bash
-deno task relay          # start/reuse the server + terminal UI
-deno task relay web      # open the web client in the browser
-deno task relay status   # show the background server
-deno task relay stop     # stop the background server
+pnpm relay          # start/reuse the server + terminal UI
+pnpm relay web      # open the web client in the browser
+pnpm relay status   # show the background server
+pnpm relay stop     # stop the background server
 ```
 
 The server listens on `RELAY_PORT` (default `7433`). In development, if that port is taken by something that is not a
@@ -103,27 +94,26 @@ healthy Relay server, the CLI starts one on a free port and records the actual U
 dev proxy follows it). In production — or whenever `RELAY_PORT` is set explicitly — a taken port is a startup error.
 
 The terminal and the browser use the same font. The browser loads it automatically; for the terminal run
-`relay fonts install` (or `deno task relay fonts install`) and select the printed family in your terminal settings.
-`relay fonts status` reports whether it is installed.
+`pnpm relay fonts install` and select the printed family in your terminal settings. `pnpm relay fonts status` reports
+whether it is installed.
 
-In development `relay web` opens Vite (`http://localhost:5173`) when it is running, otherwise the web app bundled by the
-server. In production (`RELAY_ENV=production`, e.g. `deno task relay:prod web`) the server serves the built SPA
+In development `relay web` opens Vite (`http://localhost:5173`) when it is running, otherwise the web app served by the
+server. In production (`RELAY_ENV=production`, e.g. `pnpm relay:prod web`) the server serves the built SPA
 (`packages/web/dist`) itself.
 
-With GitHub auth, the first `deno task relay` opens the browser to sign in; the server hands the session to the CLI
-(loopback only), so the terminal and the browser act as the same user. Sign out only affects the current client.
+With GitHub auth, the first `pnpm relay` opens the browser to sign in; the server hands the session to the CLI (loopback
+only), so the terminal and the browser act as the same user. Sign out only affects the current client.
 
 Lower-level tasks remain for running a server in the foreground:
 
 ```bash
-deno task serve:dev      # foreground server, development env
-deno task serve:prod     # foreground server, production env
-deno task web:dev        # Vite dev server with HMR
+pnpm serve:dev           # foreground server, development env
+pnpm serve:prod          # foreground server, production env
+pnpm web:dev             # Vite dev server with HMR
 ```
 
-The compiled binary ships the same commands: `relay`, `relay web`, `relay serve`, `relay stop`, `relay status`,
-`relay fonts`. `deno task build` builds and embeds the web app (release-safe, no env); `deno task build:local` also
-embeds the dev env.
+`pnpm relay` builds the CLI bundle (`packages/cli/dist`) automatically and then runs the same commands as before:
+`relay`, `relay web`, `relay serve`, `relay stop`, `relay status`, `relay fonts`, `relay workspace`.
 
 ## Authentication
 
@@ -158,8 +148,8 @@ them.
    `RELAY_PUBLIC_URL` already comes from `.env.development` / `.env.production`; `AUTH_SESSION_TTL_DAYS` defaults to 30
    and can be overridden in a `.local` file.
 
-3. Start the matching mode (`deno task serve:dev` + `deno task web:dev`, or `deno task serve:prod` after
-   `deno task web:build`) and sign in with two accounts to verify isolation.
+3. Start the matching mode (`pnpm serve:dev` + `pnpm web:dev`, or `pnpm serve:prod` after `pnpm web:build`) and sign in
+   with two accounts to verify isolation.
 
 The CLI authenticates with the bearer session token a loopback browser login hands over in `~/.relay/session.json`, so
 the terminal and the browser act as the same user without extra configuration.
@@ -192,10 +182,14 @@ model and checklist.
 │   │   └── tui/            # Terminal UI framework (JSX runtime, Yoga layout)
 │   └── web/                # Solid + Vite SPA client (@vvtxn/web)
 │       └── src/            # Effect API layer, TanStack Query/Router, components
-├── scripts/                # Build and version bump scripts
-├── dist/                   # Compiled binary output
-└── deno.json               # Workspace configuration
+├── scripts/                # Env loading and version bump scripts
+├── pnpm-workspace.yaml     # Workspace definition
+├── vite.config.ts          # Workspace-wide Vite+ tooling (fmt/lint/check)
+└── tsconfig.base.json      # Shared strict TypeScript options
 ```
+
+Only `packages/cli` needs bundling (Node cannot run TSX); everything else runs as native TypeScript under Node 26. The
+CLI bundle lives in `packages/cli/dist` and is produced by `pnpm relay` / `pnpm build`.
 
 ### Package Dependency Graph
 
@@ -215,16 +209,16 @@ mapping, diffs) and the shared Graphite/Silver theme tokens to both clients.
 
 ### `packages/client/` — Wire Protocol + Client
 
-The single source of truth for the server↔client contract, used by the CLI (Deno) and web (browser):
+The single source of truth for the server↔client contract, used by the CLI (Node) and web (browser):
 
 - `protocol.ts` — REST payloads + SSE `ServerEvent` union (plain JSON types)
-- `sse.ts` — fetch-based SSE parser (no EventSource; works in Deno and browsers) + server-side frame encoder
+- `sse.ts` — fetch-based SSE parser (no EventSource; works in Node and browsers) + server-side frame encoder
 - `client.ts` — `RelayClient` (typed methods for every endpoint, `subscribe()` for event streams)
 - `session-state.ts` — pure `applyServerEvent` reducer shared by both clients so run rendering cannot drift
 
 ### `packages/server/` — Agent Runtime Host
 
-A dependency-free `Deno.serve` application:
+A plain Node application built on a small `node:http` → Fetch adapter (`http-server.ts`) — no web framework:
 
 - **RunManager** — one active run per session; bridges agent events onto per-session SSE streams; gates side-effecting
   tools behind approval decisions that arrive over HTTP
@@ -346,27 +340,29 @@ A SolidJS single-page app served by the server (bundled `packages/web/dist`, or 
 ## Development
 
 ```bash
-deno task fmt          # Format code
-deno task fmt:check    # Check formatting
-deno task lint         # Lint
-deno task check        # Strict type-check every entrypoint
-deno task relay        # Start/reuse the server + terminal UI
-deno task relay web    # Open the web client (server starts in the background)
-deno task relay stop   # Stop the background server
-deno task relay status # Show the background server
-deno task relay workspace list          # List registered workspaces
-deno task relay workspace add <path>    # Register a project directory (default: cwd)
-deno task relay workspace remove <path> # Unregister a workspace (sessions are kept)
-deno task relay fonts status  # Check whether the shared terminal font is installed
-deno task serve:dev    # Run a foreground server with the development env
-deno task serve:prod   # Run a foreground server with the production env
-deno task web:dev      # Run the web client with Vite (proxies /api to the server)
-deno task web:build    # Build the web app to packages/web/dist
-deno task build        # Build binary (dist/relay; embeds web, release-safe, no env)
-deno task build:local  # Build binary embedding the dev env (may include secrets)
-deno task version      # Show current version
-deno task version:bump <patch|minor|major>  # Bump version
+pnpm fmt               # Format code (Oxfmt via Vite+)
+pnpm fmt:check         # Check formatting
+pnpm lint              # Lint (Oxlint via Vite+)
+pnpm check             # Format, lint, and type-check (tsgo via Vite+)
+pnpm relay             # Build the CLI bundle, then start/reuse the server + terminal UI
+pnpm relay web         # Open the web client (server starts in the background)
+pnpm relay stop        # Stop the background server
+pnpm relay status      # Show the background server
+pnpm relay workspace list          # List registered workspaces
+pnpm relay workspace add <path>    # Register a project directory (default: cwd)
+pnpm relay workspace remove <path> # Unregister a workspace (sessions are kept)
+pnpm relay fonts status  # Check whether the shared terminal font is installed
+pnpm serve:dev         # Run a foreground server with the development env
+pnpm serve:prod        # Run a foreground server with the production env
+pnpm web:dev           # Run the web client with Vite (proxies /api to the server)
+pnpm web:build         # Build the web app to packages/web/dist
+pnpm build             # Build the web app and the CLI bundle
+pnpm run version         # Show current version
+pnpm run version:bump <patch|minor|major>  # Bump version
 ```
+
+The toolchain is pinned in `.node-version` and `package.json` (`engines`, `packageManager`). `vp` comes from the
+project-local `vite-plus` dev dependency; run it directly as `pnpm exec vp …` or through the scripts above.
 
 ## Releasing
 
@@ -375,14 +371,14 @@ deno task version:bump <patch|minor|major>  # Bump version
 
 Tag-based releases via GitHub Actions (`.github/workflows/release.yml`):
 
-1. `deno task version:bump <patch|minor|major>`
+1. `pnpm run version:bump <patch|minor|major>`
 2. Commit and push to `main`
 3. `git tag v<version> && git push --tags`
-4. CI builds the Linux binary without embedding environment files and creates the GitHub Release
+4. CI verifies checks and creates the GitHub Release (source-only — no binary artifact is published)
 
-The released binary reads `TURSO_DB_URL`, `TURSO_DB_TOKEN`, `GITHUB_APP_CLIENT_ID`, and `GITHUB_APP_CLIENT_SECRET` from
-its runtime environment. The LLM API key is per user and stored in the database (set via the web Settings page). Local
-`deno task build` builds may load `.env` automatically, but release builds should not include secrets in the executable.
+Relay reads `TURSO_DB_URL`, `TURSO_DB_TOKEN`, `GITHUB_APP_CLIENT_ID`, and `GITHUB_APP_CLIENT_SECRET` from its runtime
+environment (loaded from the mode-aware `.env` files). The LLM API key is per user and stored in the database (set via
+the web Settings page).
 
 ## License
 

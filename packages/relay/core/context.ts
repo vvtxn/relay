@@ -1,4 +1,4 @@
-import type { Message } from "@/api/types.ts";
+import type { Message } from "#/api/types.ts";
 
 // ---------------------------------------------------------------------------
 // Token estimation (heuristic: ~4 chars per token)
@@ -205,7 +205,5 @@ export function trimContext(messages: Message[], options: TrimOptions = {}): Mes
 		}
 	}
 
-	return turns
-		.filter((_, i) => !dropIndices.has(i))
-		.flatMap((t) => t.messages);
+	return turns.filter((_, i) => !dropIndices.has(i)).flatMap((t) => t.messages);
 }

@@ -1,10 +1,11 @@
+import { readFileSync, writeFileSync } from "node:fs";
 import { VERSION } from "../packages/relay/version.ts";
 
-const part = Deno.args[0] as "patch" | "minor" | "major" | undefined;
+const part = process.argv[2] as "patch" | "minor" | "major" | undefined;
 
 if (!part || !["patch", "minor", "major"].includes(part)) {
-	console.error("Usage: deno task version:bump <patch|minor|major>");
-	Deno.exit(1);
+	console.error("Usage: pnpm version:bump <patch|minor|major>");
+	process.exit(1);
 }
 
 const [major = 0, minor = 0, patch = 0] = VERSION.split(".").map(Number);
@@ -31,14 +32,11 @@ const content = `/**
  */
 export const VERSION = "${next}";
 `;
-await Deno.writeTextFile("packages/relay/version.ts", content);
+writeFileSync("packages/relay/version.ts", content);
 
 // Update README.md
-const readme = await Deno.readTextFile("README.md");
-const updatedReadme = readme.replace(
-	/Relay v\d+\.\d+\.\d+/,
-	`Relay v${next}`,
-);
-await Deno.writeTextFile("README.md", updatedReadme);
+const readme = readFileSync("README.md", "utf8");
+const updatedReadme = readme.replace(/Relay v\d+\.\d+\.\d+/, `Relay v${next}`);
+writeFileSync("README.md", updatedReadme);
 
 console.log(`${VERSION} → ${next}`);

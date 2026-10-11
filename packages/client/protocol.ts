@@ -1,7 +1,7 @@
 /**
  * Wire protocol shared by the Relay server and its clients (CLI, web).
  *
- * Every type here is plain JSON — no Deno or browser dependencies — so the
+ * Every type here is plain JSON — no runtime dependencies — so the
  * protocol can be consumed from any runtime. The SSE event payloads mirror the
  * agent runner callbacks one-to-one, plus server-side lifecycle events.
  */

@@ -53,15 +53,19 @@ export async function handleEvents(services: RequestServices, sessionId: string,
 				}
 			}, HEARTBEAT_INTERVAL_MS);
 
-			request.signal.addEventListener("abort", () => {
-				if (heartbeat) clearInterval(heartbeat);
-				unsubscribe?.();
-				try {
-					controller.close();
-				} catch {
-					// Already closed
-				}
-			}, { once: true });
+			request.signal.addEventListener(
+				"abort",
+				() => {
+					if (heartbeat) clearInterval(heartbeat);
+					unsubscribe?.();
+					try {
+						controller.close();
+					} catch {
+						// Already closed
+					}
+				},
+				{ once: true },
+			);
 		},
 		cancel() {
 			if (heartbeat) clearInterval(heartbeat);
@@ -73,7 +77,7 @@ export async function handleEvents(services: RequestServices, sessionId: string,
 		headers: {
 			"Content-Type": "text/event-stream",
 			"Cache-Control": "no-cache",
-			"Connection": "keep-alive",
+			Connection: "keep-alive",
 		},
 	});
 }

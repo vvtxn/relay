@@ -1,6 +1,6 @@
 /** Server configuration — read once from the environment at startup. */
 
-import { resolve } from "@std/path/resolve";
+import { resolve } from "node:path";
 import { homeDir } from "@vvtxn/relay/core/paths.ts";
 import { validateWorkspacePathSync } from "@vvtxn/relay/core/workspace.ts";
 
@@ -63,7 +63,10 @@ function required(env: Record<string, string | undefined>, key: string): string 
 /** Comma-separated list, trimmed and without empties. */
 function parseList(value: string | undefined): string[] {
 	if (!value) return [];
-	return value.split(",").map((part) => part.trim()).filter(Boolean);
+	return value
+		.split(",")
+		.map((part) => part.trim())
+		.filter(Boolean);
 }
 
 /** Parse a positive integer env var, throwing on malformed values. */
@@ -81,9 +84,7 @@ export function isLoopbackHost(host: string): boolean {
 	return host === "localhost" || host === "::1" || host === "[::1]" || host.startsWith("127.");
 }
 
-export function serverConfigFromEnv(
-	env: Record<string, string | undefined> = Deno.env.toObject(),
-): ServerConfig {
+export function serverConfigFromEnv(env: Record<string, string | undefined> = { ...process.env }): ServerConfig {
 	const port = positiveInt(env.RELAY_PORT, DEFAULT_PORT, "RELAY_PORT", 65_535);
 	const hostname = env.RELAY_HOST ?? DEFAULT_HOSTNAME;
 	// GitHub App credentials. `GITHUB_CLIENT_ID`/`GITHUB_CLIENT_SECRET` are
@@ -120,7 +121,7 @@ export function serverConfigFromEnv(
 	// Canonicalize the default workspace and require it to satisfy the same
 	// rules as a client-supplied path, so the server never advertises a
 	// workspace it would refuse to create.
-	const candidateCwd = env.RELAY_WORKSPACE ?? Deno.cwd();
+	const candidateCwd = env.RELAY_WORKSPACE ?? process.cwd();
 	const defaultWorkspace = validateWorkspacePathSync(candidateCwd, workspaceRoots);
 	if (!defaultWorkspace.ok) {
 		throw new Error(

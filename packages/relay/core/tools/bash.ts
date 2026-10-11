@@ -1,3 +1,4 @@
+import { collectCommand, spawnCommand } from "../command.ts";
 import { defineTool, type Tool } from "./types.ts";
 
 const MAX_OUTPUT = 10_000;
@@ -12,7 +13,7 @@ export function createBashTool(cwd?: string): Tool {
 	return defineTool({
 		name: "bash",
 		description:
-			"Execute a shell command. Use only for running project scripts (e.g. deno task, npm run), build/test commands, git operations, and installing packages. Do NOT use bash for file reading, searching, or directory listing — use the dedicated tools (read_file, grep) instead. Commands run in the current working directory.",
+			"Execute a shell command. Use only for running project scripts (e.g. pnpm run, vp run), build/test commands, git operations, and installing packages. Do NOT use bash for file reading, searching, or directory listing — use the dedicated tools (read_file, grep) instead. Commands run in the current working directory.",
 		parameters: {
 			type: "object",
 			properties: {
@@ -32,14 +33,12 @@ export function createBashTool(cwd?: string): Tool {
 			const start = performance.now();
 
 			try {
-				const process = new Deno.Command("bash", {
+				const child = spawnCommand("bash", {
 					args: ["-c", command],
 					...(cwd ? { cwd } : {}),
 					stdout: "piped",
 					stderr: "piped",
 				});
-
-				const child = process.spawn();
 
 				const timeoutMs = timeout ?? DEFAULT_TIMEOUT;
 				const timer = setTimeout(() => {
@@ -50,7 +49,7 @@ export function createBashTool(cwd?: string): Tool {
 					}
 				}, timeoutMs);
 
-				const result = await child.output();
+				const result = await collectCommand(child);
 				clearTimeout(timer);
 
 				const durationMs = Math.round(performance.now() - start);

@@ -2,11 +2,14 @@
  * Workspace helpers — filesystem operations rooted at an explicit directory.
  *
  * The workspace root is the directory an agent session operates in: the CLI
- * passes `Deno.cwd()`, a server passes a per-session workspace directory.
+ * passes `process.cwd()`, a server passes a per-session workspace directory.
  * Every helper takes the root explicitly so the caller controls confinement.
  */
 
-import { basename, dirname, isAbsolute, join, resolve, SEPARATOR } from "@std/path";
+import { lstat, readdir, readFile, realpath, stat } from "node:fs/promises";
+import { type Dirent, realpathSync, statSync, type Stats } from "node:fs";
+import { basename, dirname, isAbsolute, join, resolve, sep } from "node:path";
+import { runCommand } from "./command.ts";
 
 const IGNORE_DIRS = new Set([".git", "node_modules", "dist", "out", "build", "coverage", ".next", "target", ".cache"]);
 const MAX_FILES = 10_000;
@@ -21,7 +24,7 @@ const MAX_MENTION_DEPTH = 8;
 export function resolveWithinRoot(root: string, rel: string): string | null {
 	const normalizedRoot = resolve(root);
 	const abs = resolve(normalizedRoot, rel);
-	return abs === normalizedRoot || abs.startsWith(normalizedRoot + SEPARATOR) ? abs : null;
+	return abs === normalizedRoot || abs.startsWith(normalizedRoot + sep) ? abs : null;
 }
 
 /** Why a candidate workspace directory was rejected. */
@@ -38,7 +41,7 @@ function reject(reason: WorkspaceRejection, message: string): WorkspaceValidatio
 
 /** True when `abs` equals `root` or sits inside it. Both must be canonical. */
 function isWithin(root: string, abs: string): boolean {
-	return abs === root || abs.startsWith(root + SEPARATOR);
+	return abs === root || abs.startsWith(root + sep);
 }
 
 /**
@@ -72,18 +75,18 @@ export function validateWorkspacePathSync(raw: unknown, roots: string[]): Worksp
 	const input = absoluteInput(raw);
 	if (!input.ok) return input.result;
 
-	let stat: Deno.FileInfo | null;
+	let info: Stats | null;
 	try {
-		stat = Deno.statSync(input.abs);
+		info = statSync(input.abs);
 	} catch {
-		stat = null;
+		info = null;
 	}
-	if (!stat) return reject("missing", `No such directory on the server: ${input.abs}`);
-	if (!stat.isDirectory) return reject("not-a-directory", `Not a directory on the server: ${input.abs}`);
+	if (!info) return reject("missing", `No such directory on the server: ${input.abs}`);
+	if (!info.isDirectory()) return reject("not-a-directory", `Not a directory on the server: ${input.abs}`);
 
 	const realOf = (path: string): string | null => {
 		try {
-			return Deno.realPathSync(path);
+			return realpathSync(path);
 		} catch {
 			return null;
 		}
@@ -106,31 +109,31 @@ export async function validateWorkspacePath(raw: unknown, roots: string[]): Prom
 	const input = absoluteInput(raw);
 	if (!input.ok) return input.result;
 
-	let stat: Deno.FileInfo | null;
+	let info: Stats | null;
 	try {
-		stat = await Deno.stat(input.abs);
+		info = await stat(input.abs);
 	} catch {
-		stat = null;
+		info = null;
 	}
-	if (!stat) return reject("missing", `No such directory on the server: ${input.abs}`);
-	if (!stat.isDirectory) return reject("not-a-directory", `Not a directory on the server: ${input.abs}`);
+	if (!info) return reject("missing", `No such directory on the server: ${input.abs}`);
+	if (!info.isDirectory()) return reject("not-a-directory", `Not a directory on the server: ${input.abs}`);
 
 	const realOf = async (path: string): Promise<string | null> => {
 		try {
-			return await Deno.realPath(path);
+			return await realpath(path);
 		} catch {
 			return null;
 		}
 	};
-	const real = await realOf(input.abs) ?? input.abs;
+	const real = (await realOf(input.abs)) ?? input.abs;
 	const realRoots = await Promise.all(roots.map(async (root) => (await realOf(resolve(root))) ?? resolve(root)));
 	return rootsReject(real, realRoots) ?? { ok: true, path: real };
 }
 
 export async function isGitRepo(root: string): Promise<boolean> {
 	try {
-		const stat = await Deno.stat(`${root}/.git`);
-		return stat.isDirectory;
+		const info = await stat(`${root}/.git`);
+		return info.isDirectory();
 	} catch {
 		return false;
 	}
@@ -139,12 +142,12 @@ export async function isGitRepo(root: string): Promise<boolean> {
 /** Returns the current git branch for the workspace, or null when unavailable (not a repo, detached, no git). */
 export async function getGitBranch(root: string): Promise<string | null> {
 	try {
-		const result = await new Deno.Command("git", {
+		const result = await runCommand("git", {
 			args: ["branch", "--show-current"],
 			cwd: root,
 			stdout: "piped",
 			stderr: "null",
-		}).output();
+		});
 		if (!result.success) return null;
 		return new TextDecoder().decode(result.stdout).trim() || null;
 	} catch {
@@ -153,12 +156,12 @@ export async function getGitBranch(root: string): Promise<string | null> {
 }
 
 async function listFilesGit(root: string): Promise<string[]> {
-	const result = await new Deno.Command("git", {
+	const result = await runCommand("git", {
 		args: ["ls-files", "--cached", "--others", "--exclude-standard"],
 		cwd: root,
 		stdout: "piped",
 		stderr: "piped",
-	}).output();
+	});
 	if (!result.success) throw new Error("git ls-files failed");
 	const files = new TextDecoder().decode(result.stdout).trim().split("\n").filter(Boolean);
 
@@ -179,21 +182,21 @@ async function listFilesWalk(root: string): Promise<string[]> {
 
 	async function walk(dir: string, prefix: string) {
 		if (files.length >= MAX_FILES) return;
-		let entries: Deno.DirEntry[];
+		let entries: Dirent[];
 		try {
-			entries = await Array.fromAsync(Deno.readDir(dir));
+			entries = await readdir(dir, { withFileTypes: true });
 		} catch {
 			// Directory vanished or is unreadable — skip it rather than failing.
 			return;
 		}
 		for (const entry of entries) {
 			if (files.length >= MAX_FILES) return;
-			if (entry.isDirectory) {
+			if (entry.isDirectory()) {
 				if (IGNORE_DIRS.has(entry.name)) continue;
 				const dirPath = prefix ? `${prefix}/${entry.name}` : entry.name;
 				files.push(dirPath + "/");
 				await walk(`${dir}/${entry.name}`, dirPath);
-			} else if (entry.isFile) {
+			} else if (entry.isFile()) {
 				files.push(prefix ? `${prefix}/${entry.name}` : entry.name);
 			}
 		}
@@ -225,27 +228,27 @@ async function readDirRecursive(absDir: string, relDir: string, root: string): P
 
 	async function walk(abs: string, rel: string, depth: number) {
 		if (truncated) return;
-		let entries: Deno.DirEntry[];
+		let entries: Dirent[];
 		try {
-			entries = await Array.fromAsync(Deno.readDir(abs));
+			entries = await readdir(abs, { withFileTypes: true });
 		} catch {
 			return;
 		}
 		entries.sort((a, b) => a.name.localeCompare(b.name));
 		for (const entry of entries) {
 			if (truncated) return;
-			if (entry.isSymlink) continue;
+			if (entry.isSymbolicLink()) continue;
 			const absPath = `${abs}/${entry.name}`;
 			const relPath = `${rel}/${entry.name}`;
-			if (entry.isDirectory) {
+			if (entry.isDirectory()) {
 				if (IGNORE_DIRS.has(entry.name)) continue;
 				if (depth >= MAX_MENTION_DEPTH) continue;
-				if (!await realPathWithinRoot(root, absPath)) continue;
+				if (!(await realPathWithinRoot(root, absPath))) continue;
 				await walk(absPath, relPath, depth + 1);
-			} else if (entry.isFile) {
-				if (!await realPathWithinRoot(root, absPath)) continue;
+			} else if (entry.isFile()) {
+				if (!(await realPathWithinRoot(root, absPath))) continue;
 				try {
-					const content = await Deno.readTextFile(absPath);
+					const content = await readFile(absPath, "utf8");
 					const header = `--- ${relPath} ---\n`;
 					const section = header + content + "\n\n";
 					if (totalLen + section.length > MAX_MENTION_OUTPUT) {
@@ -271,8 +274,8 @@ async function readDirRecursive(absDir: string, relDir: string, root: string): P
 
 async function realPathWithinRoot(root: string, absPath: string): Promise<string | null> {
 	try {
-		const [realRoot, realPath] = await Promise.all([Deno.realPath(root), Deno.realPath(absPath)]);
-		return realPath === realRoot || realPath.startsWith(realRoot + SEPARATOR) ? realPath : null;
+		const [realRoot, realPath] = await Promise.all([realpath(root), realpath(absPath)]);
+		return realPath === realRoot || realPath.startsWith(realRoot + sep) ? realPath : null;
 	} catch {
 		return null;
 	}
@@ -293,7 +296,7 @@ export async function resolveRealWithinRoot(root: string, rel: string): Promise<
 	// is detected rather than treated as a missing path.
 	let exists = true;
 	try {
-		await Deno.lstat(abs);
+		await lstat(abs);
 	} catch {
 		exists = false;
 	}
@@ -320,28 +323,29 @@ export async function expandMentions(text: string, root: string): Promise<string
 		mentions.push(relPath);
 	}
 
-	const contextBlocks = await Promise.all(mentions.map(async (relPath) => {
-		const absPath = resolveWithinRoot(root, relPath);
-		if (!absPath) return null;
+	const contextBlocks = await Promise.all(
+		mentions.map(async (relPath) => {
+			const absPath = resolveWithinRoot(root, relPath);
+			if (!absPath) return null;
 
-		try {
-			const realPath = await realPathWithinRoot(root, absPath);
-			if (!realPath) return null;
-			const stat = await Deno.stat(realPath);
-			if (stat.isDirectory) {
-				return await readDirRecursive(realPath, relPath, root);
-			} else if (stat.isFile) {
-				const raw = await Deno.readTextFile(realPath);
-				const content = raw.length > MAX_MENTION_OUTPUT
-					? raw.slice(0, MAX_MENTION_OUTPUT) + "\n...(truncated)"
-					: raw;
-				return `--- ${relPath} ---\n${content}`;
+			try {
+				const realPath = await realPathWithinRoot(root, absPath);
+				if (!realPath) return null;
+				const info = await stat(realPath);
+				if (info.isDirectory()) {
+					return await readDirRecursive(realPath, relPath, root);
+				} else if (info.isFile()) {
+					const raw = await readFile(realPath, "utf8");
+					const content =
+						raw.length > MAX_MENTION_OUTPUT ? raw.slice(0, MAX_MENTION_OUTPUT) + "\n...(truncated)" : raw;
+					return `--- ${relPath} ---\n${content}`;
+				}
+			} catch {
+				// path doesn't exist or can't be read — leave mention as-is
 			}
-		} catch {
-			// path doesn't exist or can't be read — leave mention as-is
-		}
-		return null;
-	}));
+			return null;
+		}),
+	);
 	const blocks = contextBlocks.filter((block): block is string => block !== null);
 
 	if (blocks.length === 0) return text;

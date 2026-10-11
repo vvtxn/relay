@@ -46,7 +46,7 @@ function cookieOptions(services: ServerServices) {
 export function safeReturnTo(value: string | null | undefined): string {
 	if (!value || value.length > 2048 || !value.startsWith("/")) return "/";
 	if (value.length > 1 && (value[1] === "/" || value[1] === "\\")) return "/";
-	// deno-lint-ignore no-control-regex -- reject control chars in redirect targets
+	// oxlint-disable-next-line no-control-regex -- reject control chars in redirect targets
 	if (/[\u0000-\u001f\u007f\\]/.test(value)) return "/";
 	return value;
 }
@@ -148,11 +148,7 @@ export async function handleLogout(services: ServerServices, request: Request): 
 }
 
 /** Dispatch `/api/auth/*`; returns null when the path is not an auth route. */
-export async function handleAuthRoutes(
-	services: ServerServices,
-	request: Request,
-	url: URL,
-): Promise<Response | null> {
+export async function handleAuthRoutes(services: ServerServices, request: Request, url: URL): Promise<Response | null> {
 	const path = url.pathname;
 	if (path === "/api/auth/login" && request.method === "GET") return await handleLogin(services, url);
 	if (path === "/api/auth/callback" && request.method === "GET") {

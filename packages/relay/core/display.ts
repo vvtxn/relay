@@ -67,7 +67,7 @@ export function summarizeToolArgs(name: string, args: string): string {
 			default:
 				return Object.entries(parsed as Record<string, unknown>)
 					.filter(([, v]) => typeof v === "string" && v.length < 100)
-					.map(([k, v]) => `${k}=${v}`)
+					.map(([k, v]) => `${k}=${String(v)}`)
 					.join(" ");
 		}
 	} catch {
@@ -99,11 +99,12 @@ export function entriesToUIMessages(entries: Entry[]): UIMessage[] {
 			const hasContent = typeof entry.content === "string" && entry.content.trim();
 			const hasToolCalls = entry.toolCalls && entry.toolCalls.length > 0;
 			if (!hasContent && !hasToolCalls) continue;
-			const toolCalls: UIToolCall[] = entry.toolCalls?.map((tc) => {
-				const uiTc = createUIToolCall(tc.function.name, tc.function.arguments);
-				toolCallIdMap.set(tc.id, uiTc);
-				return uiTc;
-			}) ?? [];
+			const toolCalls: UIToolCall[] =
+				entry.toolCalls?.map((tc) => {
+					const uiTc = createUIToolCall(tc.function.name, tc.function.arguments);
+					toolCallIdMap.set(tc.id, uiTc);
+					return uiTc;
+				}) ?? [];
 			messages.push({
 				role: "agent",
 				content: typeof entry.content === "string" ? entry.content : "",

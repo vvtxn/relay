@@ -26,11 +26,11 @@ import { readSSEStream } from "./sse.ts";
 
 /** Error thrown for non-2xx API responses; carries the server's error message. */
 export class RelayApiError extends Error {
-	constructor(
-		public readonly status: number,
-		message: string,
-	) {
+	readonly status: number;
+
+	constructor(status: number, message: string) {
 		super(message);
+		this.status = status;
 		this.name = "RelayApiError";
 	}
 }
@@ -44,7 +44,7 @@ export interface RelayClientOptions {
 
 /**
  * Typed client for the Relay server API. Pure fetch — no runtime-specific
- * dependencies, so the same client drives the CLI (Deno) and the web app
+ * dependencies, so the same client drives the CLI (Node) and the web app
  * (browser).
  */
 
@@ -129,10 +129,10 @@ export class RelayClient {
 	}
 
 	async approve(sessionId: string, toolCallId: string, decision: ApprovalDecision): Promise<StatusResponse> {
-		return await this.post(
-			`/api/sessions/${sessionId}/approve`,
-			{ toolCallId, decision } satisfies ApprovalRequest,
-		);
+		return await this.post(`/api/sessions/${sessionId}/approve`, {
+			toolCallId,
+			decision,
+		} satisfies ApprovalRequest);
 	}
 
 	async cancel(sessionId: string): Promise<StatusResponse> {
@@ -191,7 +191,9 @@ export class RelayClient {
 		try {
 			const parsed = JSON.parse(text) as ErrorResponse;
 			if (typeof parsed.error === "string") message = parsed.error;
-		} catch { /* not JSON — use raw text */ }
+		} catch {
+			/* not JSON — use raw text */
+		}
 		return new RelayApiError(response.status, message);
 	}
 }

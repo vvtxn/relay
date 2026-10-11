@@ -1,6 +1,6 @@
 import Y from "yoga-layout";
-import { applyInheritedBackground, toBgAnsi } from "@/tui/core/primitives/color.ts";
-import { fillPositions } from "@/tui/core/primitives/fill.ts";
+import { applyInheritedBackground, toBgAnsi } from "#/tui/core/primitives/color.ts";
+import { fillPositions } from "#/tui/core/primitives/fill.ts";
 import type { BoxInstance, ElementHandler, Position } from "../types/index.ts";
 import type { LayoutHandler } from "./index.ts";
 

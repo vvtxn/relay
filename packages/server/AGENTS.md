@@ -1,14 +1,16 @@
 # AGENTS.md - Server
 
-HTTP + SSE server hosting the Relay agent runtime. Plain TypeScript on `Deno.serve` — no web framework.
+HTTP + SSE server hosting the Relay agent runtime. Plain TypeScript on `node:http` (via a small Fetch adapter) — no web
+framework.
 
 ## Architecture
 
 ```
 server/
-├── deno.json        # @vvtxn/server; exports "./main" for the CLI serve subcommand
+├── package.json     # @vvtxn/server; exports "./main" for the CLI serve subcommand
 ├── mod.ts           # Public exports (startServer, createServices, handleRequest, RunManager)
-├── main.ts          # Entry point: config from env → createServices → Deno.serve
+├── main.ts          # Entry point: config from env → createServices → startHttpServer
+├── http-server.ts   # node:http ↔ Request/Response adapter (streaming, aborts, EADDRINUSE)
 ├── config.ts        # serverConfigFromEnv: port, host, LLM key/model, Turso, auth, static dir
 ├── services.ts      # ServerServices + createServices() — the composition seam
 ├── router.ts        # Manual route matching; per-request auth gate; error mapping (400/401/404/405/500)
@@ -88,8 +90,8 @@ a provider from the owning user's key at run start; a missing key fails the run 
 ### Static serving
 
 The server always serves a web app for non-API GET requests: `RELAY_STATIC_DIR` when set (a deployment override),
-otherwise the bundled `packages/web/dist` (embedded in the compiled binary via `--include`). Unknown paths fall back to
-`index.html` for SPA routing; paths are confined to the root.
+otherwise the built `packages/web/dist` (`pnpm web:build`). Unknown paths fall back to `index.html` for SPA routing;
+paths are confined to the root.
 
 ### Background state
 
@@ -145,22 +147,20 @@ Payload types live in `@vvtxn/client/protocol.ts` — never redeclare them here.
 ## Running
 
 ```bash
-deno task serve:dev      # from repo root, loads development env files
-deno task serve:prod     # production env files
-relay serve              # compiled binary subcommand (runtime env)
+pnpm serve:dev      # from repo root, loads development env files
+pnpm serve:prod     # production env files
 ```
 
 ## Task Completion Checklist
 
 After concluding that a task is complete, always run these commands from the repo root:
 
-1. `deno task fmt` — auto-format all code
-2. `deno task lint` — check for lint errors
-3. `deno task check` — strict type-check of every entrypoint
+1. `pnpm exec vp fmt` — auto-format all code
+2. `pnpm check` — format, lint, and type-check (Oxfmt, Oxlint, tsgo via Vite+)
 
 ## Code Patterns
 
 - Handlers receive `services` explicitly; never read env at request time
 - Route handlers throw `BadRequestError`/`NotFoundError`; the router maps them to responses
 - SSE frames via `encodeSSEFrame` from `@vvtxn/client`; heartbeats as SSE comments every 15s
-- `deno-lint-ignore` is rarely needed — prefer extracting non-async generators
+- `oxlint-disable-next-line` is rarely needed — prefer extracting non-async generators

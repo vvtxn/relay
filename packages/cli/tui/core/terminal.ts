@@ -40,7 +40,13 @@ function normalizeHex(color?: string): string | null {
 	const match = color.match(/^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/);
 	if (!match) return null;
 	const digits = match[1]!;
-	const full = digits.length === 3 ? digits.split("").map((d) => d + d).join("") : digits;
+	const full =
+		digits.length === 3
+			? digits
+					.split("")
+					.map((d) => d + d)
+					.join("")
+			: digits;
 	return `#${full.toLowerCase()}`;
 }
 
@@ -147,10 +153,7 @@ export class Terminal {
 	}
 
 	private createEmptyBuffer(): Cell[][] {
-		return Array.from(
-			{ length: this.height },
-			() => Array.from({ length: this.width }, () => this.blankCell()),
-		);
+		return Array.from({ length: this.height }, () => Array.from({ length: this.width }, () => this.blankCell()));
 	}
 
 	private clearScreen() {
@@ -355,9 +358,8 @@ export class Terminal {
 				if (!current || !previous) continue;
 				if (current.cont) continue;
 
-				const changed = this.isFirstRender ||
-					current.char !== previous.char ||
-					current.style !== previous.style;
+				const changed =
+					this.isFirstRender || current.char !== previous.char || current.style !== previous.style;
 
 				if (!changed) {
 					endRun();

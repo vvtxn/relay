@@ -1,7 +1,9 @@
-import { dirname } from "@std/path/dirname";
+import { mkdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { dirname } from "node:path";
 import { type ServerConfig, serverConfigFromEnv } from "./config.ts";
 import { createServices } from "./services.ts";
 import { handleRequest } from "./router.ts";
+import { startHttpServer, type RunningServer } from "./http-server.ts";
 
 /**
  * Exit code used when the configured port is taken (`EX_TEMPFAIL` from
@@ -11,8 +13,8 @@ import { handleRequest } from "./router.ts";
  */
 const EXIT_ADDR_IN_USE = 75;
 
-function isAddrInUse(error: unknown): error is Error {
-	return error instanceof Error && error.name === "AddrInUse";
+function isAddrInUse(error: unknown): error is NodeJS.ErrnoException {
+	return error instanceof Error && (error as NodeJS.ErrnoException).code === "EADDRINUSE";
 }
 
 function bindFailure(config: ServerConfig, error: Error): string {
@@ -29,29 +31,28 @@ function bindFailure(config: ServerConfig, error: Error): string {
  * server. Only used when the launcher sets `RELAY_STATE_FILE` (the background
  * daemon); a plain `relay serve` leaves no state behind.
  */
-function writeServerState(config: ServerConfig, server: Deno.HttpServer): void {
-	const path = Deno.env.get("RELAY_STATE_FILE");
+function writeServerState(config: ServerConfig, server: RunningServer): void {
+	const path = process.env.RELAY_STATE_FILE;
 	if (!path) return;
-	const address = server.addr as Deno.NetAddr;
 	const host = config.hostname === "0.0.0.0" || config.hostname === "::" ? "127.0.0.1" : config.hostname;
 	const state = {
-		url: `http://${host}:${address.port}`,
-		port: address.port,
-		pid: Deno.pid,
+		url: `http://${host}:${server.port}`,
+		port: server.port,
+		pid: process.pid,
 		startedAt: new Date().toISOString(),
 		cwd: config.defaultCwd,
 		webUrl: config.publicUrl,
 	};
 	try {
-		Deno.mkdirSync(dirname(path), { recursive: true });
+		mkdirSync(dirname(path), { recursive: true });
 		// Write-then-rename so a reader never observes a partial file.
-		const tmp = `${path}.${Deno.pid}.tmp`;
+		const tmp = `${path}.${process.pid}.tmp`;
 		try {
-			Deno.writeTextFileSync(tmp, JSON.stringify(state, null, "\t") + "\n", { mode: 0o600 });
-			Deno.renameSync(tmp, path);
+			writeFileSync(tmp, JSON.stringify(state, null, "\t") + "\n", { mode: 0o600 });
+			renameSync(tmp, path);
 		} catch (error) {
 			try {
-				Deno.removeSync(tmp);
+				rmSync(tmp, { force: true });
 			} catch {
 				// Best effort cleanup.
 			}
@@ -72,31 +73,27 @@ export async function startServer(): Promise<void> {
 	console.log(
 		`Workspace roots: ${config.workspaceRoots.length > 0 ? config.workspaceRoots.join(", ") : "(any directory)"}`,
 	);
-	console.log(
-		`OAuth callback: ${config.publicUrl}/api/auth/callback (must match a GitHub App callback URL exactly)`,
-	);
+	console.log(`OAuth callback: ${config.publicUrl}/api/auth/callback (must match a GitHub App callback URL exactly)`);
 	if (config.staticDir) console.log(`Serving web app from ${config.staticDir}`);
 
-	let server: Deno.HttpServer;
+	let server: RunningServer;
 	try {
-		server = Deno.serve(
-			{ port: config.port, hostname: config.hostname, onListen: () => {} },
-			(request) => handleRequest(services, request),
+		server = await startHttpServer({ port: config.port, hostname: config.hostname }, (request) =>
+			handleRequest(services, request),
 		);
 	} catch (error) {
 		if (isAddrInUse(error)) {
 			console.error(bindFailure(config, error));
-			Deno.exit(EXIT_ADDR_IN_USE);
+			process.exit(EXIT_ADDR_IN_USE);
 		}
 		throw error;
 	}
 
-	const address = server.addr as Deno.NetAddr;
-	console.log(`Relay server listening on http://${config.hostname}:${address.port}`);
+	console.log(`Relay server listening on http://${config.hostname}:${server.port}`);
 	writeServerState(config, server);
 }
 
-// Run when executed directly (deno run packages/server/main.ts)
+// Run when executed directly (node packages/server/main.ts)
 if (import.meta.main) {
 	await startServer();
 }

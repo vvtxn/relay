@@ -1,5 +1,5 @@
 import { Show } from "solid-js";
-import { streamState } from "@/state/session.ts";
+import { streamState } from "#/state/session.ts";
 
 function formatTokens(value: number): string {
 	if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`;
@@ -55,9 +55,13 @@ export function StatusBar(props: {
 					<span class="status-stat-value">${streamState().cost.toFixed(2)}</span>
 				</div>
 				<span class="status-sep" />
-				<button type="button" class="status-action" onClick={props.onOpenSettings}>settings</button>
+				<button type="button" class="status-action" onClick={props.onOpenSettings}>
+					settings
+				</button>
 				<span class="status-sep" />
-				<button type="button" class="status-action" onClick={props.onSignOut}>sign out</button>
+				<button type="button" class="status-action" onClick={props.onSignOut}>
+					sign out
+				</button>
 			</div>
 		</header>
 	);

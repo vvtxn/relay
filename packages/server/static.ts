@@ -1,4 +1,6 @@
-import { extname, isAbsolute, join, normalize, relative } from "@std/path";
+import { extname, isAbsolute, join, normalize, relative } from "node:path";
+import { type Stats } from "node:fs";
+import { readFile, stat } from "node:fs/promises";
 import { error } from "./http.ts";
 
 const MIME_TYPES: Record<string, string> = {
@@ -20,9 +22,8 @@ const MIME_TYPES: Record<string, string> = {
 const HTML_HEADERS = { "Content-Type": "text/html; charset=utf-8" };
 
 /**
- * Where the built SPA lives relative to this module. In a source checkout this
- * is the real `packages/web/dist`; in a compiled binary the build script
- * `--include`s it, so `Deno.readFile` resolves it from the embedded filesystem.
+ * Where the built SPA lives relative to this module: `packages/web/dist` in a
+ * source checkout.
  */
 const WEB_DIST_URL = new URL("../web/dist/", import.meta.url);
 
@@ -51,15 +52,15 @@ async function serveFromDisk(staticDir: string, pathname: string): Promise<Respo
 		return error(403, "Forbidden");
 	}
 
-	let file: Deno.FileInfo;
+	let file: Stats;
 	try {
-		file = await Deno.stat(normalizedPath);
+		file = await stat(normalizedPath);
 	} catch {
 		return await serveDiskIndex(staticDir);
 	}
-	if (file.isDirectory) return await serveDiskIndex(staticDir);
+	if (file.isDirectory()) return await serveDiskIndex(staticDir);
 
-	const content = await Deno.readFile(normalizedPath);
+	const content = await readFile(normalizedPath);
 	return new Response(content, { headers: { "Content-Type": mimeFor(normalizedPath) } });
 }
 
@@ -72,7 +73,7 @@ async function serveFromUrl(root: URL, pathname: string): Promise<Response> {
 	}
 
 	try {
-		const content = await Deno.readFile(url);
+		const content = await readFile(url);
 		return new Response(content, { headers: { "Content-Type": mimeFor(url.pathname) } });
 	} catch {
 		return await serveUrlIndex(root);
@@ -81,7 +82,7 @@ async function serveFromUrl(root: URL, pathname: string): Promise<Response> {
 
 async function serveDiskIndex(staticDir: string): Promise<Response> {
 	try {
-		const content = await Deno.readFile(join(staticDir, "index.html"));
+		const content = await readFile(join(staticDir, "index.html"));
 		return new Response(content, { headers: HTML_HEADERS });
 	} catch {
 		return error(404, "Not found");
@@ -90,7 +91,7 @@ async function serveDiskIndex(staticDir: string): Promise<Response> {
 
 async function serveUrlIndex(root: URL): Promise<Response> {
 	try {
-		const content = await Deno.readFile(new URL("index.html", root));
+		const content = await readFile(new URL("index.html", root));
 		return new Response(content, { headers: HTML_HEADERS });
 	} catch {
 		return error(404, "Not found");

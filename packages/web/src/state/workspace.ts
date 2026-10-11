@@ -1,6 +1,6 @@
 import { createSignal } from "solid-js";
 import { expandHome } from "@vvtxn/relay/core/display.ts";
-import { readStoredCwd, writeStoredCwd } from "@/api/storage.ts";
+import { readStoredCwd, writeStoredCwd } from "#/api/storage.ts";
 
 const [cwd, setCwdSignal] = createSignal(readStoredCwd() ?? "");
 export { cwd };

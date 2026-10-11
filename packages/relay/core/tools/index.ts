@@ -2,7 +2,7 @@ export { createToolRegistry, defineTool, getDefinitions } from "./types.ts";
 export type { Tool, ToolRegistry, ToolResult } from "./types.ts";
 export { type ApprovalHandler, type ApprovalOptions, withApproval } from "./approval.ts";
 
-import { resolveRealWithinRoot } from "@/core/workspace.ts";
+import { resolveRealWithinRoot } from "#/core/workspace.ts";
 import { bashTool, createBashTool } from "./bash.ts";
 import { editFileTool } from "./edit.ts";
 import { grepTool } from "./grep.ts";
@@ -11,13 +11,7 @@ import { writeFileTool } from "./write.ts";
 import type { Tool } from "./types.ts";
 
 /** All built-in tools. */
-export const defaultTools: Tool[] = [
-	bashTool,
-	readFileTool,
-	writeFileTool,
-	editFileTool,
-	grepTool,
-];
+export const defaultTools: Tool[] = [bashTool, readFileTool, writeFileTool, editFileTool, grepTool];
 
 /**
  * Rewrites a tool's `path` argument to an absolute path inside `root`,

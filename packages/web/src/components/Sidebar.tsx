@@ -2,11 +2,11 @@ import { createEffect, createMemo, createSignal, For, Show } from "solid-js";
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/solid-query";
 import { abbreviateHome } from "@vvtxn/relay/core/display.ts";
 import type { SessionSummary, WorkspaceSummary } from "@vvtxn/relay/core/sessions/index.ts";
-import { sessionsQuery, workspacesQuery } from "@/api/queries.ts";
-import { createSession, registerWorkspace, validateWorkspace } from "@/api/mutations.ts";
-import { queryKeys } from "@/api/query-client.ts";
-import { appendError } from "@/state/session.ts";
-import { cwd, homeDir, resolveWorkspaceInput, setCwd } from "@/state/workspace.ts";
+import { sessionsQuery, workspacesQuery } from "#/api/queries.ts";
+import { createSession, registerWorkspace, validateWorkspace } from "#/api/mutations.ts";
+import { queryKeys } from "#/api/query-client.ts";
+import { appendError } from "#/state/session.ts";
+import { cwd, homeDir, resolveWorkspaceInput, setCwd } from "#/state/workspace.ts";
 
 function formatTimestamp(timestamp: number | string): string {
 	const date = new Date(timestamp);
@@ -62,7 +62,9 @@ export function Sidebar(props: {
 
 	// Only fetch sessions for workspaces the user has opened.
 	const expandedCwds = createMemo(() =>
-		items().filter((workspace) => expanded().has(workspace.cwd)).map((workspace) => workspace.cwd)
+		items()
+			.filter((workspace) => expanded().has(workspace.cwd))
+			.map((workspace) => workspace.cwd),
 	);
 	const sessionQueries = useQueries(() => ({
 		queries: expandedCwds().map((path) => sessionsQuery(path)),
@@ -162,11 +164,11 @@ export function Sidebar(props: {
 									>
 										<span class="workspace-name">{workspaceName(workspace.cwd)}</span>
 										<span class="workspace-meta">
-											{workspace.exists === false
-												? <span class="workspace-missing">missing</span>
-												: (
-													`${workspace.sessionCount}`
-												)}
+											{workspace.exists === false ? (
+												<span class="workspace-missing">missing</span>
+											) : (
+												`${workspace.sessionCount}`
+											)}
 										</span>
 									</button>
 								</div>
@@ -179,8 +181,8 @@ export function Sidebar(props: {
 													{result()?.isFetching
 														? "Loading…"
 														: result()?.isError
-														? "Failed to load"
-														: "No sessions yet"}
+															? "Failed to load"
+															: "No sessions yet"}
 												</div>
 											}
 										>
@@ -193,9 +195,11 @@ export function Sidebar(props: {
 														{(session) => (
 															<button
 																type="button"
-																class={session.reference === props.activeSessionId
-																	? "session-item active"
-																	: "session-item"}
+																class={
+																	session.reference === props.activeSessionId
+																		? "session-item active"
+																		: "session-item"
+																}
 																onClick={() => props.onSelect(session.reference)}
 															>
 																<span class="session-preview">{preview(session)}</span>
@@ -237,7 +241,9 @@ export function Sidebar(props: {
 							<p class="workspace-error">{addError()}</p>
 						</Show>
 						<div class="workspace-add-actions">
-							<button type="button" class="btn ghost" onClick={() => setAddOpen(false)}>Cancel</button>
+							<button type="button" class="btn ghost" onClick={() => setAddOpen(false)}>
+								Cancel
+							</button>
 							<button type="submit" class="btn" disabled={adding()}>
 								{adding() ? "Checking…" : "Add"}
 							</button>
@@ -247,12 +253,7 @@ export function Sidebar(props: {
 			</div>
 
 			<div class="sidebar-footer">
-				<button
-					type="button"
-					class="sidebar-user"
-					title="Open settings"
-					onClick={props.onOpenSettings}
-				>
+				<button type="button" class="sidebar-user" title="Open settings" onClick={props.onOpenSettings}>
 					<span class="status-user">
 						<Show when={props.avatarUrl}>
 							<img class="avatar" src={props.avatarUrl} alt="" />

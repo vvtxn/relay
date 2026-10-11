@@ -1,8 +1,8 @@
-import { join } from "@std/path/join";
-import { relayDir } from "@/core/paths.ts";
+import { join } from "node:path";
+import { relayDir } from "#/core/paths.ts";
 
 function getUsername(): string | undefined {
-	return Deno.env.get("USER") ?? Deno.env.get("USERNAME");
+	return process.env.USER ?? process.env.USERNAME;
 }
 
 export function sessionsBaseDir(): string {

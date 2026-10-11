@@ -1,7 +1,7 @@
 import Y from "yoga-layout";
-import { applyAnsi, applyInheritedBackground, toBgAnsi } from "@/tui/core/primitives/color.ts";
-import { fillPositions } from "@/tui/core/primitives/fill.ts";
-import { theme } from "@/tui/theme.ts";
+import { applyAnsi, applyInheritedBackground, toBgAnsi } from "#/tui/core/primitives/color.ts";
+import { fillPositions } from "#/tui/core/primitives/fill.ts";
+import { theme } from "#/tui/theme.ts";
 import type { ElementHandler, Position, ScrollAreaInstance } from "../types/index.ts";
 import type { LayoutHandler } from "./index.ts";
 
@@ -71,8 +71,8 @@ export const ScrollAreaElement: ElementHandler<ScrollAreaInstance> = (instance, 
 
 	let contentHeight = 0;
 	for (const child of instance.children) {
-		const childBottom = Math.round(child.yogaNode.getComputedTop()) +
-			Math.round(child.yogaNode.getComputedHeight());
+		const childBottom =
+			Math.round(child.yogaNode.getComputedTop()) + Math.round(child.yogaNode.getComputedHeight());
 		if (childBottom > contentHeight) contentHeight = childBottom;
 	}
 
@@ -105,10 +105,9 @@ export const ScrollAreaElement: ElementHandler<ScrollAreaInstance> = (instance, 
 	if (instance.props.scrollbar && contentHeight > viewportHeight) {
 		const barX = x + w - 1;
 		const trackHeight = viewportHeight;
-		const thumbHeight = Math.max(1, Math.floor(viewportHeight / contentHeight * trackHeight));
-		const thumbTop = maxScroll > 0
-			? clipTop + Math.floor(scrollOffset / maxScroll * (trackHeight - thumbHeight))
-			: clipTop;
+		const thumbHeight = Math.max(1, Math.floor((viewportHeight / contentHeight) * trackHeight));
+		const thumbTop =
+			maxScroll > 0 ? clipTop + Math.floor((scrollOffset / maxScroll) * (trackHeight - thumbHeight)) : clipTop;
 
 		for (let row = clipTop; row <= clipBottom; row++) {
 			const isThumb = row >= thumbTop && row < thumbTop + thumbHeight;

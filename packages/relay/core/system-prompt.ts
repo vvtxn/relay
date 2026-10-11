@@ -1,9 +1,11 @@
+import { readFileSync } from "node:fs";
+
 /**
  * Default system prompt for coding agents, shared across clients (TUI, web).
  *
  * Frontends may pass their own prompt via `AgentConfig.systemPrompt`; this is
- * just the shared default. Requires `--unstable-raw-imports` at runtime.
+ * just the shared default, read from the bundled markdown file at startup.
  */
-import SYSTEM_PROMPT from "./system-prompt.md" with { type: "text" };
+const SYSTEM_PROMPT = readFileSync(new URL("./system-prompt.md", import.meta.url), "utf8");
 
 export { SYSTEM_PROMPT };

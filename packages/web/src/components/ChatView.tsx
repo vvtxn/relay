@@ -1,6 +1,6 @@
 import { createEffect, createMemo, createSignal, For, Show } from "solid-js";
 import { viewMessages } from "@vvtxn/client/session-state.ts";
-import { streamState } from "@/state/session.ts";
+import { streamState } from "#/state/session.ts";
 import { MessageView } from "./MessageView.tsx";
 
 const NEAR_BOTTOM_PX = 64;
@@ -30,6 +30,7 @@ export function ChatView(props: {
 	// output never yanks the viewport away from earlier messages.
 	createEffect(() => {
 		messages();
+		// oxlint-disable-next-line no-unused-expressions -- signal read for tracking
 		streamState().draftText;
 		if (stuck()) scrollToBottom();
 	});
@@ -58,7 +59,9 @@ export function ChatView(props: {
 				</Show>
 			</div>
 			<Show when={!stuck()}>
-				<button type="button" class="scroll-bottom" onClick={scrollToBottom}>Jump to latest</button>
+				<button type="button" class="scroll-bottom" onClick={scrollToBottom}>
+					Jump to latest
+				</button>
 			</Show>
 		</div>
 	);

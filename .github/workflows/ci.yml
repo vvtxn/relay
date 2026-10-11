@@ -10,7 +10,7 @@ on:
             - main
 
 jobs:
-    lint:
+    check:
         runs-on: ubuntu-latest
         timeout-minutes: 15
         permissions:
@@ -20,15 +20,19 @@ jobs:
         steps:
             - uses: actions/checkout@v4
 
-            - uses: denoland/setup-deno@v2
+            - uses: pnpm/action-setup@v4
               with:
-                  deno-version: v2.x
+                  version: 11
 
-            - name: Cache Deno dependencies
-              uses: actions/cache@v4
+            - uses: actions/setup-node@v4
               with:
-                  path: ~/.cache/deno
-                  key: deno-${{ hashFiles('deno.lock') }}
-                  restore-keys: deno-
+                  node-version-file: .node-version
+                  cache: pnpm
 
-            - run: deno task fmt:check && deno task lint
+            - run: pnpm install --frozen-lockfile
+
+            - name: Check (format, lint, type-check)
+              run: pnpm check
+
+            - name: Build web app and CLI bundle
+              run: pnpm build

@@ -1,6 +1,6 @@
 import { createSignal } from "solid-js";
-import { readStoredTheme, type ThemePreference, writeStoredTheme } from "@/api/storage.ts";
-import { applyTheme } from "@/theme.ts";
+import { readStoredTheme, type ThemePreference, writeStoredTheme } from "#/api/storage.ts";
+import { applyTheme } from "#/theme.ts";
 
 const [theme, setThemeSignal] = createSignal<ThemePreference>(readStoredTheme());
 export { theme };

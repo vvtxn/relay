@@ -1,5 +1,5 @@
 import { Box, Text } from "../components.tsx";
-import { theme } from "@/tui/theme.ts";
+import { theme } from "#/tui/theme.ts";
 import type { useApprovalPrompt } from "../hooks/approval.ts";
 
 export interface ApprovalPromptProps {
@@ -24,13 +24,7 @@ export function ApprovalPrompt(props: ApprovalPromptProps) {
 			justifyContent="center"
 			alignItems="center"
 		>
-			<Box
-				width={width}
-				bgColor={theme.surfaceElevated}
-				flexDirection="column"
-				padding={1}
-				gap={1}
-			>
+			<Box width={width} bgColor={theme.surfaceElevated} flexDirection="column" padding={1} gap={1}>
 				<Text bold color={theme.warning}>
 					Approval required
 				</Text>

@@ -1,3 +1,4 @@
+import { runCommand } from "../command.ts";
 import { defineTool } from "./types.ts";
 
 const MAX_OUTPUT = 10_000;
@@ -51,10 +52,10 @@ export const grepTool = defineTool({
 		const searchPath = path ?? ".";
 
 		try {
-			let result: Deno.CommandOutput;
+			let result: Awaited<ReturnType<typeof runCommand>>;
 			try {
 				const args = buildRgArgs({ pattern, searchPath, glob, fixed_strings, case_sensitive, max_results });
-				result = await new Deno.Command("rg", { args, stdout: "piped", stderr: "piped" }).output();
+				result = await runCommand("rg", { args, stdout: "piped", stderr: "piped" });
 			} catch {
 				// Ripgrep not available — fall back to grep
 				const args = ["-rn", "--color=never"];
@@ -62,7 +63,7 @@ export const grepTool = defineTool({
 				if (case_sensitive === false) args.push("-i");
 				if (max_results !== undefined) args.push(`-m${max_results}`);
 				args.push(pattern, searchPath);
-				result = await new Deno.Command("grep", { args, stdout: "piped", stderr: "piped" }).output();
+				result = await runCommand("grep", { args, stdout: "piped", stderr: "piped" });
 			}
 
 			const stdout = new TextDecoder().decode(result.stdout);

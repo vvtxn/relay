@@ -224,9 +224,12 @@ export class Renderer {
 
 	/** True when a memoized component's previous output can be reused verbatim. */
 	private canReuseMemo(existing: Instance | null, componentType: unknown, props: object): existing is Instance {
-		const reusable = !!existing &&
+		const reusable =
+			!!existing &&
 			existing.memoComponent === componentType &&
-			existing.memoProps !== undefined && existing.memoOutput !== undefined && existing.memoOutput !== null &&
+			existing.memoProps !== undefined &&
+			existing.memoOutput !== undefined &&
+			existing.memoOutput !== null &&
 			memoPropsEqual(existing.memoProps, props);
 		return reusable;
 	}
@@ -264,10 +267,7 @@ export class Renderer {
 		}
 
 		if (vnode.type === "fragment") {
-			return this.reconcile(
-				{ type: ElementType.BOX, props: { children: vnode.props.children } },
-				existing,
-			);
+			return this.reconcile({ type: ElementType.BOX, props: { children: vnode.props.children } }, existing);
 		}
 
 		const type = typeof vnode.type === "string" ? vnode.type : ElementType.BOX;
@@ -284,8 +284,8 @@ export class Renderer {
 		// whose measure function reads content from their props (e.g. `<Text>`)
 		// must still re-apply layout when only the children changed: the handler
 		// re-installs its measure function and marks the node dirty.
-		const childrenChanged = !element.hasChildren &&
-			previousProps.children !== (vnode.props as { children?: unknown }).children;
+		const childrenChanged =
+			!element.hasChildren && previousProps.children !== (vnode.props as { children?: unknown }).children;
 		existing.props = vnode.props;
 		// Yoga setter calls are FFI and dominate large-tree commits; only the
 		// element's own props (children reconcile separately) require them.
@@ -335,8 +335,8 @@ export class Renderer {
 		// of the subtree (plus FFI churn) even when every child kept its
 		// position. `parentInstance.children` is kept in sync with the Yoga
 		// child list by mount and reconcile, so a JS compare is enough.
-		const unchanged = oldChildren.length === newChildren.length &&
-			newChildren.every((child, i) => child === oldChildren[i]);
+		const unchanged =
+			oldChildren.length === newChildren.length && newChildren.every((child, i) => child === oldChildren[i]);
 		if (!unchanged) {
 			const childCount = parentInstance.yogaNode.getChildCount();
 			for (let i = childCount - 1; i >= 0; i--) {
@@ -373,11 +373,7 @@ export class Renderer {
 		return null;
 	}
 
-	private resolveAndReconcile(
-		children: unknown[],
-		ctx: ReconcileCtx,
-		newChildren: Instance[],
-	) {
+	private resolveAndReconcile(children: unknown[], ctx: ReconcileCtx, newChildren: Instance[]) {
 		for (const child of children) {
 			if (typeof child === "string" || typeof child === "number") {
 				const oldChild = this.consumeOldChild(ctx, undefined);
@@ -551,6 +547,7 @@ export class Renderer {
 	render(createVNode: () => VNode) {
 		this.disposeEffect = effect(() => {
 			// Track terminal size so a resize triggers a fresh layout + repaint.
+			// oxlint-disable-next-line no-unused-expressions -- signal read for tracking
 			this.terminal.size.value;
 			this.commitRender(createVNode());
 		});
@@ -591,9 +588,9 @@ export function run(
 		inputManager.stop();
 		unmount();
 		// Flush teardown bytes (exit-alternate-screen) before killing the
-		// process — Deno.exit() drops queued stdout writes otherwise.
+		// process — process.exit() drops queued stdout writes otherwise.
 		await terminal.drain().catch(() => {});
-		Deno.exit(0);
+		process.exit(0);
 	};
 
 	const { unmount } = render(() => createVNode(quit), terminal);
@@ -602,7 +599,7 @@ export function run(
 
 	const cleanupKey = inputManager.onKeyGlobal((event) => {
 		if (event.ctrl && event.key === "c") {
-			quit();
+			void quit();
 		}
 		return false;
 	});

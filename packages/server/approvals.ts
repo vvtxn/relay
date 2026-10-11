@@ -4,11 +4,7 @@ import { BadRequestError, json, NotFoundError, readJsonBody } from "./http.ts";
 import { openSessionHandle } from "./sessions.ts";
 
 /** Resolves a pending tool approval for a session. */
-export async function handleApprove(
-	services: RequestServices,
-	sessionId: string,
-	request: Request,
-): Promise<Response> {
+export async function handleApprove(services: RequestServices, sessionId: string, request: Request): Promise<Response> {
 	const body = await readJsonBody<ApprovalRequest>(request);
 	if (typeof body.toolCallId !== "string" || !body.toolCallId) {
 		throw new BadRequestError("toolCallId is required");

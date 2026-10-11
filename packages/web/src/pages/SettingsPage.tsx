@@ -1,14 +1,14 @@
 import { createEffect, createSignal, Show } from "solid-js";
 import { useNavigate } from "@tanstack/solid-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/solid-query";
-import { meQuery, settingsQuery } from "@/api/queries.ts";
-import { setApiKey } from "@/api/mutations.ts";
-import { RelayError } from "@/api/services.ts";
-import { queryKeys } from "@/api/query-client.ts";
-import { signOut } from "@/auth/auth.ts";
-import { BootScreen } from "@/components/BootScreen.tsx";
-import { setTheme, theme } from "@/state/theme.ts";
-import { VERSION } from "@/version.ts";
+import { meQuery, settingsQuery } from "#/api/queries.ts";
+import { setApiKey } from "#/api/mutations.ts";
+import { RelayError } from "#/api/services.ts";
+import { queryKeys } from "#/api/query-client.ts";
+import { signOut } from "#/auth/auth.ts";
+import { BootScreen } from "#/components/BootScreen.tsx";
+import { setTheme, theme } from "#/state/theme.ts";
+import { VERSION } from "#/version.ts";
 
 export function SettingsPage() {
 	const navigate = useNavigate();

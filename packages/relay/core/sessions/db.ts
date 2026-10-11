@@ -273,14 +273,16 @@ export class DatabaseSessionStore implements SessionStore {
 	}
 
 	private async initialize(): Promise<void> {
-		for (const sql of SCHEMA.split(";").map((part) => part.trim()).filter(Boolean)) {
+		for (const sql of SCHEMA.split(";")
+			.map((part) => part.trim())
+			.filter(Boolean)) {
 			await this.client.execute(sql);
 		}
 	}
 
 	private async execute(statement: Statement): Promise<Result> {
 		await this.schemaReady;
-		return await this.client.execute(statement) as unknown as Result;
+		return (await this.client.execute(statement)) as unknown as Result;
 	}
 }
 
@@ -297,14 +299,25 @@ type DatabaseSessionHeader = {
 class DatabaseSessionHandle implements SessionHandle {
 	private headerDirty = false;
 	private appendQueue = Promise.resolve();
+	private readonly store: DatabaseSessionStore;
+	private readonly scope: SessionScope;
+	private readonly header: DatabaseSessionHeader;
+	private readonly entries: Entry[];
+	private persisted: boolean;
 
 	constructor(
-		private readonly store: DatabaseSessionStore,
-		private readonly scope: SessionScope,
-		private readonly header: DatabaseSessionHeader,
-		private readonly entries: Entry[],
-		private persisted: boolean,
-	) {}
+		store: DatabaseSessionStore,
+		scope: SessionScope,
+		header: DatabaseSessionHeader,
+		entries: Entry[],
+		persisted: boolean,
+	) {
+		this.store = store;
+		this.scope = scope;
+		this.header = header;
+		this.entries = entries;
+		this.persisted = persisted;
+	}
 
 	async append(entry: NewEntry): Promise<string> {
 		let id = "";

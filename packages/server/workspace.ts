@@ -1,4 +1,4 @@
-import { isAbsolute, resolve } from "@std/path";
+import { isAbsolute, resolve } from "node:path";
 import { validateWorkspacePath } from "@vvtxn/relay/core/workspace.ts";
 import type {
 	RegisterWorkspaceRequest,
@@ -22,13 +22,11 @@ export function handleWorkspace(services: RequestServices): Response {
  */
 export async function handleValidateWorkspace(services: RequestServices, url: URL): Promise<Response> {
 	const result = await validateWorkspacePath(url.searchParams.get("cwd"), services.config.workspaceRoots);
-	return json(
-		{
-			ok: result.ok,
-			...(result.ok ? { path: result.path } : { reason: result.reason, message: result.message }),
-			roots: services.config.workspaceRoots,
-		} satisfies WorkspaceValidateResponse,
-	);
+	return json({
+		ok: result.ok,
+		...(result.ok ? { path: result.path } : { reason: result.reason, message: result.message }),
+		roots: services.config.workspaceRoots,
+	} satisfies WorkspaceValidateResponse);
 }
 
 /** Registers an existing, allowed workspace directory so it appears in the picker. */

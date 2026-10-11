@@ -48,23 +48,23 @@ function isZeroWidth(cp: number): boolean {
 /** Whether a code point is East Asian Wide/Fullwidth or emoji presentation. */
 function isWide(cp: number): boolean {
 	return (
-		cp >= 0x1100 && cp <= 0x115f || // Hangul Jamo
-		cp >= 0x2329 && cp <= 0x232a || // angle brackets
-		cp >= 0x2e80 && cp <= 0x303e || // CJK radicals, Kangxi, CJK symbols
-		cp >= 0x3041 && cp <= 0x33ff || // Hiragana .. CJK compatibility
-		cp >= 0x3400 && cp <= 0x4dbf || // CJK ext A
-		cp >= 0x4e00 && cp <= 0x9fff || // CJK unified ideographs
-		cp >= 0xa000 && cp <= 0xa4cf || // Yi
-		cp >= 0xac00 && cp <= 0xd7a3 || // Hangul syllables
-		cp >= 0xf900 && cp <= 0xfaff || // CJK compatibility ideographs
-		cp >= 0xfe10 && cp <= 0xfe19 || // vertical forms
-		cp >= 0xfe30 && cp <= 0xfe6f || // CJK compatibility forms
-		cp >= 0xff00 && cp <= 0xff60 || // fullwidth forms
-		cp >= 0xffe0 && cp <= 0xffe6 || // fullwidth signs
-		cp >= 0x1f300 && cp <= 0x1f64f || // misc symbols and pictographs, emoticons
-		cp >= 0x1f900 && cp <= 0x1f9ff || // supplemental symbols and pictographs
-		cp >= 0x1fa70 && cp <= 0x1faff || // symbols and pictographs extended-A
-		cp >= 0x20000 && cp <= 0x3fffd // CJK ext B and beyond
+		(cp >= 0x1100 && cp <= 0x115f) || // Hangul Jamo
+		(cp >= 0x2329 && cp <= 0x232a) || // angle brackets
+		(cp >= 0x2e80 && cp <= 0x303e) || // CJK radicals, Kangxi, CJK symbols
+		(cp >= 0x3041 && cp <= 0x33ff) || // Hiragana .. CJK compatibility
+		(cp >= 0x3400 && cp <= 0x4dbf) || // CJK ext A
+		(cp >= 0x4e00 && cp <= 0x9fff) || // CJK unified ideographs
+		(cp >= 0xa000 && cp <= 0xa4cf) || // Yi
+		(cp >= 0xac00 && cp <= 0xd7a3) || // Hangul syllables
+		(cp >= 0xf900 && cp <= 0xfaff) || // CJK compatibility ideographs
+		(cp >= 0xfe10 && cp <= 0xfe19) || // vertical forms
+		(cp >= 0xfe30 && cp <= 0xfe6f) || // CJK compatibility forms
+		(cp >= 0xff00 && cp <= 0xff60) || // fullwidth forms
+		(cp >= 0xffe0 && cp <= 0xffe6) || // fullwidth signs
+		(cp >= 0x1f300 && cp <= 0x1f64f) || // misc symbols and pictographs, emoticons
+		(cp >= 0x1f900 && cp <= 0x1f9ff) || // supplemental symbols and pictographs
+		(cp >= 0x1fa70 && cp <= 0x1faff) || // symbols and pictographs extended-A
+		(cp >= 0x20000 && cp <= 0x3fffd) // CJK ext B and beyond
 	);
 }
 
@@ -85,7 +85,7 @@ export function charWidth(char: string): number {
 }
 
 /** Matches SGR escape sequences (`\x1b[...m`). */
-// deno-lint-ignore no-control-regex
+// oxlint-disable-next-line no-control-regex
 export const ANSI_SGR_RE = /\x1b\[[0-9;]*m/g;
 
 /** Remove SGR escape sequences from a string. */

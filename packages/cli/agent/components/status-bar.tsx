@@ -1,5 +1,5 @@
-import { Box, Text } from "@/tui/render/components.tsx";
-import { theme } from "@/tui/theme.ts";
+import { Box, Text } from "#/tui/render/components.tsx";
+import { theme } from "#/tui/theme.ts";
 
 // ---------------------------------------------------------------------------
 // TokenBar
@@ -36,16 +36,21 @@ function TokenBar({ tokenCount, contextWindow }: { tokenCount: number; contextWi
 // StatusBar
 // ---------------------------------------------------------------------------
 
-export function StatusBar(
-	{ tokenCount, totalCost, branchName, userName, contextWindow, model }: {
-		tokenCount: number;
-		totalCost: number;
-		branchName: string;
-		userName?: string | undefined;
-		contextWindow: number;
-		model: string;
-	},
-) {
+export function StatusBar({
+	tokenCount,
+	totalCost,
+	branchName,
+	userName,
+	contextWindow,
+	model,
+}: {
+	tokenCount: number;
+	totalCost: number;
+	branchName: string;
+	userName?: string | undefined;
+	contextWindow: number;
+	model: string;
+}) {
 	return (
 		<Box
 			flexDirection="row"

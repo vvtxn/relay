@@ -122,8 +122,7 @@ body {
 	height: 100%;
 	padding: 2rem;
 	background:
-		radial-gradient(circle at 50% 30%, rgba(192, 192, 192, 0.05), transparent 55%),
-		var(--relay-background, #0a0a0a);
+		radial-gradient(circle at 50% 30%, rgba(192, 192, 192, 0.05), transparent 55%), var(--relay-background, #0a0a0a);
 }
 
 .boot-card {

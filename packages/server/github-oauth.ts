@@ -53,7 +53,7 @@ export function buildAuthorizeUrl(options: {
 		code_challenge: options.challenge,
 		code_challenge_method: "S256",
 	});
-	return `${AUTHORIZE_URL}?${params}`;
+	return `${AUTHORIZE_URL}?${params.toString()}`;
 }
 
 /** Exchange the authorization code for a user access token. */
@@ -76,7 +76,7 @@ export async function exchangeCode(options: {
 		}),
 		signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
 	});
-	const data = await response.json() as { access_token?: string; error?: string; error_description?: string };
+	const data = (await response.json()) as { access_token?: string; error?: string; error_description?: string };
 	if (!response.ok || !data.access_token) {
 		throw new Error(data.error_description ?? data.error ?? `GitHub token exchange failed (${response.status})`);
 	}
@@ -93,14 +93,14 @@ export async function fetchGitHubProfile(accessToken: string): Promise<GitHubPro
 
 	const userResponse = await fetch(USER_URL, { headers, signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
 	if (!userResponse.ok) throw new Error(`GitHub user request failed (${userResponse.status})`);
-	const profile = await userResponse.json() as GitHubProfile;
+	const profile = (await userResponse.json()) as GitHubProfile;
 
 	if (!profile.email) {
 		const emailResponse = await fetch(EMAILS_URL, { headers, signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
 		if (emailResponse.ok) {
-			const emails = await emailResponse.json() as { email: string; primary: boolean; verified: boolean }[];
-			const primary = emails.find((entry) => entry.primary && entry.verified) ??
-				emails.find((entry) => entry.verified);
+			const emails = (await emailResponse.json()) as { email: string; primary: boolean; verified: boolean }[];
+			const primary =
+				emails.find((entry) => entry.primary && entry.verified) ?? emails.find((entry) => entry.verified);
 			if (primary) profile.email = primary.email;
 		}
 	}

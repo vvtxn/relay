@@ -1,18 +1,18 @@
 import { createEffect, onCleanup, Show } from "solid-js";
 import { useNavigate, useParams } from "@tanstack/solid-router";
 import { useQuery } from "@tanstack/solid-query";
-import { configQuery, meQuery, sessionQuery } from "@/api/queries.ts";
-import { RelayError } from "@/api/services.ts";
-import { signOut } from "@/auth/auth.ts";
-import { ApprovalDialog } from "@/components/ApprovalDialog.tsx";
-import { BootError, BootScreen } from "@/components/BootScreen.tsx";
-import { ChatView } from "@/components/ChatView.tsx";
-import { Composer } from "@/components/Composer.tsx";
-import { Sidebar } from "@/components/Sidebar.tsx";
-import { StatusBar } from "@/components/StatusBar.tsx";
-import { hydrateSession, resetSession, startStream, stopStream } from "@/state/session.ts";
-import { setHomeDir } from "@/state/workspace.ts";
-import { VERSION } from "@/version.ts";
+import { configQuery, meQuery, sessionQuery } from "#/api/queries.ts";
+import { RelayError } from "#/api/services.ts";
+import { signOut } from "#/auth/auth.ts";
+import { ApprovalDialog } from "#/components/ApprovalDialog.tsx";
+import { BootError, BootScreen } from "#/components/BootScreen.tsx";
+import { ChatView } from "#/components/ChatView.tsx";
+import { Composer } from "#/components/Composer.tsx";
+import { Sidebar } from "#/components/Sidebar.tsx";
+import { StatusBar } from "#/components/StatusBar.tsx";
+import { hydrateSession, resetSession, startStream, stopStream } from "#/state/session.ts";
+import { setHomeDir } from "#/state/workspace.ts";
+import { VERSION } from "#/version.ts";
 
 function errorMessage(error: unknown): string {
 	return error instanceof Error ? error.message : String(error);

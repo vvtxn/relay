@@ -1,6 +1,6 @@
 import process from "node:process";
 import { batch, signal } from "@preact/signals-core";
-import { CSI } from "@/tui/core/ansi.ts";
+import { CSI } from "#/tui/core/ansi.ts";
 
 export interface KeyEvent {
 	key: string;

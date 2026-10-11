@@ -39,10 +39,7 @@ export interface ToolDefinition {
 	};
 }
 
-export type ToolChoice =
-	| "auto"
-	| "none"
-	| { type: "function"; function: { name: string } };
+export type ToolChoice = "auto" | "none" | { type: "function"; function: { name: string } };
 
 /** JSON Schema subset used for tool parameter definitions. */
 export type JsonSchema = {

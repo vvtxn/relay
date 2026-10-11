@@ -2,7 +2,7 @@
  * Reads a server-sent event stream from a fetch Response.
  *
  * Parses the standard `data: {json}\n\n` framing. Works in any runtime with
- * fetch + ReadableStream (Deno, browsers) — deliberately not based on
+ * fetch + ReadableStream (Node, browsers) — deliberately not based on
  * EventSource so the CLI can use it too.
  */
 export async function* readSSEStream<T>(response: Response): AsyncIterable<T> {

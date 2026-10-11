@@ -1,5 +1,5 @@
-import { parseSSEStream } from "@/api/streaming/stream.ts";
-import type { CompletionRequest, CompletionResponse, LLMProvider, ProviderConfig, StreamChunk } from "@/api/types.ts";
+import { parseSSEStream } from "#/api/streaming/stream.ts";
+import type { CompletionRequest, CompletionResponse, LLMProvider, ProviderConfig, StreamChunk } from "#/api/types.ts";
 
 export interface GenerationStats {
 	totalCost: number | null;
@@ -16,15 +16,13 @@ export class CompletionsProvider implements LLMProvider {
 	constructor(config: ProviderConfig) {
 		this.apiKey = config.apiKey;
 		// Normalize: strip trailing slashes and /chat/completions if someone pastes the full endpoint URL
-		this.baseURL = config.baseURL
-			.replace(/\/+$/, "")
-			.replace(/\/chat\/completions$/, "");
+		this.baseURL = config.baseURL.replace(/\/+$/, "").replace(/\/chat\/completions$/, "");
 	}
 
 	async complete(request: CompletionRequest): Promise<CompletionResponse> {
 		const body = this.buildBody(request, false);
 		const response = await this.fetch(body);
-		return await response.json() as CompletionResponse;
+		return (await response.json()) as CompletionResponse;
 	}
 
 	async *stream(request: CompletionRequest): AsyncIterable<StreamChunk> {
@@ -61,12 +59,14 @@ export class CompletionsProvider implements LLMProvider {
 		try {
 			const url = `${this.baseURL}/generation?id=${encodeURIComponent(id)}`;
 			const response = await Promise.race([
-				fetch(url, { headers: { "Authorization": `Bearer ${this.apiKey}` } }),
+				fetch(url, { headers: { Authorization: `Bearer ${this.apiKey}` } }),
 				timeout,
 			]);
 			if (!response.ok) return null;
-			const json = await response.json();
-			const data = json?.data;
+			const json = (await response.json()) as {
+				data?: { total_cost?: unknown; tokens_prompt?: unknown; tokens_completion?: unknown };
+			};
+			const data = json.data;
 			if (!data) return null;
 			return {
 				totalCost: typeof data.total_cost === "number" ? data.total_cost : null,
@@ -97,7 +97,7 @@ export class CompletionsProvider implements LLMProvider {
 					method: "POST",
 					headers: {
 						"Content-Type": "application/json",
-						"Authorization": `Bearer ${this.apiKey}`,
+						Authorization: `Bearer ${this.apiKey}`,
 					},
 					body: JSON.stringify(body),
 					signal: signal ?? null,
@@ -110,7 +110,9 @@ export class CompletionsProvider implements LLMProvider {
 				// Deliberately omits the request URL: it leaks server internals when
 				// errors are forwarded to clients (e.g. over HTTP/WebSocket), and the
 				// caller already knows the configured baseURL.
-				throw new Error(`API error ${response.status}: ${text || response.statusText} (model: ${body.model})`);
+				throw new Error(
+					`API error ${response.status}: ${text || response.statusText} (model: ${String(body.model)})`,
+				);
 			}
 
 			return response;

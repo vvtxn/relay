@@ -59,10 +59,7 @@ function originAllowed(services: ServerServices, request: Request): boolean {
  * `/api/health` and `/api/auth/*` are public; every other API route resolves
  * the caller first and returns 401 when unauthenticated.
  */
-export async function handleRequest(
-	services: ServerServices,
-	request: Request,
-): Promise<Response> {
+export async function handleRequest(services: ServerServices, request: Request): Promise<Response> {
 	const url = new URL(request.url);
 	const path = url.pathname;
 	const method = request.method;

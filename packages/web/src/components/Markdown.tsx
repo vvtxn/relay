@@ -38,13 +38,13 @@ function renderInline(token: Token, key: string): JSX.Element {
 			const link = token as Tokens.Link;
 			const href = safeUrl(link.href);
 			const children = inline(link.tokens, key);
-			return href
-				? (
-					<a href={href} target="_blank" rel="noreferrer noopener">
-						{children}
-					</a>
-				)
-				: <>{children}</>;
+			return href ? (
+				<a href={href} target="_blank" rel="noreferrer noopener">
+					{children}
+				</a>
+			) : (
+				<>{children}</>
+			);
 		}
 		case "image": {
 			const image = token as Tokens.Image;
@@ -68,11 +68,7 @@ function renderBlock(token: Token, key: string): JSX.Element {
 		}
 		case "heading": {
 			const heading = token as Tokens.Heading;
-			return (
-				<Dynamic component={`h${heading.depth}`}>
-					{inline(heading.tokens, key)}
-				</Dynamic>
-			);
+			return <Dynamic component={`h${heading.depth}`}>{inline(heading.tokens, key)}</Dynamic>;
 		}
 		case "code": {
 			const code = token as Tokens.Code;
@@ -97,9 +93,11 @@ function renderBlock(token: Token, key: string): JSX.Element {
 					</Show>
 				</li>
 			));
-			return list.ordered
-				? <ol start={typeof list.start === "number" ? list.start : undefined}>{items}</ol>
-				: <ul>{items}</ul>;
+			return list.ordered ? (
+				<ol start={typeof list.start === "number" ? list.start : undefined}>{items}</ol>
+			) : (
+				<ul>{items}</ul>
+			);
 		}
 		case "table": {
 			const table = token as Tokens.Table;

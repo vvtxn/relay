@@ -222,95 +222,98 @@ export class RunManager {
 			}
 
 			const tools = createToolRegistry(
-				withApproval(
-					createWorkspaceTools(cwd),
-					(tool, input) => this.requestApproval(sessionId, tool, input, ac.signal),
+				withApproval(createWorkspaceTools(cwd), (tool, input) =>
+					this.requestApproval(sessionId, tool, input, ac.signal),
 				),
 			);
 
-			await runAgentLoop(messages, {
-				provider,
-				tools,
-				model: this.config.model,
-				systemPrompt: SYSTEM_PROMPT,
-				temperature: this.config.temperature,
-				contextLimit: {
-					maxTokens: this.config.maxTokens,
-					preserveRecentTurns: this.config.preserveRecentTurns,
+			await runAgentLoop(
+				messages,
+				{
+					provider,
+					tools,
+					model: this.config.model,
+					systemPrompt: SYSTEM_PROMPT,
+					temperature: this.config.temperature,
+					contextLimit: {
+						maxTokens: this.config.maxTokens,
+						preserveRecentTurns: this.config.preserveRecentTurns,
+					},
+					maxTokens: this.config.maxCompletionTokens,
+					signal: ac.signal,
 				},
-				maxTokens: this.config.maxCompletionTokens,
-				signal: ac.signal,
-			}, {
-				onTextDelta: (delta) => {
-					this.draftText.set(sessionId, (this.draftText.get(sessionId) ?? "") + delta);
-					this.emit(sessionId, { type: "text_delta", content: delta });
-				},
-				onToolCallStart: (id, name) => {
-					this.emit(sessionId, { type: "tool_call_start", id, name });
-				},
-				onToolCallArgsDelta: (id, args) => {
-					this.emit(sessionId, { type: "tool_call_args_delta", id, args });
-				},
-				onToolCallEnd: (id, name, args) => {
-					const calls = this.draftToolCalls.get(sessionId);
-					const index = this.draftIndex.get(sessionId);
-					if (!calls || !index) return;
-					index.set(id, calls.length);
-					calls.push({ id, name, args });
-					this.emit(sessionId, { type: "tool_call_end", id, name, args });
-				},
-				onToolResult: (id, result) => {
-					const calls = this.draftToolCalls.get(sessionId);
-					const index = this.draftIndex.get(sessionId);
-					const at = index?.get(id);
-					if (calls && at !== undefined && at < calls.length) {
-						const existing = calls[at];
-						if (existing) calls[at] = { ...existing, result };
-					}
-					this.emit(sessionId, { type: "tool_result", id, result });
-				},
-				onMessageComplete: (usage?: Usage) => {
-					if (usage) {
-						// `tokens` is the current context-window usage (this call's
-						// prompt + completion), not a running total: clients render it
-						// against the model's context limit. `cost` does accumulate.
-						this.tokens.set(sessionId, usage.prompt_tokens + usage.completion_tokens);
-						if (usage.cost) {
-							this.cost.set(sessionId, (this.cost.get(sessionId) ?? 0) + usage.cost);
+				{
+					onTextDelta: (delta) => {
+						this.draftText.set(sessionId, (this.draftText.get(sessionId) ?? "") + delta);
+						this.emit(sessionId, { type: "text_delta", content: delta });
+					},
+					onToolCallStart: (id, name) => {
+						this.emit(sessionId, { type: "tool_call_start", id, name });
+					},
+					onToolCallArgsDelta: (id, args) => {
+						this.emit(sessionId, { type: "tool_call_args_delta", id, args });
+					},
+					onToolCallEnd: (id, name, args) => {
+						const calls = this.draftToolCalls.get(sessionId);
+						const index = this.draftIndex.get(sessionId);
+						if (!calls || !index) return;
+						index.set(id, calls.length);
+						calls.push({ id, name, args });
+						this.emit(sessionId, { type: "tool_call_end", id, name, args });
+					},
+					onToolResult: (id, result) => {
+						const calls = this.draftToolCalls.get(sessionId);
+						const index = this.draftIndex.get(sessionId);
+						const at = index?.get(id);
+						if (calls && at !== undefined && at < calls.length) {
+							const existing = calls[at];
+							if (existing) calls[at] = { ...existing, result };
 						}
-						handle.setTokens(this.tokens.get(sessionId) ?? 0);
-						handle.setCost(this.cost.get(sessionId) ?? 0);
-					}
-					this.emit(sessionId, {
-						type: "message_complete",
-						...(usage ? { usage } : {}),
-						tokens: this.tokens.get(sessionId) ?? 0,
-						cost: this.cost.get(sessionId) ?? 0,
-					});
-				},
-				onTurnComplete: async (assistantMessage: Message, toolResults: Message[]) => {
-					await handle.append({
-						type: "message",
-						role: "assistant",
-						content: assistantMessage.content,
-						...(assistantMessage.tool_calls?.length && { toolCalls: assistantMessage.tool_calls }),
-					});
-					for (const tr of toolResults) {
-						await handle.append({
-							type: "tool_result",
-							toolCallId: tr.tool_call_id!,
-							toolName: tr.name!,
-							content: tr.content!,
+						this.emit(sessionId, { type: "tool_result", id, result });
+					},
+					onMessageComplete: (usage?: Usage) => {
+						if (usage) {
+							// `tokens` is the current context-window usage (this call's
+							// prompt + completion), not a running total: clients render it
+							// against the model's context limit. `cost` does accumulate.
+							this.tokens.set(sessionId, usage.prompt_tokens + usage.completion_tokens);
+							if (usage.cost) {
+								this.cost.set(sessionId, (this.cost.get(sessionId) ?? 0) + usage.cost);
+							}
+							handle.setTokens(this.tokens.get(sessionId) ?? 0);
+							handle.setCost(this.cost.get(sessionId) ?? 0);
+						}
+						this.emit(sessionId, {
+							type: "message_complete",
+							...(usage ? { usage } : {}),
+							tokens: this.tokens.get(sessionId) ?? 0,
+							cost: this.cost.get(sessionId) ?? 0,
 						});
-					}
-					this.emit(sessionId, { type: "turn_complete" });
+					},
+					onTurnComplete: async (assistantMessage: Message, toolResults: Message[]) => {
+						await handle.append({
+							type: "message",
+							role: "assistant",
+							content: assistantMessage.content,
+							...(assistantMessage.tool_calls?.length && { toolCalls: assistantMessage.tool_calls }),
+						});
+						for (const tr of toolResults) {
+							await handle.append({
+								type: "tool_result",
+								toolCallId: tr.tool_call_id!,
+								toolName: tr.name!,
+								content: tr.content!,
+							});
+						}
+						this.emit(sessionId, { type: "turn_complete" });
+					},
+					onError: (error) => {
+						if (ac.signal.aborted) return;
+						finished = { type: "run_finished", reason: "error" };
+						this.emit(sessionId, { type: "error", message: error.message });
+					},
 				},
-				onError: (error) => {
-					if (ac.signal.aborted) return;
-					finished = { type: "run_finished", reason: "error" };
-					this.emit(sessionId, { type: "error", message: error.message });
-				},
-			});
+			);
 
 			if (ac.signal.aborted && finished.reason === "completed") {
 				finished = { type: "run_finished", reason: "cancelled" };
@@ -381,12 +384,16 @@ export class RunManager {
 		const decision = await new Promise<ApprovalDecision>((resolve) => {
 			pending!.set(toolCallId, { resolve, info });
 			this.emit(sessionId, { type: "approval_required", approval: info });
-			signal.addEventListener("abort", () => {
-				if (pending!.delete(toolCallId)) {
-					this.emit(sessionId, { type: "approval_resolved", toolCallId, decision: "deny" });
-					resolve("deny");
-				}
-			}, { once: true });
+			signal.addEventListener(
+				"abort",
+				() => {
+					if (pending!.delete(toolCallId)) {
+						this.emit(sessionId, { type: "approval_resolved", toolCallId, decision: "deny" });
+						resolve("deny");
+					}
+				},
+				{ once: true },
+			);
 		});
 
 		if (decision === "always") {

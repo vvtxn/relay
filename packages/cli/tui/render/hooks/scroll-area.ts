@@ -1,5 +1,5 @@
 import type { Signal } from "@preact/signals-core";
-import { useInput } from "@/tui/core/input.ts";
+import { useInput } from "#/tui/core/input.ts";
 import type { ScrollMetrics } from "../types/index.ts";
 import { useSignal, useSignalEffect } from "./signals.ts";
 
@@ -9,9 +9,11 @@ export interface ScrollAreaState {
 	onScrollOffsetChange: (offset: number) => void;
 }
 
-export function useScrollArea(
-	options?: { focused?: boolean | undefined; scrollStep?: number | undefined; autoScroll?: boolean | undefined },
-): ScrollAreaState {
+export function useScrollArea(options?: {
+	focused?: boolean | undefined;
+	scrollStep?: number | undefined;
+	autoScroll?: boolean | undefined;
+}): ScrollAreaState {
 	const scrollOffset = useSignal(0);
 	const viewportHeight = useSignal(0);
 	const maxScroll = useSignal(0);

@@ -1,5 +1,5 @@
-import type { Position } from "@/tui/render/types/index.ts";
-import { RESET_BG } from "@/tui/core/ansi.ts";
+import type { Position } from "#/tui/render/types/index.ts";
+import { RESET_BG } from "#/tui/core/ansi.ts";
 
 /**
  * Background fill positions for a box: one styled run of spaces per row,

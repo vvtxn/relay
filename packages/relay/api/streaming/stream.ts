@@ -1,4 +1,4 @@
-import type { StreamChunk } from "@/api/types.ts";
+import type { StreamChunk } from "#/api/types.ts";
 
 /**
  * Parses an SSE stream from a fetch Response into an async iterable of StreamChunks.

@@ -2,7 +2,7 @@
 
 Terminal-based coding agent with custom TUI framework.
 
-## Repository Structure (Deno Workspace)
+## Repository Structure (pnpm Workspace)
 
 ```
 ├── packages/
@@ -16,9 +16,10 @@ Terminal-based coding agent with custom TUI framework.
 │   │   └── tui/            # Terminal UI framework (JSX runtime, Yoga layout)
 │   └── web/                # Solid + Vite SPA client (@vvtxn/web)
 │       └── src/            # Effect API layer, TanStack Query/Router, components
-├── scripts/                # Build and version bump scripts
-├── dist/                   # Compiled binary output
-└── deno.json               # Workspace configuration
+├── scripts/                # Env loading and version bump scripts
+├── pnpm-workspace.yaml     # Workspace definition
+├── vite.config.ts          # Workspace-wide Vite+ tooling (fmt/lint/check)
+└── tsconfig.base.json      # Shared strict TypeScript options
 ```
 
 ## Package Dependencies
@@ -39,80 +40,79 @@ in the server. `packages/relay` powers the server and provides display + theme u
 
 ## Build/Run Commands
 
-- **Format code**: `deno task fmt`
-- **Check formatting**: `deno task fmt:check`
-- **Lint**: `deno task lint`
-- **Type-check**: `deno task check` (strict; checks every entrypoint)
-- **Run CLI**: `deno task relay` (starts/reuses the background server, then the TUI)
-- **Open web client**: `deno task relay web` (ensures the server, opens the browser)
-- **Stop/status the background server**: `deno task relay stop` / `deno task relay status`
-- **Manage workspaces**: `deno task relay workspace add|list|remove [path]` (no TUI; attaches to the running server)
-- **Install the shared terminal font**: `deno task relay fonts install` / `deno task relay fonts status`
-- **Run server (foreground)**: `deno task serve` (dev alias; loads mode env files)
-- **Run server (prod)**: `deno task serve:prod` (sets `RELAY_ENV=production`)
-- **Run web dev server**: `deno task web:dev` (Vite; proxies `/api` to `127.0.0.1:7433`)
-- **Build web app**: `deno task web:build` (Vite → `packages/web/dist`; serve with `RELAY_STATIC_DIR`)
-- **Build binary**: `deno task build` (release-safe: no env embedded)
-- **Build local binary**: `deno task build:local` (embeds dev env; may include secrets)
+- **Format code**: `pnpm fmt`
+- **Check formatting**: `pnpm fmt:check`
+- **Lint**: `pnpm lint`
+- **Type-check**: `pnpm check` (strict; checks every entrypoint)
+- **Run CLI**: `pnpm relay` (starts/reuses the background server, then the TUI)
+- **Open web client**: `pnpm relay web` (ensures the server, opens the browser)
+- **Stop/status the background server**: `pnpm relay stop` / `pnpm relay status`
+- **Manage workspaces**: `pnpm relay workspace add|list|remove [path]` (no TUI; attaches to the running server)
+- **Install the shared terminal font**: `pnpm relay fonts install` / `pnpm relay fonts status`
+- **Run server (foreground)**: `pnpm serve` (dev alias; loads mode env files)
+- **Run server (prod)**: `pnpm serve:prod` (sets `RELAY_ENV=production`)
+- **Run web dev server**: `pnpm web:dev` (Vite; proxies `/api` to `127.0.0.1:7433`)
+- **Build web app**: `pnpm web:build` (Vite → `packages/web/dist`; serve with `RELAY_STATIC_DIR`)
+- **Build web app + CLI bundle**: `pnpm build`
 
 ## Task Completion Checklist
 
 After concluding that a task is complete, always run these commands in order:
 
-1. `deno task fmt` — auto-format all code
-2. `deno task lint` — check for lint errors
-3. `deno task check` — strict type-check of every entrypoint
+1. `pnpm exec vp fmt` — auto-format all code
+2. `pnpm check` — format, lint, and type-check (Oxfmt, Oxlint, tsgo via Vite+)
 
-If any command fails, fix the issues and re-run until all pass cleanly. Do not report the task as done until all three
-pass.
+If any command fails, fix the issues and re-run until both pass. Do not report the task as done until they pass
+cleanly.
 
 ### Type Checking
 
-The root `deno.json` `compilerOptions` apply to every workspace package and enable strict settings beyond Deno's
-defaults: `noUncheckedIndexedAccess`, `exactOptionalPropertyTypes`, `noImplicitOverride`, `noFallthroughCasesInSwitch`,
-`allowUnreachableCode: false`, and `allowUnusedLabels: false`. `deno lint` is a separate linter (configurable via the
-`lint` block); it does not type-check. Prefer real guards over `!`; use `!` only where an invariant is already
-guaranteed.
+The root `tsconfig.base.json` `compilerOptions` apply to every workspace package and enable strict settings beyond
+TypeScript's defaults: `noUncheckedIndexedAccess`, `exactOptionalPropertyTypes`, `noImplicitOverride`,
+`noFallthroughCasesInSwitch`, `allowUnreachableCode: false`, and `allowUnusedLabels: false`. Type-checking runs through
+`vp check` (tsgo), and Oxlint is the linter (configured in the root `vite.config.ts`); linting does not type-check.
+Prefer real guards over `!`; use `!` only where an invariant is already guaranteed.
+
+Code must also run under Node's native TypeScript type stripping: no enums, namespaces, parameter properties, or other
+syntax that requires transformation. Only `packages/cli` is bundled (for JSX).
 
 ### Environment & Modes
 
 `RELAY_ENV` selects `development` (default) or `production`. Tasks run through `scripts/run-env.ts`, which merges env
-files with explicit precedence — **process env > `.env.<mode>.local` > `.env.<mode>` > `.env.local` > `.env`** (Deno's
-own multi-file `--env-file` precedence is ambiguous and it has no "if exists" variant). Files resolve relative to the
-working directory, falling back to the current worktree root and then the main worktree root, so gitignored secrets also
-load in linked worktrees.
+files with explicit precedence — **process env > `.env.<mode>.local` > `.env.<mode>` > `.env.local` > `.env`** (Node has
+no multi-file "if exists" env loading, so the merge is explicit). Files resolve relative to the working directory,
+falling back to the current worktree root and then the main worktree root, so gitignored secrets also load in linked
+worktrees.
 
 - `.env.development` / `.env.production` — committed non-secret mode defaults.
 - `.env.local`, `.env.<mode>.local` — gitignored secrets (`TURSO_*`, `GITHUB_APP_*`).
 - `.env.example` — template for every key.
 
-`deno task build` never embeds env (release-safe); `deno task build:local` embeds the merged dev env and warns.
-
 ### Build & Version
 
-- **Build binary**: `deno task build` (compiles to `dist/relay`)
-- **Show version**: `deno task version`
-- **Bump version**: `deno task version:bump <patch|minor|major>`
+- **Build web app + CLI bundle**: `pnpm build`
+- **Show version**: `pnpm run version`
+- **Bump version**: `pnpm run version:bump <patch|minor|major>`
 
 ### Releasing
 
 Tag-based releases via GitHub Actions (`.github/workflows/release.yml`):
 
-1. `deno task version:bump <patch|minor|major>`
+1. `pnpm run version:bump <patch|minor|major>`
 2. Commit and push to `main`
 3. `git tag v<version> && git push --tags`
-4. CI builds Linux binary and creates GitHub Release
+4. CI verifies checks and creates the GitHub Release (source-only — no binary is published)
 
 ## Import Aliases
 
-Within each package, use `@/` for intra-package imports:
+Within each package, use `#/` for intra-package imports (Node package imports, declared in each package's `package.json`):
 
 ```typescript
 // Inside packages/relay/core/agent.ts
-import type { Message } from "@/api/types.ts";
+import type { Message } from "#/api/types.ts";
 
 // Inside packages/cli/agent/app.tsx
-import { Box, Text } from "@/tui/render/components.tsx";
+import { Box, Text } from "#/tui/render/components.tsx";
 ```
 
 Cross-package imports use the `@vvtxn/` prefix with subpaths:
@@ -137,9 +137,9 @@ import { themeToCssVariables } from "@vvtxn/relay/core/theme.ts";
 ## Code Style Guidelines
 
 - **Language**: TypeScript with strict mode
-- **Runtime**: Deno
-- **Formatting**: deno fmt (tabs, 120 line width, double quotes)
-- **Imports**: ES modules with `.ts` extensions and `@/` path alias
+- **Runtime**: Node.js 26+ (native TypeScript; only the CLI is bundled)
+- **Formatting**: Oxfmt via Vite+ (tabs, 120 line width, double quotes)
+- **Imports**: ES modules with `.ts` extensions and the `#/` package-import alias
 - **Naming**: camelCase for variables/functions, PascalCase for types/classes, UPPER_CASE for constants
 
 ## Sub-package Guidelines
@@ -163,7 +163,7 @@ Follow [Conventional Commits](https://www.conventionalcommits.org/) with these t
 - `feat` - New feature or behavior
 - `fix` - Bug fix
 - `refactor` - Code restructuring without behavior change
-- `style` - Formatting only (e.g., `style: run deno fmt`)
+- `style` - Formatting only (e.g., `style: run vp fmt`)
 - `style(lint)` - Lint fixes
 - `docs` - Documentation or README updates
 - `chore` - Maintenance tasks (e.g., `chore: version bump`)

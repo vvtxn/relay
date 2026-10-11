@@ -1,7 +1,7 @@
 /**
  * @vvtxn/client — Typed client + wire protocol for the Relay server.
  *
- * Shared by the CLI (Deno) and the web app (browser) so the protocol is
+ * Shared by the CLI (Node) and the web app (browser) so the protocol is
  * defined exactly once.
  *
  * @example
