@@ -1,7 +1,7 @@
 import type { Signal } from "@preact/signals-core";
 
 import { inputManager, type KeyEvent } from "../../core/input.ts";
-import { getHookKey, hasCleanup, setCleanup } from "./signals.ts";
+import { getHookKey, hasCleanup, setCleanup, useSignal } from "./signals.ts";
 import {
 	deleteBackward,
 	deleteForward,
@@ -209,18 +209,23 @@ function handleNormalMode(event: KeyEvent, state: TextState, options: UseTextInp
 }
 
 export function useTextInput(options: UseTextInputOptions) {
+	// The key handler is registered once; route it through a ref signal so it
+	// always sees the latest callbacks instead of the first render's closure.
+	const optionsRef = useSignal(options);
+	optionsRef.value = options;
+
 	const key = getHookKey();
 
 	if (!hasCleanup(key) && options.focused !== false) {
-		const state: TextState = { value: options.value, cursorPosition: options.cursorPosition };
-
 		const cleanup = inputManager.onKey((event: KeyEvent) => {
-			if (options.focused === false) return false;
+			const current = optionsRef.value;
+			if (current.focused === false) return false;
 
-			if (options.mode?.value === "NORMAL") {
-				return handleNormalMode(event, state, options);
+			const state: TextState = { value: current.value, cursorPosition: current.cursorPosition };
+			if (current.mode?.value === "NORMAL") {
+				return handleNormalMode(event, state, current);
 			}
-			return handleInsertMode(event, state, options);
+			return handleInsertMode(event, state, current);
 		});
 
 		setCleanup(key, cleanup);

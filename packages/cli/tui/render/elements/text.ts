@@ -34,6 +34,9 @@ export const TextLayout: LayoutHandler<TextInstance> = (instance) => {
 			const maxLineWidth = Math.max(...lines.map((l) => visibleLength(l)));
 			return { width: maxLineWidth, height: lines.length };
 		});
+		// `setMeasureFunc` does not dirty the node in yoga-layout 3.x, so a
+		// content change would otherwise keep the previous measured height.
+		instance.yogaNode.markDirty();
 	}
 };
 
