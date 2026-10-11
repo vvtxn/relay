@@ -1,5 +1,5 @@
 import { createMemo, createSignal, For, Show } from "solid-js";
-import { useMutation, useQuery } from "@tanstack/solid-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/solid-query";
 import { filesQuery } from "#/api/queries.ts";
 import { cancelRun, sendMessage } from "#/api/mutations.ts";
 import { appendError, appendUserMessage, setRunning, streamState } from "#/state/session.ts";
@@ -7,15 +7,21 @@ import { appendError, appendUserMessage, setRunning, streamState } from "#/state
 const MAX_FILE_HITS = 10;
 
 export function Composer(props: { sessionId: string }) {
+	const queryClient = useQueryClient();
 	const [value, setValue] = createSignal("");
 	const [mentionStart, setMentionStart] = createSignal(-1);
 	const [mentionQuery, setMentionQuery] = createSignal("");
 	const [highlight, setHighlight] = createSignal(0);
 	let textRef: HTMLTextAreaElement | undefined;
 
-	const files = useQuery(() => filesQuery(props.sessionId));
 	const running = () => streamState().running;
 	const mentionOpen = () => mentionStart() >= 0;
+
+	// The mention picker is the only consumer. Keeping the query disabled until
+	// it opens matters for performance: Solid holds a route transition open
+	// until every query resource created inside it settles, and a fetch on
+	// mount would delay every session switch by one round trip.
+	const files = useQuery(() => ({ ...filesQuery(props.sessionId), enabled: mentionOpen() }));
 
 	const send = useMutation(() => ({
 		mutationFn: (content: string) => sendMessage(props.sessionId, content),
@@ -118,7 +124,14 @@ export function Composer(props: { sessionId: string }) {
 		<div class="composer">
 			<Show when={mentionOpen()}>
 				<div class="mention-list">
-					<Show when={filtered().length > 0} fallback={<div class="mention-empty">No matching files</div>}>
+					<Show
+						when={filtered().length > 0}
+						fallback={
+							<div class="mention-empty">
+								{files.isFetching && !files.data ? "Loading files…" : "No matching files"}
+							</div>
+						}
+					>
 						<For each={filtered()}>
 							{(file, index) => (
 								<button
@@ -143,6 +156,7 @@ export function Composer(props: { sessionId: string }) {
 					rows={3}
 					placeholder="Write a message..."
 					value={value()}
+					onFocus={() => void queryClient.prefetchQuery(filesQuery(props.sessionId))}
 					onInput={handleInput}
 					onKeyDown={handleKeyDown}
 				/>

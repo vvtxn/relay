@@ -8,6 +8,9 @@ export const queryClient = new QueryClient({
 	defaultOptions: {
 		queries: {
 			staleTime: 30_000,
+			// Keep cached server state around for the life of the tab so revisiting
+			// a chat or settings never falls back to a loading state.
+			gcTime: 30 * 60_000,
 			retry: 1,
 			refetchOnWindowFocus: false,
 		},

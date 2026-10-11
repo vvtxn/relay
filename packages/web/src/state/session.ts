@@ -7,39 +7,44 @@ import {
 	resetSessionStreamState,
 	type SessionStreamState,
 } from "@vvtxn/client/session-state.ts";
-import type { ServerEvent } from "@vvtxn/client/protocol.ts";
+import type { OpenSessionResponse, ServerEvent } from "@vvtxn/client/protocol.ts";
 import { entriesToUIMessages } from "@vvtxn/relay/core/display.ts";
 import { fork, interrupt } from "#/api/runtime.ts";
 import { SessionStream } from "#/api/services.ts";
 import { queryClient, queryKeys } from "#/api/query-client.ts";
+import { writeStoredSessionId } from "#/api/storage.ts";
 
 const [streamState, setStreamState] = createSignal<SessionStreamState>(initialSessionStreamState);
 export { streamState };
 
 let current = initialSessionStreamState;
-let fiber: Fiber.RuntimeFiber<void, never> | null = null;
+let fiber: Fiber.Fiber<void> | null = null;
 let abort: AbortController | null = null;
+let activeSessionId: string | null = null;
+let streamingSessionId: string | null = null;
 
 function commit(next: SessionStreamState): void {
 	current = next;
 	setStreamState(next);
 }
 
-/** Seed the live state with persisted entries (source of truth on open). */
-export function hydrateSession(entries: Parameters<typeof entriesToUIMessages>[0], tokens: number, cost: number): void {
+/**
+ * Seed the live store from a persisted snapshot. Only the first call for a
+ * session applies — later refetches and re-renders must never clobber streamed
+ * state (or restart the stream).
+ */
+export function ensureSession(id: string, session: OpenSessionResponse): void {
+	if (activeSessionId === id) return;
+	activeSessionId = id;
+	writeStoredSessionId(id);
 	commit({
-		...current,
-		messages: entriesToUIMessages(entries),
-		draftText: "",
-		draftToolCalls: [],
-		toolCallIndex: {},
-		tokens,
-		cost,
+		...resetSessionStreamState(),
+		messages: entriesToUIMessages(session.entries),
+		tokens: session.tokens,
+		cost: session.cost,
+		running: session.running,
+		status: session.running ? { kind: "thinking" } : { kind: "idle" },
 	});
-}
-
-export function resetSession(): void {
-	commit(resetSessionStreamState());
 }
 
 /** Optimistically append the user's message and mark the run active. */
@@ -94,18 +99,29 @@ function streamProgram(sessionId: string, signal: AbortSignal): Effect.Effect<vo
 	});
 }
 
-export function startStream(sessionId: string): void {
-	stopStream();
-	const controller = new AbortController();
-	abort = controller;
-	fiber = fork(streamProgram(sessionId, controller.signal));
-}
-
+/**
+ * Stop the live stream. The session's persisted snapshot is marked stale: the
+ * only authoritative view of it is the stream, so any events that arrive while
+ * detached (another client, a run finishing) must be re-fetched on re-entry.
+ */
 export function stopStream(): void {
+	const stopped = streamingSessionId;
+	streamingSessionId = null;
 	abort?.abort();
 	abort = null;
 	if (fiber) {
 		interrupt(fiber);
 		fiber = null;
 	}
+	if (stopped) void queryClient.invalidateQueries({ queryKey: queryKeys.session(stopped) });
+}
+
+/** Attach the live stream once per session; repeating the same id is a no-op. */
+export function startStream(sessionId: string): void {
+	if (streamingSessionId === sessionId) return;
+	stopStream();
+	streamingSessionId = sessionId;
+	const controller = new AbortController();
+	abort = controller;
+	fiber = fork(streamProgram(sessionId, controller.signal));
 }
