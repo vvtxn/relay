@@ -9,7 +9,7 @@ import {
 	viewMessages,
 } from "@vvtxn/client/session-state.ts";
 import { batch, signal } from "@preact/signals-core";
-import { run } from "@/tui/render/index.ts";
+import { run } from "#/tui/render/index.ts";
 import {
 	ApprovalPrompt,
 	Box,
@@ -19,16 +19,16 @@ import {
 	Text,
 	TextInput,
 	WelcomeScreen,
-} from "@/tui/render/components.tsx";
-import { getHookKey, hasCleanup, setCleanup, useSignal, useSignalEffect } from "@/tui/render/hooks/signals.ts";
-import { useApprovalPrompt } from "@/tui/render/hooks/approval.ts";
-import { useTextInput, type VimMode } from "@/tui/render/hooks/text-input.ts";
-import { type CommandPaletteItem, useCommandPalette } from "@/tui/render/hooks/command-palette.ts";
-import { inputManager } from "@/tui/core/input.ts";
+} from "#/tui/render/components.tsx";
+import { getHookKey, hasCleanup, setCleanup, useSignal, useSignalEffect } from "#/tui/render/hooks/signals.ts";
+import { useApprovalPrompt } from "#/tui/render/hooks/approval.ts";
+import { useTextInput, type VimMode } from "#/tui/render/hooks/text-input.ts";
+import { type CommandPaletteItem, useCommandPalette } from "#/tui/render/hooks/command-palette.ts";
+import { inputManager } from "#/tui/core/input.ts";
 import { useProjectFiles } from "./hooks/project-files.ts";
 import { getClient, serverUrl } from "./client.ts";
 import { openBrowser } from "./open.ts";
-import { theme } from "@/tui/theme.ts";
+import { theme } from "#/tui/theme.ts";
 import { VERSION } from "../version.ts";
 import { StatusBar } from "./components/status-bar.tsx";
 import { BootError, BootScreen } from "./components/boot-screen.tsx";
@@ -101,9 +101,11 @@ function App({ onQuit, user, initialSessionId, info }: AppProps) {
 	// state lives in persisted signals. `sync.pending` accumulates events off
 	// the render signal; `stream` is flushed on a 50ms throttle for text deltas
 	// and immediately for structural events.
-	const sync = useSignal<
-		{ pending: SessionStreamState; timer: ReturnType<typeof setTimeout> | null; syncing: boolean }
-	>({
+	const sync = useSignal<{
+		pending: SessionStreamState;
+		timer: ReturnType<typeof setTimeout> | null;
+		syncing: boolean;
+	}>({
 		pending: initialSessionStreamState,
 		timer: null,
 		syncing: false,
@@ -199,7 +201,10 @@ function App({ onQuit, user, initialSessionId, info }: AppProps) {
 		const ask = currentAsk.value;
 		currentAsk.value = null;
 		if (!ask) return;
-		if (denyOnServer) void getClient().approve(ask.sessionId, ask.toolCallId, "deny").catch(() => {});
+		if (denyOnServer)
+			void getClient()
+				.approve(ask.sessionId, ask.toolCallId, "deny")
+				.catch(() => {});
 		approval.cancel();
 	};
 
@@ -267,7 +272,9 @@ function App({ onQuit, user, initialSessionId, info }: AppProps) {
 			if (!id) return false;
 			const now = Date.now();
 			if (now - lastEsc < 1500) {
-				void getClient().cancel(id).catch(() => {});
+				void getClient()
+					.cancel(id)
+					.catch(() => {});
 				lastEsc = 0;
 				escPrimed.value = false;
 				if (escTimer) {
@@ -333,7 +340,7 @@ function App({ onQuit, user, initialSessionId, info }: AppProps) {
 	const startNewChat = async () => {
 		dropPendingAsk(true);
 		try {
-			const response = await getClient().createSession(Deno.cwd());
+			const response = await getClient().createSession(process.cwd());
 			sessionId.value = response.id;
 			sync.value.pending = resetSessionStreamState();
 			syncStream(true);
@@ -359,7 +366,7 @@ function App({ onQuit, user, initialSessionId, info }: AppProps) {
 		maxResults: 20,
 		onSelect: (item) => {
 			if (stream.value.running) return;
-			void openSessionById(item.id);
+			openSessionById(item.id);
 		},
 	});
 
@@ -398,21 +405,24 @@ function App({ onQuit, user, initialSessionId, info }: AppProps) {
 			if (item.id === "new-chat") {
 				void startNewChat();
 			} else if (item.id === "threads") {
-				void getClient().listSessions(Deno.cwd()).then((response) => {
-					threadItems.value = response.sessions.map((s) => {
-						const date = new Date(s.timestamp);
-						const label = date.toLocaleString();
-						const preview = s.firstUserMessage
-							? s.firstUserMessage.length > 45
-								? s.firstUserMessage.slice(0, 45) + "…"
-								: s.firstUserMessage
-							: "(empty session)";
-						return { id: s.reference, title: preview, description: label, keywords: [s.id] };
+				void getClient()
+					.listSessions(process.cwd())
+					.then((response) => {
+						threadItems.value = response.sessions.map((s) => {
+							const date = new Date(s.timestamp);
+							const label = date.toLocaleString();
+							const preview = s.firstUserMessage
+								? s.firstUserMessage.length > 45
+									? s.firstUserMessage.slice(0, 45) + "…"
+									: s.firstUserMessage
+								: "(empty session)";
+							return { id: s.reference, title: preview, description: label, keywords: [s.id] };
+						});
+						threadsPalette.openPalette();
+					})
+					.catch((error) => {
+						showError(error instanceof Error ? error.message : String(error));
 					});
-					threadsPalette.openPalette();
-				}).catch((error) => {
-					showError(error instanceof Error ? error.message : String(error));
-				});
 			} else if (item.id === "web") {
 				const id = sessionId.value;
 				openBrowser(id ? `${info.webUrl}/s/${id}` : info.webUrl);
@@ -450,28 +460,28 @@ function App({ onQuit, user, initialSessionId, info }: AppProps) {
 				model={info.model}
 			/>
 
-			{messages.length === 0
-				? (
-					loadingSession.value !== null
-						? (
-							<Box flex flexDirection="column" justifyContent="center" alignItems="center">
-								<Text color={theme.textDim} italic>Loading thread…</Text>
-							</Box>
-						)
-						: (
-							<WelcomeScreen
-								version={VERSION}
-								userName={user.name}
-								model={info.model}
-								hints="Enter to send • @ for files • / for commands • PageUp/PageDown to scroll • i/Esc to toggle mode"
-							/>
-						)
+			{messages.length === 0 ? (
+				loadingSession.value !== null ? (
+					<Box flex flexDirection="column" justifyContent="center" alignItems="center">
+						<Text color={theme.textDim} italic>
+							Loading thread…
+						</Text>
+					</Box>
+				) : (
+					<WelcomeScreen
+						version={VERSION}
+						userName={user.name}
+						model={info.model}
+						hints="Enter to send • @ for files • / for commands • PageUp/PageDown to scroll • i/Esc to toggle mode"
+					/>
 				)
-				: (
-					<ScrollArea flex flexDirection="column" padding={1} gap={1} scrollbar focused autoScroll>
-						{messages.map((msg, i) => <MessageView key={i} msg={msg} />)}
-					</ScrollArea>
-				)}
+			) : (
+				<ScrollArea flex flexDirection="column" padding={1} gap={1} scrollbar focused autoScroll>
+					{messages.map((msg, i) => (
+						<MessageView key={i} msg={msg} />
+					))}
+				</ScrollArea>
+			)}
 
 			<Box height={1} />
 			{stream.value.running && (
@@ -480,24 +490,18 @@ function App({ onQuit, user, initialSessionId, info }: AppProps) {
 					<Text color={theme.textMuted} bold italic>
 						{formatStatus(stream.value.status)}
 					</Text>
-					{escPrimed.value
-						? (
-							<Text color={theme.warning} bold>
-								Press Esc again to cancel
-							</Text>
-						)
-						: (
-							<Text color={theme.textDim} italic>
-								Esc to cancel
-							</Text>
-						)}
+					{escPrimed.value ? (
+						<Text color={theme.warning} bold>
+							Press Esc again to cancel
+						</Text>
+					) : (
+						<Text color={theme.textDim} italic>
+							Esc to cancel
+						</Text>
+					)}
 				</Box>
 			)}
-			<Box
-				bgColor={theme.surface}
-				paddingX={1}
-				paddingY={1}
-			>
+			<Box bgColor={theme.surface} paddingX={1} paddingY={1}>
 				<TextInput
 					value={input.value}
 					cursorPosition={cursor.value}
@@ -545,12 +549,10 @@ async function bootstrap(): Promise<void> {
 		try {
 			await getClient().health();
 		} catch {
-			throw new Error(
-				`Cannot reach the Relay server at ${serverUrl()}. Start one with 'relay serve'.`,
-			);
+			throw new Error(`Cannot reach the Relay server at ${serverUrl()}. Start one with 'relay serve'.`);
 		}
 		const [user, info] = await Promise.all([getClient().me(), getClient().getConfig()]);
-		const response = await getClient().createSession(Deno.cwd());
+		const response = await getClient().createSession(process.cwd());
 		boot.value = { kind: "ready", user, sessionId: response.id, info };
 	} catch (error) {
 		boot.value = { kind: "error", message: error instanceof Error ? error.message : String(error) };
@@ -572,4 +574,8 @@ function Root({ quit }: { quit: () => void }) {
 // Entry
 // ---------------------------------------------------------------------------
 
-run((quit) => <Root quit={quit} />, () => {}, { defaultBg: theme.background });
+run(
+	(quit) => <Root quit={quit} />,
+	() => {},
+	{ defaultBg: theme.background },
+);

@@ -1,5 +1,5 @@
-import { RESET_FG } from "@/tui/core/ansi.ts";
-import { toAnsi } from "@/tui/core/primitives/color.ts";
+import { RESET_FG } from "#/tui/core/ansi.ts";
+import { toAnsi } from "#/tui/core/primitives/color.ts";
 import type { ElementHandler, Position, SpinnerInstance } from "../types/index.ts";
 import type { LayoutHandler } from "./index.ts";
 

@@ -35,13 +35,15 @@ export function BootError(props: { message: string; onRetry?: () => void }) {
 				<div class="boot-error-message">{props.message}</div>
 				<ul class="boot-hints">
 					<li>
-						Start the server with <code>deno task serve</code>.
+						Start the server with <code>pnpm serve:dev</code>.
 					</li>
 					<li>Confirm the server is listening and the URL above is correct.</li>
 					<li>If the server is remote, it must allow this browser origin.</li>
 				</ul>
 				<div class="boot-actions">
-					<button type="button" class="btn primary" onClick={retry}>Retry</button>
+					<button type="button" class="btn primary" onClick={retry}>
+						Retry
+					</button>
 				</div>
 			</div>
 		</div>
@@ -56,7 +58,9 @@ export function LoginScreen(props: { onLogin: () => void }) {
 				<div class="boot-error-title">Sign in required</div>
 				<div class="boot-error-message">Your session is not authenticated. Continue to sign in.</div>
 				<div class="boot-actions">
-					<button type="button" class="btn primary" onClick={props.onLogin}>Continue with GitHub</button>
+					<button type="button" class="btn primary" onClick={props.onLogin}>
+						Continue with GitHub
+					</button>
 				</div>
 			</div>
 		</div>

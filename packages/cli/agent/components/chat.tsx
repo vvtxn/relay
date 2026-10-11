@@ -1,5 +1,5 @@
-import { Box, Markdown, memo, Text } from "@/tui/render/components.tsx";
-import { theme } from "@/tui/theme.ts";
+import { Box, Markdown, memo, Text } from "#/tui/render/components.tsx";
+import { theme } from "#/tui/theme.ts";
 import { summarizeToolCalls } from "@vvtxn/relay/core/display.ts";
 import type { UIMessage } from "@vvtxn/relay/core/display.ts";
 
@@ -20,7 +20,9 @@ export const MessageView = memo(function MessageView({ msg }: { key?: number; ms
 		return (
 			<Box flexDirection="row" gap={1}>
 				<Text color={theme.borderLabel}>│</Text>
-				<Text flex color={theme.text}>{msg.content}</Text>
+				<Text flex color={theme.text}>
+					{msg.content}
+				</Text>
 			</Box>
 		);
 	}
@@ -34,7 +36,9 @@ export const MessageView = memo(function MessageView({ msg }: { key?: number; ms
 		<Box flexDirection="column" gap={1}>
 			{hasText && (
 				<Box flexDirection="row" gap={1}>
-					<Text color={theme.brand} bold>●</Text>
+					<Text color={theme.brand} bold>
+						●
+					</Text>
 					<Markdown flex>{msg.content.trim()}</Markdown>
 				</Box>
 			)}

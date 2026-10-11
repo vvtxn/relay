@@ -9,9 +9,9 @@ import {
 } from "@vvtxn/client/session-state.ts";
 import type { ServerEvent } from "@vvtxn/client/protocol.ts";
 import { entriesToUIMessages } from "@vvtxn/relay/core/display.ts";
-import { fork, interrupt } from "@/api/runtime.ts";
-import { SessionStream } from "@/api/services.ts";
-import { queryClient, queryKeys } from "@/api/query-client.ts";
+import { fork, interrupt } from "#/api/runtime.ts";
+import { SessionStream } from "#/api/services.ts";
+import { queryClient, queryKeys } from "#/api/query-client.ts";
 
 const [streamState, setStreamState] = createSignal<SessionStreamState>(initialSessionStreamState);
 export { streamState };
@@ -80,13 +80,11 @@ function streamProgram(sessionId: string, signal: AbortSignal): Effect.Effect<vo
 		let backoff = 500;
 		while (!signal.aborted) {
 			yield* Effect.exit(
-				Stream.runForEach(
-					service.events(sessionId, signal),
-					(event) =>
-						Effect.sync(() => {
-							backoff = 500;
-							handleEvent(sessionId, event);
-						}),
+				Stream.runForEach(service.events(sessionId, signal), (event) =>
+					Effect.sync(() => {
+						backoff = 500;
+						handleEvent(sessionId, event);
+					}),
 				),
 			);
 			if (signal.aborted) break;

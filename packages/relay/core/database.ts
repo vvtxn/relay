@@ -15,8 +15,8 @@ export function createDatabaseClient(credentials: DatabaseCredentials): Database
 
 /** Reads Turso credentials from the environment. */
 export function databaseCredentialsFromEnv(): DatabaseCredentials {
-	const url = Deno.env.get("TURSO_DB_URL");
-	const authToken = Deno.env.get("TURSO_DB_TOKEN");
+	const url = process.env.TURSO_DB_URL;
+	const authToken = process.env.TURSO_DB_TOKEN;
 	if (!url || !authToken) throw new Error("TURSO_DB_URL and TURSO_DB_TOKEN are required");
 	return { url, authToken };
 }

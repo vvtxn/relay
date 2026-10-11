@@ -1,4 +1,5 @@
-import { resolve } from "@std/path";
+import { resolve } from "node:path";
+import { stat } from "node:fs/promises";
 import { getGitBranch, validateWorkspacePath } from "@vvtxn/relay/core/workspace.ts";
 import { homeDir } from "@vvtxn/relay/core/paths.ts";
 import type { SessionHandle } from "@vvtxn/relay/core/sessions/index.ts";
@@ -41,7 +42,7 @@ function resolveCwd(services: RequestServices, url: URL): string {
 /** True when `path` is an existing directory. */
 async function directoryExists(path: string): Promise<boolean> {
 	try {
-		return (await Deno.stat(path)).isDirectory;
+		return (await stat(path)).isDirectory();
 	} catch {
 		return false;
 	}
@@ -49,27 +50,23 @@ async function directoryExists(path: string): Promise<boolean> {
 
 export function handleMe(services: RequestServices): Response {
 	const { user } = services;
-	return json(
-		{
-			id: user.id,
-			...(user.name && { name: user.name }),
-			...(user.provider && { provider: user.provider }),
-			...(user.avatarUrl && { avatarUrl: user.avatarUrl }),
-		} satisfies MeResponse,
-	);
+	return json({
+		id: user.id,
+		...(user.name && { name: user.name }),
+		...(user.provider && { provider: user.provider }),
+		...(user.avatarUrl && { avatarUrl: user.avatarUrl }),
+	} satisfies MeResponse);
 }
 
 /** Model + context info for client status displays. */
 export function handleConfig(services: RequestServices): Response {
 	const { config } = services;
-	return json(
-		{
-			model: config.model,
-			contextTokens: config.maxTokens,
-			home: homeDir() ?? "",
-			webUrl: config.publicUrl,
-		} satisfies ConfigResponse,
-	);
+	return json({
+		model: config.model,
+		contextTokens: config.maxTokens,
+		home: homeDir() ?? "",
+		webUrl: config.publicUrl,
+	} satisfies ConfigResponse);
 }
 
 export async function handleListSessions(services: RequestServices, url: URL): Promise<Response> {
@@ -116,10 +113,7 @@ export async function handleCreateSession(services: RequestServices, request: Re
 	await services.sessionStore.registerWorkspace(scope);
 	const handle = services.sessionStore.create(scope);
 	services.runs.attachHandle(handle.getHeader().id, handle, services.user.id);
-	return json(
-		{ id: handle.getHeader().id, header: handle.getHeader() } satisfies CreateSessionResponse,
-		201,
-	);
+	return json({ id: handle.getHeader().id, header: handle.getHeader() } satisfies CreateSessionResponse, 201);
 }
 
 export async function handleOpenSession(services: RequestServices, sessionId: string): Promise<Response> {
@@ -128,16 +122,14 @@ export async function handleOpenSession(services: RequestServices, sessionId: st
 	services.runs.attachHandle(sessionId, handle, services.user.id);
 	const branch = await getGitBranch(handle.getHeader().cwd);
 
-	return json(
-		{
-			header: handle.getHeader(),
-			entries: handle.getEntries(),
-			tokens: handle.getTokens(),
-			cost: handle.getCost(),
-			branch,
-			running: services.runs.isRunning(sessionId),
-		} satisfies OpenSessionResponse,
-	);
+	return json({
+		header: handle.getHeader(),
+		entries: handle.getEntries(),
+		tokens: handle.getTokens(),
+		cost: handle.getCost(),
+		branch,
+		running: services.runs.isRunning(sessionId),
+	} satisfies OpenSessionResponse);
 }
 
 export async function handleSendMessage(
@@ -158,7 +150,7 @@ export async function handleSendMessage(
 
 	// Fail fast with a clear message rather than starting a run that can only
 	// error out: a provider cannot be built without the user's API key.
-	if (!await services.userSettings.getApiKey(services.user.id)) {
+	if (!(await services.userSettings.getApiKey(services.user.id))) {
 		return error(400, "No API key configured. Add one in Settings.");
 	}
 

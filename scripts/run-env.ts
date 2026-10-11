@@ -1,16 +1,18 @@
+import { spawnSync } from "node:child_process";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { parseEnv } from "node:util";
+
 /**
  * Mode-aware environment loader.
  *
- * Deno's `--env-file` has no "if exists" variant and its multi-file precedence
- * is documented inconsistently (the CLI help and the docs disagree), so this
- * wrapper merges the env files explicitly and then spawns the entrypoint.
+ * The task runner has no reliable "load these env files if they exist" story
+ * with explicit precedence, so this wrapper merges the env files itself and
+ * then spawns the entrypoint with the merged environment.
  *
- * Usage: `deno run -A scripts/run-env.ts <deno-run-args...>`
+ * Usage: `node scripts/run-env.ts <entrypoint> [args...]`
  * Mode:  `RELAY_ENV=development|production` (default: `development`)
  */
-
-import { join } from "@std/path";
-import { loadSync } from "@std/dotenv";
 
 export const MODES = ["development", "production"] as const;
 export type Mode = (typeof MODES)[number];
@@ -34,7 +36,7 @@ export function envFileCandidates(mode: Mode): string[] {
  */
 export function resolveEnv(
 	mode: Mode,
-	read: (path: string) => Record<string, string> | null,
+	read: (path: string) => Record<string, string | undefined> | null,
 	processEnv: Record<string, string | undefined>,
 ): Record<string, string> {
 	const merged: Record<string, string> = {};
@@ -53,24 +55,21 @@ export function resolveEnv(
 	return merged;
 }
 
-function readEnvFile(path: string): Record<string, string> | null {
+function readEnvFile(path: string): Record<string, string | undefined> | null {
 	try {
-		Deno.statSync(path);
+		return parseEnv(readFileSync(path, "utf8"));
 	} catch {
 		return null;
 	}
-	return loadSync({ envPath: path, export: false }) as Record<string, string>;
 }
 
 function gitOutput(cwd: string, args: string[]): string | null {
 	try {
-		const result = new Deno.Command("git", {
-			args: ["-C", cwd, ...args],
-			stdin: "null",
-			stdout: "piped",
-			stderr: "null",
-		}).outputSync();
-		return result.success ? new TextDecoder().decode(result.stdout) : null;
+		const result = spawnSync("git", ["-C", cwd, ...args], {
+			stdio: ["ignore", "pipe", "ignore"],
+		});
+		if (result.error || result.status !== 0) return null;
+		return result.stdout.toString();
 	} catch {
 		return null;
 	}
@@ -80,20 +79,21 @@ function gitOutput(cwd: string, args: string[]): string | null {
  * Directories to read env files from, least to most specific: the main
  * worktree, the current worktree root, then the working directory. Gitignored
  * env files are not copied into linked worktrees, so falling back to the main
- * checkout keeps tasks like `deno task relay` working there.
+ * checkout keeps tasks like `pnpm relay` working there.
  */
 export function envRoots(cwd: string): string[] {
 	const current = gitOutput(cwd, ["rev-parse", "--show-toplevel"])?.trim();
 	const mainLine = gitOutput(cwd, ["worktree", "list", "--porcelain"])
-		?.split("\n").find((line) => line.startsWith("worktree "));
+		?.split("\n")
+		.find((line) => line.startsWith("worktree "));
 	const main = mainLine?.slice("worktree ".length).trim();
 	const roots = [main, current, cwd].filter((root): root is string => !!root);
 	return [...new Set(roots)];
 }
 
 /** Read a relative env file from the most specific root that has it. */
-function readEnvFromRoots(roots: string[], relative: string): Record<string, string> | null {
-	let found: Record<string, string> | null = null;
+function readEnvFromRoots(roots: string[], relative: string): Record<string, string | undefined> | null {
+	let found: Record<string, string | undefined> | null = null;
 	for (const root of roots) {
 		const values = readEnvFile(join(root, relative));
 		if (values) found = values;
@@ -103,34 +103,29 @@ function readEnvFromRoots(roots: string[], relative: string): Record<string, str
 
 /** Merge only the env files for a mode (no process environment). */
 export function loadEnvFiles(mode: Mode): Record<string, string> {
-	const roots = envRoots(Deno.cwd());
+	const roots = envRoots(process.cwd());
 	return resolveEnv(mode, (path) => readEnvFromRoots(roots, path), {});
 }
 
-async function main(): Promise<void> {
-	const mode = resolveMode(Deno.env.get("RELAY_ENV"));
-	const roots = envRoots(Deno.cwd());
-	const merged = resolveEnv(mode, (path) => readEnvFromRoots(roots, path), Deno.env.toObject());
-	for (const [key, value] of Object.entries(merged)) Deno.env.set(key, value);
-	Deno.env.set("RELAY_ENV", mode);
+function main(): void {
+	const mode = resolveMode(process.env.RELAY_ENV);
+	const roots = envRoots(process.cwd());
+	const merged = resolveEnv(mode, (path) => readEnvFromRoots(roots, path), process.env);
 
-	const args = Deno.args;
+	const env: Record<string, string> = {};
+	for (const [key, value] of Object.entries(merged)) env[key] = value;
+	env.RELAY_ENV = mode;
+
+	const args = process.argv.slice(2);
 	if (args.length === 0) {
-		console.error("Usage: deno run -A scripts/run-env.ts <deno-run-args...>");
-		Deno.exit(2);
+		console.error("Usage: node scripts/run-env.ts <entrypoint> [args...]");
+		process.exit(2);
 	}
 
-	const command = new Deno.Command(Deno.execPath(), {
-		args: ["run", ...args],
-		env: Deno.env.toObject(),
-		stdin: "inherit",
-		stdout: "inherit",
-		stderr: "inherit",
-	});
-	const status = await command.spawn().status;
-	Deno.exit(status.code);
+	const result = spawnSync(process.execPath, args, { env, stdio: "inherit" });
+	process.exit(result.status ?? 1);
 }
 
 if (import.meta.main) {
-	await main();
+	main();
 }

@@ -1,4 +1,4 @@
-import { theme } from "@/tui/theme.ts";
+import { theme } from "#/tui/theme.ts";
 
 /** Represents a parsed markdown segment with styling */
 export interface MarkdownSegment {

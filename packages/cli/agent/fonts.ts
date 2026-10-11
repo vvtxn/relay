@@ -1,4 +1,7 @@
-import { fromFileUrl, join } from "@std/path";
+import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { runCommand } from "@vvtxn/relay/core/command.ts";
 import { font } from "@vvtxn/relay/core/fonts.ts";
 import { homeDir } from "@vvtxn/relay/core/paths.ts";
 
@@ -8,9 +11,8 @@ import { homeDir } from "@vvtxn/relay/core/paths.ts";
  * Unlike the web client, a terminal cannot load a font at runtime: the user
  * selects one in their terminal emulator. This command copies the bundled
  * ttf/otf files into the platform's user font directory and prints what to
- * select. Files are resolved relative to this module, so the same code works
- * from a source checkout and from the compiled binary (which embeds
- * `packages/relay/assets` via `scripts/build.ts`).
+ * select. Files are resolved relative to this module (or the CLI bundle, which
+ * sits at the same depth), so the same code works from a source checkout.
  */
 
 const FONT_ASSET_DIR = new URL("../../relay/assets/fonts/", import.meta.url);
@@ -46,9 +48,9 @@ export function fontInstallDir(platform: string, home: string, env: FontEnv = {}
 
 function currentEnv(): FontEnv {
 	const env: FontEnv = {};
-	const xdg = Deno.env.get("XDG_DATA_HOME");
+	const xdg = process.env.XDG_DATA_HOME;
 	if (xdg) env.XDG_DATA_HOME = xdg;
-	const localAppData = Deno.env.get("LOCALAPPDATA");
+	const localAppData = process.env.LOCALAPPDATA;
 	if (localAppData) env.LOCALAPPDATA = localAppData;
 	return env;
 }
@@ -61,7 +63,7 @@ function requireHome(): string {
 
 async function exists(path: string): Promise<boolean> {
 	try {
-		await Deno.stat(path);
+		await stat(path);
 		return true;
 	} catch {
 		return false;
@@ -71,11 +73,11 @@ async function exists(path: string): Promise<boolean> {
 /** Refresh fontconfig's cache so terminals pick the new files up without a logout. */
 async function refreshFontCache(): Promise<void> {
 	try {
-		const { success } = await new Deno.Command("fc-cache", {
+		const { success } = await runCommand("fc-cache", {
 			args: ["-f"],
 			stdout: "null",
 			stderr: "null",
-		}).output();
+		});
 		if (success) console.log("Refreshed the system font cache (fc-cache).");
 	} catch {
 		// fontconfig is unavailable; most terminals still pick the font up after a restart.
@@ -83,13 +85,13 @@ async function refreshFontCache(): Promise<void> {
 }
 
 async function install(): Promise<void> {
-	const dir = fontInstallDir(Deno.build.os, requireHome(), currentEnv());
-	await Deno.mkdir(dir, { recursive: true });
+	const dir = fontInstallDir(process.platform, requireHome(), currentEnv());
+	await mkdir(dir, { recursive: true });
 	for (const file of font.terminal) {
-		const data = await Deno.readFile(new URL(file, FONT_ASSET_DIR));
-		await Deno.writeFile(join(dir, file), data);
+		const data = await readFile(new URL(file, FONT_ASSET_DIR));
+		await writeFile(join(dir, file), data);
 	}
-	if (Deno.build.os === "linux") await refreshFontCache();
+	if (process.platform === "linux") await refreshFontCache();
 
 	console.log(`Installed ${font.family} (${font.license}) to ${dir}`);
 	console.log(`Select "${font.family}" in your terminal settings, then restart the terminal.`);
@@ -98,7 +100,7 @@ async function install(): Promise<void> {
 async function status(): Promise<void> {
 	console.log(`${font.family} (${font.license})`);
 	console.log(`  Homepage: ${font.homepage}`);
-	console.log(`  Bundled:  ${fromFileUrl(FONT_ASSET_DIR)}`);
+	console.log(`  Bundled:  ${fileURLToPath(FONT_ASSET_DIR)}`);
 
 	const home = homeDir();
 	if (!home) {
@@ -106,7 +108,7 @@ async function status(): Promise<void> {
 		return;
 	}
 
-	const dir = fontInstallDir(Deno.build.os, home, currentEnv());
+	const dir = fontInstallDir(process.platform, home, currentEnv());
 	console.log(`  Font dir: ${dir}`);
 
 	let missing = 0;
@@ -127,7 +129,7 @@ export async function runFontsCommand(args: string[]): Promise<void> {
 			await status();
 			break;
 		case "path":
-			console.log(fromFileUrl(FONT_ASSET_DIR));
+			console.log(fileURLToPath(FONT_ASSET_DIR));
 			break;
 		default:
 			console.log(USAGE);

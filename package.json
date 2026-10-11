@@ -1,0 +1,37 @@
+{
+	"name": "relay",
+	"private": true,
+	"type": "module",
+	"scripts": {
+		"relay": "vp -C packages/cli pack && node scripts/run-env.ts packages/cli/dist/index.mjs",
+		"relay:dev": "pnpm relay",
+		"relay:prod": "RELAY_ENV=production pnpm relay",
+		"relay:web": "pnpm relay web",
+		"relay:web:prod": "RELAY_ENV=production pnpm relay web",
+		"relay:stop": "pnpm relay stop",
+		"relay:status": "pnpm relay status",
+		"agent": "pnpm relay:dev",
+		"agent:dev": "pnpm relay:dev",
+		"agent:prod": "pnpm relay:prod",
+		"serve": "pnpm serve:dev",
+		"serve:dev": "node scripts/run-env.ts packages/server/main.ts",
+		"serve:prod": "RELAY_ENV=production node scripts/run-env.ts packages/server/main.ts",
+		"web:dev": "vp -C packages/web dev",
+		"web:build": "vp -C packages/web build",
+		"build": "vp -C packages/web build && vp -C packages/cli pack",
+		"check": "vp check",
+		"fmt": "vp fmt",
+		"fmt:check": "vp fmt --check",
+		"lint": "vp lint",
+		"version": "node scripts/version.ts",
+		"version:bump": "node scripts/bump.ts"
+	},
+	"devDependencies": {
+		"@types/node": "^26.6.5",
+		"vite-plus": "^1.1.0"
+	},
+	"engines": {
+		"node": ">=26.11.1"
+	},
+	"packageManager": "pnpm@11.13.0"
+}

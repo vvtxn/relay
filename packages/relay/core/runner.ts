@@ -1,6 +1,6 @@
-import type { Message, Usage } from "@/api/types.ts";
-import { type AgentConfig, run } from "@/core/agent.ts";
-import type { ToolResult } from "@/core/tools/types.ts";
+import type { Message, Usage } from "#/api/types.ts";
+import { type AgentConfig, run } from "#/core/agent.ts";
+import type { ToolResult } from "#/core/tools/types.ts";
 
 /**
  * Callbacks for the agent runner — implemented by each client (TUI, HTTP, etc.).

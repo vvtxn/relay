@@ -1,4 +1,4 @@
-import type { ToolCall } from "@/api/types.ts";
+import type { ToolCall } from "#/api/types.ts";
 
 // ---------------------------------------------------------------------------
 // Session header — first line of every .jsonl file
@@ -42,9 +42,7 @@ export interface ToolResultEntry extends EntryBase {
 export type Entry = MessageEntry | ToolResultEntry;
 
 /** Entry input before the store assigns its id and timestamp. */
-export type NewEntry =
-	| Omit<MessageEntry, "id" | "timestamp">
-	| Omit<ToolResultEntry, "id" | "timestamp">;
+export type NewEntry = Omit<MessageEntry, "id" | "timestamp"> | Omit<ToolResultEntry, "id" | "timestamp">;
 
 // ---------------------------------------------------------------------------
 // In-memory session

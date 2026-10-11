@@ -1,4 +1,4 @@
-import type { JsonSchema, ToolDefinition } from "@/api/types.ts";
+import type { JsonSchema, ToolDefinition } from "#/api/types.ts";
 
 // ---------------------------------------------------------------------------
 // Tool result

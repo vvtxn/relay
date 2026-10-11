@@ -2,11 +2,7 @@ import { Show } from "solid-js";
 import { summarizeToolCalls, type UIMessage } from "@vvtxn/relay/core/display.ts";
 import { Markdown } from "./Markdown.tsx";
 
-export function MessageView(props: {
-	msg: UIMessage;
-	userName?: string | undefined;
-	avatarUrl?: string | undefined;
-}) {
+export function MessageView(props: { msg: UIMessage; userName?: string | undefined; avatarUrl?: string | undefined }) {
 	const hasText = () => props.msg.content.trim().length > 0;
 	const toolCalls = () => props.msg.toolCalls ?? [];
 

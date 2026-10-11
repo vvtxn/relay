@@ -20,10 +20,7 @@ CREATE INDEX IF NOT EXISTS auth_identities_user_idx ON auth_identities (user_id)
 `;
 
 /** Additive migrations for databases created before profile columns existed. */
-const MIGRATIONS = [
-	"ALTER TABLE users ADD COLUMN display_name TEXT",
-	"ALTER TABLE users ADD COLUMN avatar_url TEXT",
-];
+const MIGRATIONS = ["ALTER TABLE users ADD COLUMN display_name TEXT", "ALTER TABLE users ADD COLUMN avatar_url TEXT"];
 
 type QueryArgs = (string | null)[];
 type Result = { rows: Record<string, unknown>[] };
@@ -174,7 +171,10 @@ export class DatabaseUserStore implements UserStore, UserDirectory {
 	}
 
 	private async initialize(): Promise<void> {
-		for (const sql of SCHEMA.split(";").map((part) => part.trim()).filter(Boolean)) await this.client.execute(sql);
+		for (const sql of SCHEMA.split(";")
+			.map((part) => part.trim())
+			.filter(Boolean))
+			await this.client.execute(sql);
 		for (const sql of MIGRATIONS) {
 			try {
 				await this.client.execute(sql);
@@ -186,6 +186,6 @@ export class DatabaseUserStore implements UserStore, UserDirectory {
 
 	private async execute(statement: { sql: string; args?: QueryArgs }): Promise<Result> {
 		await this.schemaReady;
-		return await this.client.execute(statement) as unknown as Result;
+		return (await this.client.execute(statement)) as unknown as Result;
 	}
 }

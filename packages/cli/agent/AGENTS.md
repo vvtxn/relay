@@ -32,7 +32,7 @@ agent/
 2. A healthy server recorded in `~/.relay/server.json` is reused.
 3. A healthy server answering on the preferred port is adopted even without a state file (e.g. a foreground
    `relay serve`).
-4. Otherwise a detached server is spawned (compiled: `relay serve`; source: `deno run … server/main.ts`) with
+4. Otherwise a detached server is spawned (`node packages/server/main.ts`) with
    `RELAY_WORKSPACE=cwd` and `RELAY_PORT` (explicit, else the default 7433 — never derived from `RELAY_PUBLIC_URL`).
 
 The state file is the source of truth for the actual URL: the server writes it after binding, and the CLI discovers the
@@ -81,7 +81,8 @@ ask. Switching sessions denies any pending ask server-side so runs never hang.
 `/api/me` (using the token handed over by a browser login in `~/.relay/session.json`); if not signed in it opens the web
 client and waits for the sign-in to complete (`ensureAuthenticated`). It then checks `/api/settings` — if no LLM API key
 is configured it opens the web Settings page and waits (`ensureApiKey`), so the TUI never starts in an unusable state.
-`bootstrap()` then health-checks the server, fetches `/api/me` + `/api/config`, and creates a session for `Deno.cwd()`.
+`bootstrap()` then health-checks the server, fetches `/api/me` + `/api/config`, and creates a session for
+`process.cwd()`.
 `Root` renders `BootScreen` (loading) or `BootError` (friendly failure) and mounts `App` only once a user, session, and
 server info exist. `info.webUrl` powers the "Open in Browser" command.
 
@@ -114,11 +115,11 @@ without one.
 ### Fonts (`fonts.ts`)
 
 A terminal owns its font, so the CLI cannot load one at runtime. `relay fonts install` copies the ttf/otf files from
-`@vvtxn/relay/assets/fonts` (embedded in the compiled binary via `scripts/build.ts`) into the platform user font
-directory (`~/.local/share/fonts`, `~/Library/Fonts`, `%LOCALAPPDATA%\Microsoft\Windows\Fonts`), refreshes fontconfig on
-Linux, and prints the family to select in the terminal settings. `status` reports which files are installed; `path`
-prints the bundled directory. The web client loads the same font automatically, so both clients render the same
-typeface.
+`@vvtxn/relay/assets/fonts` (resolved relative to the CLI bundle, which sits at the same depth as the source) into the
+platform user font directory (`~/.local/share/fonts`, `~/Library/Fonts`, `%LOCALAPPDATA%\Microsoft\Windows\Fonts`),
+refreshes fontconfig on Linux, and prints the family to select in the terminal settings. `status` reports which files are
+installed; `path` prints the bundled directory. The web client loads the same font automatically, so both clients render
+the same typeface.
 
 ## Dependencies
 
@@ -130,25 +131,25 @@ typeface.
 ## Running
 
 ```bash
-deno task relay           # start/reuse the server + TUI
-deno task relay web       # open the browser client
-deno task relay stop      # stop the background server
-deno task relay status    # show the background server
-deno task relay workspace add ~/Code/foo  # register a workspace (no TUI)
-deno task relay workspace list            # list registered workspaces
-deno task relay fonts status  # check whether the shared font is installed
+pnpm relay           # start/reuse the server + TUI
+pnpm relay web       # open the browser client
+pnpm relay stop      # stop the background server
+pnpm relay status    # show the background server
+pnpm relay workspace add ~/Code/foo  # register a workspace (no TUI)
+pnpm relay workspace list            # list registered workspaces
+pnpm relay fonts status  # check whether the shared font is installed
 ```
 
-The compiled binary uses the same commands: `relay`, `relay web`, `relay serve`, `relay stop`, `relay status`,
-`relay workspace add|list|remove`, `relay fonts`.
+The CLI runs from the built bundle (`packages/cli/dist`, produced by `pnpm relay`), using the same commands as the
+source entrypoint: `relay`, `relay web`, `relay serve`, `relay stop`, `relay status`, `relay workspace add|list|remove`,
+`relay fonts`.
 
 ## Task Completion Checklist
 
 After concluding that a task is complete, always run these commands from the repo root:
 
-1. `deno task fmt` — auto-format all code
-2. `deno task lint` — check for lint errors
-3. `deno task check` — strict type-check of every entrypoint
+1. `pnpm exec vp fmt` — auto-format all code
+2. `pnpm check` — format, lint, and type-check (Oxfmt, Oxlint, tsgo via Vite+)
 
 ## Code Patterns
 

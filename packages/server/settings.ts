@@ -16,11 +16,9 @@ function hintFor(apiKey: string): string {
  */
 export async function handleGetSettings(services: RequestServices): Promise<Response> {
 	const apiKey = await services.userSettings.getApiKey(services.user.id);
-	return json(
-		{
-			apiKey: { set: apiKey !== null, hint: apiKey !== null ? hintFor(apiKey) : null },
-		} satisfies SettingsResponse,
-	);
+	return json({
+		apiKey: { set: apiKey !== null, hint: apiKey !== null ? hintFor(apiKey) : null },
+	} satisfies SettingsResponse);
 }
 
 /** Set (with a string) or clear (with null/empty) the caller's LLM API key. */

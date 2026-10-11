@@ -8,7 +8,8 @@
  * same user.
  */
 
-import { join } from "@std/path/join";
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { relayDir } from "../paths.ts";
 
 export interface StoredSession {
@@ -24,8 +25,8 @@ function sessionPath(): string {
 
 export function writeStoredSession(session: StoredSession): void {
 	try {
-		Deno.mkdirSync(relayDir(), { recursive: true });
-		Deno.writeTextFileSync(sessionPath(), JSON.stringify(session, null, "\t") + "\n", { mode: 0o600 });
+		mkdirSync(relayDir(), { recursive: true });
+		writeFileSync(sessionPath(), JSON.stringify(session, null, "\t") + "\n", { mode: 0o600 });
 	} catch {
 		// Best effort — the web session still works without the CLI handoff.
 	}
@@ -33,7 +34,7 @@ export function writeStoredSession(session: StoredSession): void {
 
 export function readStoredSession(): StoredSession | null {
 	try {
-		const parsed = JSON.parse(Deno.readTextFileSync(sessionPath())) as Partial<StoredSession>;
+		const parsed = JSON.parse(readFileSync(sessionPath(), "utf8")) as Partial<StoredSession>;
 		if (typeof parsed.token !== "string" || parsed.token.length === 0) return null;
 		return {
 			serverUrl: typeof parsed.serverUrl === "string" ? parsed.serverUrl : "",
@@ -47,7 +48,7 @@ export function readStoredSession(): StoredSession | null {
 
 export function clearStoredSession(): void {
 	try {
-		Deno.removeSync(sessionPath());
+		rmSync(sessionPath(), { force: true });
 	} catch {
 		// Already gone.
 	}

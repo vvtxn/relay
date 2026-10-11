@@ -81,8 +81,8 @@ Agent output is rendered as markdown into Solid elements (no `innerHTML`). Link 
 
 ## Static assets
 
-The SPA is served from the bundled `packages/web/dist` (embedded in the compiled binary) or `RELAY_STATIC_DIR`, confined
-to that root with an `index.html` fallback for SPA routing. Directory traversal and path escapes are rejected.
+The SPA is served from `packages/web/dist` (built with `pnpm web:build`) or `RELAY_STATIC_DIR`, confined to that root
+with an `index.html` fallback for SPA routing. Directory traversal and path escapes are rejected.
 
 ## Hardening checklist for exposure
 
@@ -90,7 +90,7 @@ to that root with an `index.html` fallback for SPA routing. Directory traversal 
 2. Set `RELAY_WORKSPACE_ROOTS` to a non-wildcard allowlist (also enforced when the host is non-loopback).
 3. Terminate TLS and set `RELAY_PUBLIC_URL` to the https origin.
 4. Run the server as an unprivileged user, ideally in a container.
-5. Never commit `.env.*.local` files; `deno task build` does not embed env.
+5. Never commit `.env.*.local` files; they are only read locally at runtime.
 
 ## Reporting
 

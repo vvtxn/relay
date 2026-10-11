@@ -1,0 +1,20 @@
+{
+	"name": "@vvtxn/server",
+	"version": "0.1.0",
+	"type": "module",
+	"imports": {
+		"#/*": "./*"
+	},
+	"exports": {
+		".": "./mod.ts",
+		"./main.ts": "./main.ts",
+		"./*": "./*"
+	},
+	"dependencies": {
+		"@vvtxn/client": "workspace:*",
+		"@vvtxn/relay": "workspace:*"
+	},
+	"devDependencies": {
+		"@types/node": "^26.6.5"
+	}
+}

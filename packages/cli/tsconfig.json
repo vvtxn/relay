@@ -1,0 +1,10 @@
+{
+	"extends": "../../tsconfig.base.json",
+	"compilerOptions": {
+		"jsx": "react-jsx",
+		"jsxImportSource": "#/tui/render",
+		"types": ["node"]
+	},
+	"include": ["agent", "tui", "vite.config.ts"],
+	"exclude": ["node_modules", "dist"]
+}

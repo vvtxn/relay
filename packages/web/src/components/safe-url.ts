@@ -9,7 +9,7 @@
 const SAFE_SCHEMES = new Set(["http:", "https:", "mailto:"]);
 
 /** Strip characters browsers ignore inside URLs (control chars) before checking. */
-// deno-lint-ignore no-control-regex -- intentionally matching control characters
+// oxlint-disable-next-line no-control-regex -- intentionally matching control characters
 const CONTROL_CHARS = /[\u0000-\u001f\u007f]/g;
 
 /** Scheme prefix, e.g. `javascript:` in `javascript:alert(1)`. */

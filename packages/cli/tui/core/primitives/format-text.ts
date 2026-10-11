@@ -1,4 +1,4 @@
-import type { Instance } from "@/tui/render/types/index.ts";
+import type { Instance } from "#/tui/render/types/index.ts";
 import { applyAnsi } from "./color.ts";
 
 function childrenToString(children: unknown): string {

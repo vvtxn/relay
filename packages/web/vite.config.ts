@@ -1,4 +1,4 @@
-import { defineConfig } from "vite";
+import { defineConfig } from "vite-plus";
 import solid from "vite-plugin-solid";
 import path from "node:path";
 import { readFileSync } from "node:fs";
@@ -24,15 +24,15 @@ function relayApiTarget(): string {
 	} catch {
 		// No state file yet — fall through to the default.
 	}
-	const port = Deno.env.get("RELAY_PORT") ?? String(DEFAULT_API_PORT);
+	const port = process.env.RELAY_PORT ?? String(DEFAULT_API_PORT);
 	return `http://127.0.0.1:${port}`;
 }
 
 export default defineConfig({
 	plugins: [solid()],
 	resolve: {
+		// `#/` resolves through the package.json `imports` field.
 		alias: [
-			{ find: /^@\//, replacement: path.resolve(here, "src") + "/" },
 			{ find: /^@vvtxn\/relay\//, replacement: path.resolve(here, "../relay") + "/" },
 			{ find: /^@vvtxn\/client\//, replacement: path.resolve(here, "../client") + "/" },
 		],

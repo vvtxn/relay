@@ -1,8 +1,8 @@
 import { createMemo, createSignal, For, Show } from "solid-js";
 import { useMutation, useQuery } from "@tanstack/solid-query";
-import { filesQuery } from "@/api/queries.ts";
-import { cancelRun, sendMessage } from "@/api/mutations.ts";
-import { appendError, appendUserMessage, setRunning, streamState } from "@/state/session.ts";
+import { filesQuery } from "#/api/queries.ts";
+import { cancelRun, sendMessage } from "#/api/mutations.ts";
+import { appendError, appendUserMessage, setRunning, streamState } from "#/state/session.ts";
 
 const MAX_FILE_HITS = 10;
 
@@ -153,17 +153,14 @@ export function Composer(props: { sessionId: string }) {
 					<Show
 						when={running()}
 						fallback={
-							<button
-								type="button"
-								class="btn primary"
-								disabled={!value().trim()}
-								onClick={submit}
-							>
+							<button type="button" class="btn primary" disabled={!value().trim()} onClick={submit}>
 								Send
 							</button>
 						}
 					>
-						<button type="button" class="btn danger" onClick={() => stop.mutate()}>Stop</button>
+						<button type="button" class="btn danger" onClick={() => stop.mutate()}>
+							Stop
+						</button>
 					</Show>
 				</div>
 			</div>

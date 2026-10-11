@@ -1,9 +1,9 @@
-import { join } from "@std/path/join";
+import { join } from "node:path";
 
 const AGENT_DIR = ".relay";
 
 export function homeDir(): string | undefined {
-	return Deno.env.get("HOME") ?? Deno.env.get("USERPROFILE");
+	return process.env.HOME ?? process.env.USERPROFILE;
 }
 
 export function relayDir(): string {

@@ -1,7 +1,7 @@
 import { createRootRoute, createRoute, createRouter, Outlet } from "@tanstack/solid-router";
-import { BootPage } from "@/pages/BootPage.tsx";
-import { SessionPage } from "@/pages/SessionPage.tsx";
-import { SettingsPage } from "@/pages/SettingsPage.tsx";
+import { BootPage } from "#/pages/BootPage.tsx";
+import { SessionPage } from "#/pages/SessionPage.tsx";
+import { SettingsPage } from "#/pages/SettingsPage.tsx";
 
 const rootRoute = createRootRoute({ component: () => <Outlet /> });
 

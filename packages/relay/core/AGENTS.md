@@ -152,7 +152,7 @@ needs no changes and the model can react. Handlers waiting on user input should 
 
 ### Workspace Helpers (`workspace.ts`)
 
-Filesystem helpers rooted at an explicit workspace directory — the CLI passes `Deno.cwd()`, a server passes a
+Filesystem helpers rooted at an explicit workspace directory — the CLI passes `process.cwd()`, a server passes a
 per-session workspace:
 
 - `resolveWithinRoot(root, rel)` — resolves a path, returning null when it escapes the root
@@ -170,9 +170,8 @@ per-session workspace:
 
 After concluding that a task is complete, always run these commands from the repo root:
 
-1. `deno task fmt` — auto-format all code
-2. `deno task lint` — check for lint errors
-3. `deno task check` — strict type-check of every entrypoint
+1. `pnpm exec vp fmt` — auto-format all code
+2. `pnpm check` — format, lint, and type-check (Oxfmt, Oxlint, tsgo via Vite+)
 
 If any command fails, fix the issues and re-run until all pass cleanly.
 

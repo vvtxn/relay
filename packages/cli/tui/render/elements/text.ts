@@ -1,6 +1,6 @@
-import { visibleLength } from "@/tui/core/primitives/char-width.ts";
-import { formatText } from "@/tui/core/primitives/format-text.ts";
-import { wrapText } from "@/tui/core/primitives/wrap-text.ts";
+import { visibleLength } from "#/tui/core/primitives/char-width.ts";
+import { formatText } from "#/tui/core/primitives/format-text.ts";
+import { wrapText } from "#/tui/core/primitives/wrap-text.ts";
 import type { Children, ElementHandler, Position, TextInstance } from "../types/index.ts";
 import type { LayoutHandler } from "./index.ts";
 

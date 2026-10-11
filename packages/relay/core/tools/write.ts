@@ -1,3 +1,4 @@
+import { readFile, writeFile } from "node:fs/promises";
 import { generateDiff } from "./diff.ts";
 import { defineTool } from "./types.ts";
 
@@ -24,12 +25,12 @@ export const writeFileTool = defineTool({
 		try {
 			let original: string | null = null;
 			try {
-				original = await Deno.readTextFile(path);
+				original = await readFile(path, "utf8");
 			} catch {
 				// File doesn't exist yet
 			}
 
-			await Deno.writeTextFile(path, content);
+			await writeFile(path, content);
 
 			const isNew = original === null;
 			const lines = content.split("\n").length;

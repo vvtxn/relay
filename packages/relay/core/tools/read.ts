@@ -1,3 +1,4 @@
+import { readFile } from "node:fs/promises";
 import { defineTool } from "./types.ts";
 
 const MAX_OUTPUT = 10_000;
@@ -21,7 +22,7 @@ export const readFileTool = defineTool({
 		const { path } = input as { path: string };
 
 		try {
-			const content = await Deno.readTextFile(path);
+			const content = await readFile(path, "utf8");
 			const truncated = content.length > MAX_OUTPUT;
 
 			return {

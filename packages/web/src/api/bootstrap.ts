@@ -21,9 +21,7 @@ export const bootstrap: Effect.Effect<BootResult, RelayError, Api> = Effect.gen(
 
 	const health = yield* Effect.either(api.health());
 	if (Either.isLeft(health)) {
-		return yield* Effect.fail(
-			new RelayError({ message: `Cannot reach the Relay server at ${serverLabel}.` }),
-		);
+		return yield* Effect.fail(new RelayError({ message: `Cannot reach the Relay server at ${serverLabel}.` }));
 	}
 
 	const me = yield* Effect.either(api.me());

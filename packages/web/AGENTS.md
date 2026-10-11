@@ -1,15 +1,15 @@
 # AGENTS.md - Web
 
-SolidJS SPA served by the Relay server. Built with Vite; REST server state via TanStack Query; routing via TanStack
+SolidJS SPA served by the Relay server. Built with Vite+ (Vite); REST server state via TanStack Query; routing via TanStack
 Router; the SSE stream and domain fold via Effect; shared tokens and display helpers from `@vvtxn/relay`.
 
 ## Architecture
 
 ```
 web/
-├── deno.json        # @vvtxn/web; npm imports (solid-js, tanstack, effect, marked, vite) + JSX/lib config
-├── package.json     # type: module marker for Vite
-├── vite.config.ts   # solid plugin, @vvtxn/* + @/ aliases, /api dev proxy, fs.allow for sibling packages
+├── package.json     # @vvtxn/web; deps + #/ imports (JSX/lib config lives in tsconfig.json)
+├── tsconfig.json    # solid JSX settings, DOM libs
+├── vite.config.ts   # solid plugin, @vvtxn/* aliases, /api dev proxy, fs.allow for sibling packages
 ├── index.html       # Vite entry
 ├── dist/            # Build output (gitignored) — served by the server in production
 └── src/
@@ -120,9 +120,9 @@ re-validates the persisted cwd and falls back to the server default.
 ## Building & Running
 
 ```bash
-deno task web:dev        # Vite dev server (proxies /api to 127.0.0.1:7433)
-deno task web:build      # vite build → packages/web/dist
-deno task serve:prod     # serve the built SPA (production env; RELAY_STATIC_DIR set)
+pnpm web:dev        # Vite dev server (proxies /api to 127.0.0.1:7433)
+pnpm web:build      # vite build → packages/web/dist
+pnpm serve:prod     # serve the built SPA (production env; RELAY_STATIC_DIR set)
 ```
 
 Server URL defaults to same-origin (`""`), so dev requests go through the Vite `/api` proxy and production requests hit
@@ -134,7 +134,7 @@ different server (which must then allow this browser origin). The legacy absolut
 - `solid-js` (1.x), `@tanstack/solid-query`, `@tanstack/solid-router` (npm)
 - `effect` (v3) — services, layers, streams, runtime, typed errors
 - `marked` — markdown lexer (rendered safely to vnodes)
-- `vite` + `vite-plugin-solid` (build)
+- `vite-plugin-solid` — Solid compiler plugin; Vite itself comes from `vite-plus`
 - `@vvtxn/client` — protocol, RelayClient, shared session-state reducer
 - `@vvtxn/relay` — `display.ts` helpers and `theme.ts` tokens (browser-pure)
 
@@ -142,16 +142,15 @@ different server (which must then allow this browser origin). The legacy absolut
 
 After concluding that a task is complete, always run these commands from the repo root:
 
-1. `deno task fmt` — auto-format all code
-2. `deno task lint` — check for lint errors
-3. `deno task check` — strict type-check of every entrypoint
-4. `deno task web:build` — verify the bundle builds
+1. `pnpm exec vp fmt` — auto-format all code
+2. `pnpm check` — format, lint, and type-check (Oxfmt, Oxlint, tsgo via Vite+)
+3. `pnpm web:build` — verify the bundle builds
 
 ## Code Patterns
 
 - REST server state belongs in TanStack Query; live run state belongs in the session stream store
 - Extend `@vvtxn/client` first when a new server capability is needed, then the Effect `Api`, then components
 - Fold logic lives in `@vvtxn/client/session-state.ts` — never reimplement draft handling in the web app
-- Buttons always declare `type="button"` (deno lint enforces it)
-- Use `globalThis.location` rather than `window` (deno lint's `no-window`)
-- Deno lint runs on this package too — keep TSX lint-clean
+- Buttons always declare `type="button"` (`react/button-has-type` in Oxlint)
+- Prefer `globalThis.location` over `window` for consistency
+- `vp check` runs on this package too — keep TSX lint-clean and type-clean

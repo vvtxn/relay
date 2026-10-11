@@ -15,7 +15,12 @@
  * server log so the conflict is fixed rather than hidden.
  */
 
-import { dirname, fromFileUrl, join } from "@std/path";
+import { type ChildProcess } from "node:child_process";
+import { closeSync, mkdirSync, openSync, readFileSync, readSync, rmSync, statSync } from "node:fs";
+import { createServer } from "node:net";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { spawnDetached } from "@vvtxn/relay/core/command.ts";
 import type { SettingsResponse } from "@vvtxn/client/protocol.ts";
 import { readStoredSession } from "@vvtxn/relay/core/auth/session-file.ts";
 import { relayDir } from "@vvtxn/relay/core/paths.ts";
@@ -60,12 +65,8 @@ function delay(ms: number): Promise<void> {
 
 export function readState(): ServerState | null {
 	try {
-		const parsed = JSON.parse(Deno.readTextFileSync(statePath())) as Partial<ServerState>;
-		if (
-			typeof parsed.url !== "string" ||
-			typeof parsed.port !== "number" ||
-			typeof parsed.pid !== "number"
-		) {
+		const parsed = JSON.parse(readFileSync(statePath(), "utf8")) as Partial<ServerState>;
+		if (typeof parsed.url !== "string" || typeof parsed.port !== "number" || typeof parsed.pid !== "number") {
 			return null;
 		}
 		return {
@@ -83,7 +84,7 @@ export function readState(): ServerState | null {
 
 function clearState(): void {
 	try {
-		Deno.removeSync(statePath());
+		rmSync(statePath(), { force: true });
 	} catch {
 		// Already gone.
 	}
@@ -93,7 +94,7 @@ async function isHealthy(url: string): Promise<boolean> {
 	try {
 		const response = await fetch(`${url}/api/health`, { signal: AbortSignal.timeout(HEALTH_TIMEOUT_MS) });
 		if (!response.ok) return false;
-		const body = await response.json() as { status?: string };
+		const body = (await response.json()) as { status?: string };
 		return body.status === "ok";
 	} catch {
 		return false;
@@ -102,7 +103,7 @@ async function isHealthy(url: string): Promise<boolean> {
 
 /** Port the background server should use: explicit `RELAY_PORT`, else the default. */
 function preferredPort(): number {
-	const explicit = Number(Deno.env.get("RELAY_PORT"));
+	const explicit = Number(process.env.RELAY_PORT);
 	if (Number.isInteger(explicit) && explicit > 0) return explicit;
 	return DEFAULT_PORT;
 }
@@ -114,13 +115,13 @@ function preferredPort(): number {
  * and production deployments must surface a port conflict instead of hiding it.
  */
 function portFallbackAllowed(): boolean {
-	const explicit = Number(Deno.env.get("RELAY_PORT"));
+	const explicit = Number(process.env.RELAY_PORT);
 	if (Number.isInteger(explicit) && explicit > 0) return false;
-	return Deno.env.get("RELAY_ENV") !== "production";
+	return process.env.RELAY_ENV !== "production";
 }
 
 function startTimeoutMs(): number {
-	const raw = Number(Deno.env.get("RELAY_START_TIMEOUT_MS"));
+	const raw = Number(process.env.RELAY_START_TIMEOUT_MS);
 	return Number.isFinite(raw) && raw > 0 ? raw : DEFAULT_START_TIMEOUT_MS;
 }
 
@@ -136,100 +137,72 @@ function adoptedState(url: string, port: number, cwd: string): ServerState {
 		pid: 0,
 		startedAt: "",
 		cwd,
-		webUrl: (Deno.env.get("RELAY_PUBLIC_URL") ?? url).replace(/\/+$/, ""),
+		webUrl: (process.env.RELAY_PUBLIC_URL ?? url).replace(/\/+$/, ""),
 	};
 }
 
 /** Bind an ephemeral port, release it, and return the number. */
 async function pickFreePort(): Promise<number> {
-	const server = Deno.serve({ port: 0, hostname: "127.0.0.1", onListen: () => {} }, () => new Response());
-	const port = (server.addr as Deno.NetAddr).port;
-	await server.shutdown();
+	const server = createServer();
+	await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+	const address = server.address();
+	const port = typeof address === "object" && address ? address.port : 0;
+	await new Promise<void>((resolve) => server.close(() => resolve()));
 	return port;
 }
 
 /** Arguments that re-launch this program as a foreground server. */
 function serverArgs(): string[] {
-	if (Deno.build.standalone) return ["serve"];
-	const entry = fromFileUrl(new URL("../../server/main.ts", import.meta.url));
-	return ["run", "--unstable-raw-imports", "--allow-all", entry];
+	const entry = fileURLToPath(new URL("../../server/main.ts", import.meta.url));
+	return [entry];
 }
 
-function spawnServer(port: number, cwd: string): Deno.ChildProcess {
+function spawnServer(port: number, cwd: string): ChildProcess {
 	const stateFile = statePath();
-	Deno.mkdirSync(dirname(stateFile), { recursive: true });
-	Deno.mkdirSync(dirname(logPath()), { recursive: true });
+	mkdirSync(dirname(stateFile), { recursive: true });
+	mkdirSync(dirname(logPath()), { recursive: true });
 
-	const env: Record<string, string> = {
-		...Deno.env.toObject(),
-		RELAY_WORKSPACE: cwd,
-		RELAY_PORT: String(port),
-		RELAY_STATE_FILE: stateFile,
-	};
+	const env: Record<string, string> = {};
+	for (const [key, value] of Object.entries(process.env)) {
+		if (value !== undefined) env[key] = value;
+	}
+	env.RELAY_WORKSPACE = cwd;
+	env.RELAY_PORT = String(port);
+	env.RELAY_STATE_FILE = stateFile;
 
-	const child = detachCommand(env, serverArgs()).spawn();
+	// A new process group (detached) survives the terminal closing; stdout and
+	// stderr are appended to the shared server log for startup diagnostics.
+	const child = spawnDetached(process.execPath, { args: serverArgs(), env, logFile: logPath() });
 	child.unref();
 	return child;
-}
-
-/**
- * A command that outlives the CLI. `setsid` moves the server into a new
- * session (so it survives the terminal closing) on Linux/BSD; macOS has no
- * `setsid`, so it uses `nohup`, whose ignored-SIGHUP disposition survives the
- * `exec`. Windows has neither — `unref()` alone is enough there.
- */
-function detachCommand(env: Record<string, string>, args: string[]): Deno.Command {
-	if (Deno.build.os === "windows") {
-		return new Deno.Command(Deno.execPath(), {
-			args,
-			env,
-			stdin: "null",
-			stdout: "null",
-			stderr: "null",
-		});
-	}
-
-	const script = 'exec "$@" >>"$RELAY_SERVER_LOG" 2>&1';
-	const logEnv = { ...env, RELAY_SERVER_LOG: logPath() };
-	if (Deno.build.os === "darwin") {
-		return new Deno.Command("nohup", {
-			args: ["sh", "-c", script, "sh", Deno.execPath(), ...args],
-			env: logEnv,
-			stdin: "null",
-			stdout: "null",
-			stderr: "null",
-		});
-	}
-	return new Deno.Command("setsid", {
-		args: ["sh", "-c", script, "sh", Deno.execPath(), ...args],
-		env: logEnv,
-		stdin: "null",
-	});
 }
 
 /** Last lines of the background server log, for startup failure messages. */
 function readLogTail(maxLines = 15, maxBytes = 32 * 1024): string {
 	try {
 		const path = logPath();
-		const size = Deno.statSync(path).size;
+		const size = statSync(path).size;
 		const start = Math.max(0, size - maxBytes);
-		const file = Deno.openSync(path, { read: true });
+		const file = openSync(path, "r");
 		try {
-			if (start > 0) file.seekSync(start, Deno.SeekMode.Start);
-			const buffer = new Uint8Array(size - start);
+			const buffer = Buffer.alloc(size - start);
 			let read = 0;
 			while (read < buffer.length) {
-				const chunk = file.readSync(buffer.subarray(read));
-				if (chunk === null) break;
+				const chunk = readSync(file, buffer, read, buffer.length - read, start + read);
+				if (chunk === 0) break;
 				read += chunk;
 			}
-			// deno-lint-ignore no-control-regex -- strip ANSI color codes from the log tail
+			// oxlint-disable-next-line no-control-regex -- strip ANSI color codes from the log tail
 			const text = new TextDecoder().decode(buffer.subarray(0, read)).replace(/\x1b\[[0-9;]*m/g, "");
 			const lines = text.split("\n");
 			if (start > 0) lines.shift();
-			return lines.filter((line) => line.trim() !== "").slice(-maxLines).join("\n").trim();
+			return lines
+				.filter((line) => line.trim() !== "")
+				.slice(-maxLines)
+				.join("\n")
+				.trim();
 		} finally {
-			file.close();
+			closeSync(file);
 		}
 	} catch {
 		return "";
@@ -256,22 +229,22 @@ type StartOutcome =
 	| { kind: "timeout"; detail: string };
 
 /** Wait until the spawned server is healthy, exits, or the timeout elapses. */
-async function awaitStart(child: Deno.ChildProcess, port: number, cwd: string): Promise<StartOutcome> {
+async function awaitStart(child: ChildProcess, port: number, cwd: string): Promise<StartOutcome> {
 	const startedAt = Date.now();
 	const deadline = startedAt + startTimeoutMs();
-	const exit: { status: Deno.CommandStatus | null } = { status: null };
-	child.status.then((status) => {
-		exit.status = status;
-	}).catch(() => {});
+	const exit: { status: number | null } = { status: null };
+	child.once("exit", (code) => {
+		exit.status = code ?? -1;
+	});
 	let hintShown = false;
 	while (Date.now() < deadline) {
 		const state = readState();
-		if (state && state.pid > 0 && await isHealthy(state.url)) return { kind: "started", state };
+		if (state && state.pid > 0 && (await isHealthy(state.url))) return { kind: "started", state };
 		const url = loopbackUrl(port);
 		if (await isHealthy(url)) return { kind: "started", state: adoptedState(url, port, cwd) };
-		if (exit.status) {
-			if (exit.status.code === EXIT_ADDR_IN_USE) return { kind: "addr-in-use" };
-			return { kind: "exited", detail: `the server exited (code ${exit.status.code})` };
+		if (exit.status !== null) {
+			if (exit.status === EXIT_ADDR_IN_USE) return { kind: "addr-in-use" };
+			return { kind: "exited", detail: `the server exited (code ${exit.status})` };
 		}
 		if (!hintShown && Date.now() - startedAt > 3_000) {
 			hintShown = true;
@@ -293,7 +266,7 @@ async function waitForRunningServer(preferred: number, cwd: string): Promise<Ser
 	const deadline = Date.now() + CONFLICT_GRACE_MS;
 	while (Date.now() < deadline) {
 		const state = readState();
-		if (state && state.pid > 0 && await isHealthy(state.url)) return state;
+		if (state && state.pid > 0 && (await isHealthy(state.url))) return state;
 		const url = loopbackUrl(preferred);
 		if (await isHealthy(url)) return adoptedState(url, preferred, cwd);
 		await delay(150);
@@ -308,7 +281,7 @@ async function waitForRunningServer(preferred: number, cwd: string): Promise<Ser
  * `cwd` as its workspace.
  */
 export async function ensureServer(options: { cwd: string }): Promise<ServerState> {
-	const explicit = Deno.env.get("RELAY_SERVER_URL");
+	const explicit = process.env.RELAY_SERVER_URL;
 	if (explicit) {
 		const url = explicit.replace(/\/+$/, "");
 		if (!(await isHealthy(url))) throw new Error(`Cannot reach the Relay server at ${url}.`);
@@ -323,7 +296,7 @@ export async function ensureServer(options: { cwd: string }): Promise<ServerStat
 	}
 
 	const existing = readState();
-	if (existing && await isHealthy(existing.url)) return existing;
+	if (existing && (await isHealthy(existing.url))) return existing;
 	if (existing) clearState();
 
 	// Adopt a healthy server on the preferred port even without a state file —
@@ -333,7 +306,7 @@ export async function ensureServer(options: { cwd: string }): Promise<ServerStat
 
 	const fallbackAllowed = portFallbackAllowed();
 	let port = preferred;
-	for (let attempt = 1;; attempt++) {
+	for (let attempt = 1; ; attempt++) {
 		const outcome = await awaitStart(spawnServer(port, options.cwd), port, options.cwd);
 		if (outcome.kind === "started") return outcome.state;
 		if (outcome.kind === "exited") throw startupFailure(outcome.detail);
@@ -437,7 +410,7 @@ export async function apiKeyStatus(serverUrl: string): Promise<ApiKeyStatus> {
 		});
 		if (response.status === 401) return { status: "unauthenticated" };
 		if (!response.ok) return { status: "unreachable", detail: `the server returned ${response.status}` };
-		const body = await response.json() as Partial<SettingsResponse> | null;
+		const body = (await response.json()) as Partial<SettingsResponse> | null;
 		// A malformed body counts as "missing": the TUI can only be entered once a
 		// key is confirmed, and the user can always re-save it.
 		return body?.apiKey?.set ? { status: "configured" } : { status: "missing" };
@@ -515,12 +488,12 @@ export async function ensureApiKey(state: ServerState): Promise<void> {
 		return;
 	}
 	try {
-		Deno.kill(state.pid, "SIGTERM");
+		process.kill(state.pid, "SIGTERM");
 	} catch (error) {
-		console.error(`Failed to signal the server: ${error instanceof Error ? error.message : error}`);
+		console.error(`Failed to signal the server: ${error instanceof Error ? error.message : String(error)}`);
 	}
 	const deadline = Date.now() + STOP_TIMEOUT_MS;
-	while (Date.now() < deadline && await isHealthy(state.url)) await delay(100);
+	while (Date.now() < deadline && (await isHealthy(state.url))) await delay(100);
 	clearState();
 	console.log("Relay server stopped.");
 }
@@ -551,7 +524,7 @@ async function isReachable(url: string): Promise<boolean> {
 /** `relay web`: ensure a server, open the browser, then return (or stay watching). */
 export async function runWeb(args: string[]): Promise<void> {
 	const foreground = args.includes("--foreground");
-	const state = await ensureServer({ cwd: Deno.cwd() });
+	const state = await ensureServer({ cwd: process.cwd() });
 	let webUrl = state.webUrl || state.url;
 
 	// In development the web origin is Vite (e.g. localhost:5173); if that is
@@ -567,7 +540,6 @@ export async function runWeb(args: string[]): Promise<void> {
 	if (!foreground) return;
 	console.log("Watching in the foreground; press Ctrl-C to detach (the server keeps running).");
 	await new Promise<void>((resolve) => {
-		const onSignal = () => resolve();
-		Deno.addSignalListener("SIGINT", onSignal);
+		process.once("SIGINT", () => resolve());
 	});
 }

@@ -1,8 +1,8 @@
-import { RESET_FG } from "@/tui/core/ansi.ts";
-import { toAnsi } from "@/tui/core/primitives/color.ts";
-import { findMentions, type MentionRange } from "@/tui/core/primitives/mentions.ts";
-import { cursorPositionInWrappedText, type WrappedLine, wrapTextForEditing } from "@/tui/core/primitives/wrap-text.ts";
-import { theme } from "@/tui/theme.ts";
+import { RESET_FG } from "#/tui/core/ansi.ts";
+import { toAnsi } from "#/tui/core/primitives/color.ts";
+import { findMentions, type MentionRange } from "#/tui/core/primitives/mentions.ts";
+import { cursorPositionInWrappedText, type WrappedLine, wrapTextForEditing } from "#/tui/core/primitives/wrap-text.ts";
+import { theme } from "#/tui/theme.ts";
 import type { ElementHandler, Position, TextInputInstance } from "../types/index.ts";
 import type { LayoutHandler } from "./index.ts";
 

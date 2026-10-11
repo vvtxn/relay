@@ -7,7 +7,7 @@
  * project can be added from any shell and immediately appears in the browser.
  */
 
-import { resolve } from "@std/path";
+import { resolve } from "node:path";
 import { abbreviateHome, expandHome } from "@vvtxn/relay/core/display.ts";
 import { homeDir } from "@vvtxn/relay/core/paths.ts";
 import type { RelayClient } from "@vvtxn/client/client.ts";
@@ -42,8 +42,8 @@ function display(path: string): string {
 }
 
 async function withClient<T>(fn: (client: RelayClient) => Promise<T>): Promise<T> {
-	const state = await ensureServer({ cwd: Deno.cwd() });
-	Deno.env.set("RELAY_SERVER_URL", state.url);
+	const state = await ensureServer({ cwd: process.cwd() });
+	process.env.RELAY_SERVER_URL = state.url;
 	await ensureAuthenticated(state);
 	return await fn(createClient(state.url));
 }
@@ -56,7 +56,7 @@ async function add(args: string[]): Promise<void> {
 			console.log(`Added workspace ${display(workspace.cwd)}`);
 		} catch (error) {
 			console.error(error instanceof Error ? error.message : String(error));
-			Deno.exit(1);
+			process.exit(1);
 		}
 	});
 }
@@ -83,7 +83,7 @@ async function list(): Promise<void> {
 async function remove(args: string[]): Promise<void> {
 	if (!args[0]) {
 		console.error("Usage: relay workspace remove <path>");
-		Deno.exit(1);
+		process.exit(1);
 	}
 	const target = absolute(args[0]);
 	await withClient(async (client) => {
@@ -107,6 +107,6 @@ export async function runWorkspaceCommand(args: string[]): Promise<void> {
 			return;
 		default:
 			usage();
-			if (sub) Deno.exit(1);
+			if (sub) process.exit(1);
 	}
 }

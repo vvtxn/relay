@@ -1,7 +1,7 @@
-import type { DeltaToolCall, LLMProvider, Message, ToolCall, Usage } from "@/api/types.ts";
-import { getDefinitions } from "@/core/tools/types.ts";
-import type { ToolRegistry, ToolResult } from "@/core/tools/types.ts";
-import { trimContext, type TrimOptions } from "@/core/context.ts";
+import type { DeltaToolCall, LLMProvider, Message, ToolCall, Usage } from "#/api/types.ts";
+import { getDefinitions } from "#/core/tools/types.ts";
+import type { ToolRegistry, ToolResult } from "#/core/tools/types.ts";
+import { trimContext, type TrimOptions } from "#/core/context.ts";
 
 // ---------------------------------------------------------------------------
 // Agent events — yielded by run() for the UI to consume
@@ -43,17 +43,11 @@ const STREAM_TIMEOUT_MS = 60_000; // 1 min max silence from LLM stream
 // Agent loop (async generator)
 // ---------------------------------------------------------------------------
 
-export async function* run(
-	messages: Message[],
-	config: AgentConfig,
-): AsyncGenerator<AgentEvent> {
+export async function* run(messages: Message[], config: AgentConfig): AsyncGenerator<AgentEvent> {
 	const maxRounds = config.maxToolRounds ?? DEFAULT_MAX_TOOL_ROUNDS;
 	const toolDefs = getDefinitions(config.tools);
 
-	let context: Message[] = [
-		{ role: "system", content: config.systemPrompt },
-		...messages,
-	];
+	let context: Message[] = [{ role: "system", content: config.systemPrompt }, ...messages];
 
 	const recentCallSignatures: string[] = [];
 
@@ -65,8 +59,7 @@ export async function* run(
 		if (round > 0 && round % REFLECTION_INTERVAL === 0) {
 			context.push({
 				role: "user",
-				content:
-					`[system note] You have completed ${round} tool rounds. Briefly assess: are you making progress toward the user's goal? If stuck or repeating yourself, try a different approach.`,
+				content: `[system note] You have completed ${round} tool rounds. Briefly assess: are you making progress toward the user's goal? If stuck or repeating yourself, try a different approach.`,
 			});
 		}
 
@@ -177,9 +170,7 @@ export async function* run(
 		const toolResults: { tc: ToolCall; result: ToolResult }[] = [];
 
 		if (readonlyCalls.length > 0) {
-			const results = await Promise.all(
-				readonlyCalls.map((tc) => executeTool(tc, config.tools, config.signal)),
-			);
+			const results = await Promise.all(readonlyCalls.map((tc) => executeTool(tc, config.tools, config.signal)));
 			toolResults.push(...results);
 		}
 
@@ -221,18 +212,17 @@ export async function* run(
 function isRetryableError(err: unknown): boolean {
 	if (err instanceof DOMException && err.name === "AbortError") return false;
 	const msg = err instanceof Error ? err.message : String(err);
-	return /\b(429|500|502|503|504)\b/.test(msg) ||
+	return (
+		/\b(429|500|502|503|504)\b/.test(msg) ||
 		msg.includes("network") ||
 		msg.includes("ECONNRESET") ||
 		msg.includes("fetch failed") ||
 		msg.includes("ETIMEDOUT") ||
-		msg.includes("Stream timeout");
+		msg.includes("Stream timeout")
+	);
 }
 
-async function* withStreamTimeout<T>(
-	stream: AsyncIterable<T>,
-	timeoutMs: number,
-): AsyncGenerator<T> {
+async function* withStreamTimeout<T>(stream: AsyncIterable<T>, timeoutMs: number): AsyncGenerator<T> {
 	const iterator = stream[Symbol.asyncIterator]();
 	while (true) {
 		let timer: ReturnType<typeof setTimeout>;
@@ -311,10 +301,8 @@ type ErrorKind = "unknown_tool" | "invalid_args" | "execution";
 
 function enrichError(toolName: string, rawError: string, kind: ErrorKind): ToolResult {
 	const hints: Record<ErrorKind, string> = {
-		unknown_tool:
-			`Available tools may have different names. Check the tool list and try again with the correct name.`,
-		invalid_args:
-			`The arguments could not be parsed as JSON. Review the tool's parameter schema and provide valid JSON.`,
+		unknown_tool: `Available tools may have different names. Check the tool list and try again with the correct name.`,
+		invalid_args: `The arguments could not be parsed as JSON. Review the tool's parameter schema and provide valid JSON.`,
 		execution: getExecutionHint(rawError),
 	};
 
@@ -362,9 +350,7 @@ function* processToolCallDelta(
 	}
 }
 
-function buildToolCalls(
-	accumulator: Map<number, { id: string; name: string; args: string }>,
-): ToolCall[] {
+function buildToolCalls(accumulator: Map<number, { id: string; name: string; args: string }>): ToolCall[] {
 	const sorted = [...accumulator.entries()].sort(([a], [b]) => a - b);
 	return sorted.map(([, tc]) => ({
 		id: tc.id,

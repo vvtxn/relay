@@ -1,4 +1,5 @@
-import { join } from "@std/path/join";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { relayDir } from "@vvtxn/relay/core/paths.ts";
 
 export interface RelayConfig {
@@ -13,14 +14,16 @@ const defaults: RelayConfig = {
 function loadUserConfig(): Partial<RelayConfig> {
 	const path = join(relayDir(), "config.json");
 	try {
-		const raw = Deno.readTextFileSync(path);
+		const raw = readFileSync(path, "utf8");
 		return JSON.parse(raw) as Partial<RelayConfig>;
 	} catch {
 		try {
 			const dir = relayDir();
-			Deno.mkdirSync(dir, { recursive: true });
-			Deno.writeTextFileSync(path, JSON.stringify(defaults, null, "\t") + "\n");
-		} catch { /* ignore — read-only fs or similar */ }
+			mkdirSync(dir, { recursive: true });
+			writeFileSync(path, JSON.stringify(defaults, null, "\t") + "\n");
+		} catch {
+			/* ignore — read-only fs or similar */
+		}
 		return {};
 	}
 }
@@ -29,5 +32,5 @@ export const config: RelayConfig = { ...defaults, ...loadUserConfig() };
 
 /** Environment overrides the config file. */
 export function resolveServerUrl(): string {
-	return Deno.env.get("RELAY_SERVER_URL") ?? config.serverUrl;
+	return process.env.RELAY_SERVER_URL ?? config.serverUrl;
 }

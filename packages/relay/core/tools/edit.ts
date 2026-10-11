@@ -1,3 +1,4 @@
+import { readFile, writeFile } from "node:fs/promises";
 import { generateDiff } from "./diff.ts";
 import { defineTool } from "./types.ts";
 
@@ -10,7 +11,8 @@ interface EditInput {
 
 export const editFileTool = defineTool({
 	name: "edit_file",
-	description: "Edit a file by replacing an exact string match with new content. " +
+	description:
+		"Edit a file by replacing an exact string match with new content. " +
 		"The old_str must match exactly one location in the file (unless replace_all is true). " +
 		"Returns a unified diff of the change. Always read the file first to get the exact text to replace.",
 	parameters: {
@@ -44,20 +46,20 @@ export const editFileTool = defineTool({
 		}
 
 		try {
-			const original = await Deno.readTextFile(path);
+			const original = await readFile(path, "utf8");
 
 			const count = countOccurrences(original, old_str);
 			if (count === 0) {
 				const hint = suggestHint(original, old_str);
 				return {
-					content:
-						`No match found for old_str in ${path}.${hint}\n\nRead the file first to get the exact text.`,
+					content: `No match found for old_str in ${path}.${hint}\n\nRead the file first to get the exact text.`,
 					isError: true,
 				};
 			}
 			if (count > 1 && !replace_all) {
 				return {
-					content: `Found ${count} matches for old_str in ${path}. ` +
+					content:
+						`Found ${count} matches for old_str in ${path}. ` +
 						`Add more surrounding context to make the match unique, or set replace_all: true.`,
 					isError: true,
 				};
@@ -67,7 +69,7 @@ export const editFileTool = defineTool({
 				? replaceAll(original, old_str, new_str)
 				: replaceFirst(original, old_str, new_str);
 
-			await Deno.writeTextFile(path, updated);
+			await writeFile(path, updated);
 
 			const replaced = replace_all ? `${count} occurrence${count > 1 ? "s" : ""}` : "1 occurrence";
 			const diff = generateDiff(original, updated);

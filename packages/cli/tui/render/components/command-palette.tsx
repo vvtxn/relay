@@ -1,5 +1,5 @@
 import { Box, Text, TextInput } from "../components.tsx";
-import { theme } from "@/tui/theme.ts";
+import { theme } from "#/tui/theme.ts";
 import type { CommandPaletteItem } from "../hooks/command-palette.ts";
 import type { useCommandPalette } from "../hooks/command-palette.ts";
 
@@ -26,14 +26,10 @@ export function CommandPalette(props: CommandPaletteProps) {
 			justifyContent="center"
 			alignItems="center"
 		>
-			<Box
-				width={width}
-				bgColor={theme.surfaceElevated}
-				flexDirection="column"
-				padding={1}
-				gap={1}
-			>
-				<Text bold color={theme.textDim}>{title}</Text>
+			<Box width={width} bgColor={theme.surfaceElevated} flexDirection="column" padding={1} gap={1}>
+				<Text bold color={theme.textDim}>
+					{title}
+				</Text>
 				<TextInput
 					value={palette.query.value}
 					cursorPosition={palette.cursor.value}

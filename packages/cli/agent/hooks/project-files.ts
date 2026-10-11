@@ -1,5 +1,5 @@
-import type { CommandPaletteItem } from "@/tui/render/hooks/command-palette.ts";
-import { useSignal } from "@/tui/render/hooks/signals.ts";
+import type { CommandPaletteItem } from "#/tui/render/hooks/command-palette.ts";
+import { useSignal } from "#/tui/render/hooks/signals.ts";
 import { getClient } from "../client.ts";
 
 /**

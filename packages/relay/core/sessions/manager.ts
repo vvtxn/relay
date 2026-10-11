@@ -1,6 +1,7 @@
-import { join } from "@std/path/join";
-import { dirname } from "@std/path/dirname";
-import type { Message } from "@/api/types.ts";
+import { createReadStream } from "node:fs";
+import { mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
+import type { Message } from "#/api/types.ts";
 import { sessionDir, sessionFilePath } from "./paths.ts";
 import {
 	CURRENT_VERSION,
@@ -27,7 +28,7 @@ function newId(): string {
 // ---------------------------------------------------------------------------
 
 async function readSession(path: string): Promise<Session> {
-	const text = await Deno.readTextFile(path);
+	const text = await readFile(path, "utf8");
 	const lines = text.split("\n").filter((l) => l.trim() !== "");
 	const headerLine = lines[0];
 	if (!headerLine) throw new Error(`Session file has no header: ${path}`);
@@ -63,7 +64,7 @@ export function entriesToMessages(entries: Entry[]): Message[] {
 	return entries.map(entryToMessage);
 }
 
-export { stripAttachedContext } from "@/core/display.ts";
+export { stripAttachedContext } from "#/core/display.ts";
 
 // ---------------------------------------------------------------------------
 // SessionManager
@@ -119,12 +120,12 @@ export class SessionManager {
 		const files: { path: string; mtime: number }[] = [];
 
 		try {
-			for await (const entry of Deno.readDir(dir)) {
-				if (entry.isFile && entry.name.endsWith(".jsonl")) {
+			for (const entry of await readdir(dir, { withFileTypes: true })) {
+				if (entry.isFile() && entry.name.endsWith(".jsonl")) {
 					try {
 						const path = join(dir, entry.name);
-						const stat = await Deno.stat(path);
-						files.push({ path, mtime: stat.mtime?.getTime() ?? 0 });
+						const info = await stat(path);
+						files.push({ path, mtime: info.mtime?.getTime() ?? 0 });
 					} catch {
 						// Skip files that vanish between readDir and stat
 					}
@@ -141,7 +142,7 @@ export class SessionManager {
 	static async cleanup(cwd: string, keep = 10, ownerId?: string): Promise<number> {
 		const files = await SessionManager.list(cwd, ownerId);
 		const toDelete = files.slice(keep);
-		await Promise.all(toDelete.map((f) => Deno.remove(f)));
+		await Promise.all(toDelete.map((f) => rm(f, { force: true })));
 		return toDelete.length;
 	}
 
@@ -152,22 +153,26 @@ export class SessionManager {
 
 		for (const filePath of files) {
 			try {
-				const file = await Deno.open(filePath, { read: true });
+				const stream = createReadStream(filePath);
 				const lines: string[] = [];
 				let buf = "";
 
 				// Read only enough to get header + first user message (typically lines 1-2)
-				for await (const chunk of file.readable) {
-					buf += new TextDecoder().decode(chunk);
-					const parts = buf.split("\n");
-					for (let i = 0; i < parts.length - 1; i++) {
-						const part = parts[i];
-						if (part?.trim()) lines.push(part);
-					}
-					buf = parts[parts.length - 1] ?? "";
+				try {
+					for await (const chunk of stream) {
+						buf += new TextDecoder().decode(chunk as Uint8Array);
+						const parts = buf.split("\n");
+						for (let i = 0; i < parts.length - 1; i++) {
+							const part = parts[i];
+							if (part?.trim()) lines.push(part);
+						}
+						buf = parts[parts.length - 1] ?? "";
 
-					// Header + first entry is enough in most cases
-					if (lines.length >= 2) break;
+						// Header + first entry is enough in most cases
+						if (lines.length >= 2) break;
+					}
+				} finally {
+					stream.destroy();
 				}
 				if (buf.trim()) lines.push(buf);
 				if (lines.length === 0) continue;
@@ -233,10 +238,10 @@ export class SessionManager {
 	/** Flush a dirty header by rewriting the session file. */
 	private async flushHeader(): Promise<void> {
 		if (!this.path || !this.headerDirty) return;
-		const content = await Deno.readTextFile(this.path);
+		const content = await readFile(this.path, "utf8");
 		const lines = content.split("\n");
 		lines[0] = JSON.stringify(this.session.header);
-		await Deno.writeTextFile(this.path, lines.join("\n"));
+		await writeFile(this.path, lines.join("\n"));
 		this.headerDirty = false;
 	}
 
@@ -248,12 +253,12 @@ export class SessionManager {
 			const full = { ...entry, id, timestamp: new Date().toISOString() } as Entry;
 			if (this.path) {
 				if (this.needsFlush) {
-					await Deno.mkdir(dirname(this.path), { recursive: true });
-					await Deno.writeTextFile(this.path, JSON.stringify(this.session.header) + "\n");
+					await mkdir(dirname(this.path), { recursive: true });
+					await writeFile(this.path, JSON.stringify(this.session.header) + "\n");
 					this.needsFlush = false;
 					this.headerDirty = false;
 				} else if (this.headerDirty) await this.flushHeader();
-				await Deno.writeTextFile(this.path, JSON.stringify(full) + "\n", { append: true });
+				await writeFile(this.path, JSON.stringify(full) + "\n", { flag: "a" });
 			}
 			this.session.entries.push(full);
 		});

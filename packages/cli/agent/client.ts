@@ -7,7 +7,7 @@ import { resolveServerUrl } from "./config.ts";
  * login (loopback only). The token is read per request so signing in through
  * `/web` takes effect without restarting the TUI.
  */
-function cliFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+function cliFetch(input: string | URL | Request, init?: RequestInit): Promise<Response> {
 	const token = readStoredSession()?.token ?? null;
 	if (!token) return fetch(input, init);
 	const headers = new Headers(init?.headers);
@@ -27,7 +27,7 @@ export function serverUrl(): string {
 
 /** The shared CLI client, built on first use so it sees the resolved URL. */
 export function getClient(): RelayClient {
-	return cachedClient ??= new RelayClient({ baseUrl: serverUrl(), fetch: cliFetch });
+	return (cachedClient ??= new RelayClient({ baseUrl: serverUrl(), fetch: cliFetch }));
 }
 
 /** Build a client for an explicit server URL, reusing the CLI's bearer fetch. */

@@ -1,11 +1,11 @@
 import { createEffect, createResource, Show } from "solid-js";
 import { useNavigate } from "@tanstack/solid-router";
-import { bootstrap } from "@/api/bootstrap.ts";
-import { queryClient, queryKeys } from "@/api/query-client.ts";
-import { runtime } from "@/api/runtime.ts";
-import { beginLogin } from "@/auth/auth.ts";
-import { BootError, BootScreen, LoginScreen } from "@/components/BootScreen.tsx";
-import { setCwd } from "@/state/workspace.ts";
+import { bootstrap } from "#/api/bootstrap.ts";
+import { queryClient, queryKeys } from "#/api/query-client.ts";
+import { runtime } from "#/api/runtime.ts";
+import { beginLogin } from "#/auth/auth.ts";
+import { BootError, BootScreen, LoginScreen } from "#/components/BootScreen.tsx";
+import { setCwd } from "#/state/workspace.ts";
 
 export function BootPage() {
 	const navigate = useNavigate();

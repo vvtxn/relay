@@ -12,7 +12,7 @@ import {
 	STRIKETHROUGH_OFF,
 	UNDERLINE,
 	UNDERLINE_OFF,
-} from "@/tui/core/ansi.ts";
+} from "#/tui/core/ansi.ts";
 
 const BASIC_COLORS: Record<string, string> = {
 	black: "\x1b[30m",

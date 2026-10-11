@@ -8,9 +8,9 @@ import {
 	STRIKETHROUGH_OFF,
 	UNDERLINE,
 	UNDERLINE_OFF,
-} from "@/tui/core/ansi.ts";
-import { toAnsi } from "@/tui/core/primitives/color.ts";
-import { type MarkdownSegment, parseMarkdown } from "@/tui/core/primitives/parse-markdown.ts";
+} from "#/tui/core/ansi.ts";
+import { toAnsi } from "#/tui/core/primitives/color.ts";
+import { type MarkdownSegment, parseMarkdown } from "#/tui/core/primitives/parse-markdown.ts";
 import { useScrollArea } from "./hooks/scroll-area.ts";
 import { useSignal, useSignalEffect } from "./hooks/signals.ts";
 import { memo } from "./memo.ts";

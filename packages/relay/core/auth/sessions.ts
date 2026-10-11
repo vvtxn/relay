@@ -104,10 +104,10 @@ export class DatabaseAuthSessionStore implements AuthSessionStore {
 	async resolve(token: string, extendMs?: number): Promise<AuthSession | null> {
 		await this.schemaReady;
 		const tokenHash = await hashToken(token);
-		const result = await this.client.execute({
+		const result = (await this.client.execute({
 			sql: "SELECT user_id, expires_at FROM auth_sessions WHERE token_hash = ?",
 			args: [tokenHash],
-		}) as unknown as { rows: Record<string, unknown>[] };
+		})) as unknown as { rows: Record<string, unknown>[] };
 		const row = result.rows[0];
 		if (!row) return null;
 
@@ -144,6 +144,9 @@ export class DatabaseAuthSessionStore implements AuthSessionStore {
 	}
 
 	private async initialize(): Promise<void> {
-		for (const sql of SCHEMA.split(";").map((part) => part.trim()).filter(Boolean)) await this.client.execute(sql);
+		for (const sql of SCHEMA.split(";")
+			.map((part) => part.trim())
+			.filter(Boolean))
+			await this.client.execute(sql);
 	}
 }

@@ -43,10 +43,10 @@ export class DatabaseUserSettingsStore {
 	/** The user's LLM API key, or null when none is configured. */
 	async getApiKey(userId: string): Promise<string | null> {
 		await this.schemaReady;
-		const result = await this.client.execute({
+		const result = (await this.client.execute({
 			sql: "SELECT llm_api_key FROM user_settings WHERE user_id = ?",
 			args: [userId],
-		}) as unknown as { rows: Record<string, unknown>[] };
+		})) as unknown as { rows: Record<string, unknown>[] };
 		const value = result.rows[0]?.llm_api_key;
 		return typeof value === "string" && value.length > 0 ? value : null;
 	}
@@ -64,7 +64,9 @@ export class DatabaseUserSettingsStore {
 	}
 
 	private async initialize(): Promise<void> {
-		for (const sql of SCHEMA.split(";").map((part) => part.trim()).filter(Boolean)) {
+		for (const sql of SCHEMA.split(";")
+			.map((part) => part.trim())
+			.filter(Boolean)) {
 			await this.client.execute(sql);
 		}
 	}

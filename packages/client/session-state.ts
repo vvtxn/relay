@@ -7,7 +7,7 @@
  * message list, and `run_finished` marks the run idle. Keeping that logic here
  * (rather than in each UI) means the terminal and web clients never drift.
  *
- * Pure and browser-safe: no Deno, DOM, or reactivity dependencies.
+ * Pure and browser-safe: no runtime, DOM, or reactivity dependencies.
  */
 
 import { createUIToolCall, type UIMessage, type UIToolCall } from "@vvtxn/relay/core/display.ts";

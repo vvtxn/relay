@@ -4,10 +4,7 @@
  * Pure-TypeScript Myers diff with common prefix/suffix stripping
  * and minimal allocations. Returns synchronously.
  */
-export function generateDiff(
-	oldText: string,
-	newText: string,
-): string | undefined {
+export function generateDiff(oldText: string, newText: string): string | undefined {
 	if (oldText === newText) return undefined;
 
 	const oldLines = oldText.split("\n");
@@ -22,7 +19,8 @@ export function generateDiff(
 	while (
 		suffix < minLen - prefix &&
 		oldLines[oldLines.length - 1 - suffix] === newLines[newLines.length - 1 - suffix]
-	) suffix++;
+	)
+		suffix++;
 
 	const oldSlice = oldLines.slice(prefix, oldLines.length - suffix);
 	const newSlice = newLines.slice(prefix, newLines.length - suffix);
@@ -76,8 +74,7 @@ function myersDiff(a: string[], b: string[]): Uint8Array {
 	v[1 + off] = 0;
 
 	let finalD = 0;
-	outer:
-	for (let d = 0; d <= max; d++) {
+	outer: for (let d = 0; d <= max; d++) {
 		trace.push(v.slice()); // snapshot
 		for (let k = -d; k <= d; k += 2) {
 			let x: number;
@@ -136,13 +133,7 @@ function myersDiff(a: string[], b: string[]): Uint8Array {
 // Hunk building — directly from ops array
 // ---------------------------------------------------------------------------
 
-function buildHunks(
-	ops: Uint8Array,
-	oldSlice: string[],
-	newSlice: string[],
-	prefixLen: number,
-	ctx: number,
-): string[] {
+function buildHunks(ops: Uint8Array, oldSlice: string[], newSlice: string[], prefixLen: number, ctx: number): string[] {
 	// Walk ops to find change regions, then group with context
 	const changeIdxs: number[] = [];
 	for (let i = 0; i < ops.length; i++) {
@@ -165,7 +156,8 @@ function buildHunks(
 	// Pre-compute cumulative old/new indices for each op position
 	const oldIdx = new Int32Array(ops.length);
 	const newIdx = new Int32Array(ops.length);
-	let oi = 0, ni = 0;
+	let oi = 0,
+		ni = 0;
 	for (let i = 0; i < ops.length; i++) {
 		oldIdx[i] = oi;
 		newIdx[i] = ni;

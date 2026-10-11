@@ -1,0 +1,27 @@
+{
+	"name": "@vvtxn/cli",
+	"version": "0.8.0",
+	"type": "module",
+	"imports": {
+		"#/*": "./*",
+		"#/tui/render/jsx-runtime": "./tui/render/jsx-runtime.ts",
+		"#/tui/render/jsx-dev-runtime": "./tui/render/jsx-dev-runtime.ts"
+	},
+	"exports": {
+		".": "./agent/index.ts"
+	},
+	"scripts": {
+		"pack": "vp pack"
+	},
+	"dependencies": {
+		"@preact/signals-core": "^1.11.1",
+		"@vvtxn/client": "workspace:*",
+		"@vvtxn/relay": "workspace:*",
+		"@vvtxn/server": "workspace:*",
+		"yoga-layout": "^3.2.1"
+	},
+	"devDependencies": {
+		"@types/node": "^26.6.5",
+		"vite-plus": "^1.1.0"
+	}
+}

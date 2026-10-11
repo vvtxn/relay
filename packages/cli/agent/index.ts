@@ -3,7 +3,8 @@ import { ensureApiKey, ensureAuthenticated, ensureServer, printStatus, runWeb, s
 import { runFontsCommand } from "./fonts.ts";
 import { runWorkspaceCommand } from "./workspace.ts";
 
-const command = Deno.args[0];
+const args = process.argv.slice(2);
+const command = args[0];
 
 try {
 	switch (command) {
@@ -11,7 +12,7 @@ try {
 			await startServer();
 			break;
 		case "web":
-			await runWeb(Deno.args.slice(1));
+			await runWeb(args.slice(1));
 			break;
 		case "stop":
 			await stopServer();
@@ -20,16 +21,16 @@ try {
 			await printStatus();
 			break;
 		case "fonts":
-			await runFontsCommand(Deno.args.slice(1));
+			await runFontsCommand(args.slice(1));
 			break;
 		case "workspace":
-			await runWorkspaceCommand(Deno.args.slice(1));
+			await runWorkspaceCommand(args.slice(1));
 			break;
 		default: {
 			// The CLI is the entry point: guarantee a server, ensure a session,
 			// then run the TUI. The server keeps running for the browser.
-			const state = await ensureServer({ cwd: Deno.cwd() });
-			Deno.env.set("RELAY_SERVER_URL", state.url);
+			const state = await ensureServer({ cwd: process.cwd() });
+			process.env.RELAY_SERVER_URL = state.url;
 			await ensureAuthenticated(state);
 			// The agent needs an LLM API key, entered only in the web Settings
 			// page; block here until one is saved rather than opening a TUI that
@@ -40,5 +41,5 @@ try {
 	}
 } catch (error) {
 	console.error(error instanceof Error ? error.message : String(error));
-	Deno.exit(1);
+	process.exit(1);
 }
