@@ -8,6 +8,7 @@ import { ApprovalDialog } from "#/components/ApprovalDialog.tsx";
 import { BootError, BootScreen } from "#/components/BootScreen.tsx";
 import { ChatView } from "#/components/ChatView.tsx";
 import { Composer } from "#/components/Composer.tsx";
+import { DiffModal } from "#/components/DiffModal.tsx";
 import { Sidebar } from "#/components/Sidebar.tsx";
 import { StatusBar } from "#/components/StatusBar.tsx";
 import { ensureSession, startStream, stopStream } from "#/state/session.ts";
@@ -99,6 +100,7 @@ export function SessionPage() {
 						<ChatView model={config.data!.model} version={VERSION} />
 						<Composer sessionId={sessionId()} />
 						<ApprovalDialog sessionId={sessionId()} />
+						<DiffModal />
 					</main>
 				</div>
 				<Outlet />
