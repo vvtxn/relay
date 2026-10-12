@@ -1,5 +1,5 @@
 import { join } from "node:path";
-import { relayDir } from "#/core/paths.ts";
+import { relayDir } from "../paths.ts";
 
 function getUsername(): string | undefined {
 	return process.env.USER ?? process.env.USERNAME;

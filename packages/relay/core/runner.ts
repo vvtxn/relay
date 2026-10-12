@@ -1,5 +1,5 @@
 import type { Message, Usage } from "#/api/types.ts";
-import { type AgentConfig, run } from "#/core/agent.ts";
+import { type AgentConfig, run } from "./agent.ts";
 import type { ToolResult } from "#/core/tools/types.ts";
 
 /**
