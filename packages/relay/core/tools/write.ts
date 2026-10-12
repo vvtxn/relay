@@ -34,7 +34,7 @@ export const writeFileTool = defineTool({
 
 			const isNew = original === null;
 			const lines = content.split("\n").length;
-			const diff = generateDiff(original ?? "", content);
+			const diff = generateDiff(original ?? "", content, path);
 
 			const message = isNew ? `Created ${path} (${lines} lines)` : `Wrote ${lines} lines to ${path}`;
 			return { content: message, ...(diff ? { meta: { diff } } : {}) };

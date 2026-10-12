@@ -72,7 +72,7 @@ export const editFileTool = defineTool({
 			await writeFile(path, updated);
 
 			const replaced = replace_all ? `${count} occurrence${count > 1 ? "s" : ""}` : "1 occurrence";
-			const diff = generateDiff(original, updated);
+			const diff = generateDiff(original, updated, path);
 			return { content: `Replaced ${replaced} in ${path}`, ...(diff ? { meta: { diff } } : {}) };
 		} catch (err) {
 			return {

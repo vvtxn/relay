@@ -10,7 +10,7 @@ core/
 ├── agent.ts              # Agent loop (async generator yielding AgentEvents)
 ├── runner.ts             # runAgentLoop() convenience wrapper with callbacks
 ├── display.ts            # Display utilities: UIMessage, UIToolCall, parseDiffLines, tool-call summaries
-├── theme.ts              # Graphite/Silver design tokens shared by terminal + web clients
+├── theme.ts              # Graphite/Silver design tokens (incl. per-tool accents) shared by terminal + web clients
 ├── fonts.ts              # Shared font identity: web faces, CSS stack, terminal install files
 ├── assets/fonts/         # Bundled font files + license (see its README for the swap procedure)
 ├── paths.ts              # relayDir(), homeDir() helpers
@@ -99,7 +99,7 @@ type AgentEvent =
 
 Shared across all clients (TUI, web). Deliberately dependency-free so browser bundles can import it:
 
-- `UIToolCall` — Display-ready tool call with summarized args and formatted output
+- `UIToolCall` — Display-ready tool call with summarized args, formatted output, optional `diff`, and `isError` flag
 - `UIMessage` — Client-agnostic chat message (`user` or `agent` with tool calls)
 - `entriesToUIMessages()` — Converts session entries into UIMessages, folding tool results into their calls
 - `stripAttachedContext()` — Removes `@mention` attached-context blocks from user content
@@ -181,7 +181,7 @@ If any command fails, fix the issues and re-run until all pass cleanly.
 - Tools have a `readonly` flag for parallel execution optimization
 - Use `ToolResult` with `isError` flag for error reporting
 - `ToolResult.meta.diff` carries unified diff output from `write_file` and `edit_file` for UI rendering
-- `diff.ts` uses `git diff --no-index --no-ext-diff` on temp files to bypass user-configured external diff tools
+- `diff.ts` generates unified diffs with a pure Myers algorithm and emits git-style headers (`diff --git` + file name) so UIs can render them with path-aware diff viewers
 - Agent loop is an async generator for streaming updates
 - `runAgentLoop()` is the recommended entry point for all clients; `run()` for custom event handling
 - Context trimming uses heuristic token estimation (~4 chars/token)

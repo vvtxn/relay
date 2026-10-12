@@ -1,20 +1,21 @@
 import { Show } from "solid-js";
-import { summarizeToolCalls, type UIMessage } from "@vvtxn/relay/core/display.ts";
+import type { UIMessage } from "@vvtxn/relay/core/display.ts";
 import { Markdown } from "./Markdown.tsx";
+import { ToolCalls } from "./ToolCalls.tsx";
 
-export function MessageView(props: { msg: UIMessage; userName?: string | undefined; avatarUrl?: string | undefined }) {
+/**
+ * A single chat turn. Roles are distinguished by a colored left border (user
+ * `info`, agent `brand`) instead of terminal glyphs, and turns are separated by
+ * the chat gap — no per-message panels. Tool activity is the only element on a
+ * background (`surface`), rendered as collapsed per-call rows by `ToolCalls`.
+ */
+export function MessageView(props: { msg: UIMessage }) {
 	const hasText = () => props.msg.content.trim().length > 0;
 	const toolCalls = () => props.msg.toolCalls ?? [];
 
 	if (props.msg.role === "user") {
 		return (
 			<article class="message user">
-				<header class="message-head">
-					<Show when={props.avatarUrl}>
-						<img class="avatar" src={props.avatarUrl} alt="" />
-					</Show>
-					<span class="message-role">{props.userName ?? "You"}</span>
-				</header>
 				<div class="message-body">{props.msg.content}</div>
 			</article>
 		);
@@ -22,17 +23,14 @@ export function MessageView(props: { msg: UIMessage; userName?: string | undefin
 
 	return (
 		<article class="message agent">
-			<header class="message-head">
-				<span class="message-role">Agent</span>
-			</header>
-			<Show when={hasText()}>
-				<div class="agent-text">
+			<div class="message-content">
+				<Show when={hasText()}>
 					<Markdown content={props.msg.content.trim()} />
-				</div>
-			</Show>
-			<Show when={toolCalls().length > 0}>
-				<div class="tool-summary">{summarizeToolCalls(toolCalls())}</div>
-			</Show>
+				</Show>
+				<Show when={toolCalls().length > 0}>
+					<ToolCalls toolCalls={toolCalls()} />
+				</Show>
+			</div>
 		</article>
 	);
 }

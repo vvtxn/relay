@@ -16,6 +16,8 @@ export interface UIToolCall {
 	input: string;
 	output: string;
 	diff?: string;
+	/** True when the tool returned an error result. */
+	isError?: boolean;
 }
 
 /** A chat message as rendered by clients: user text or agent text + tool calls. */
@@ -112,7 +114,10 @@ export function entriesToUIMessages(entries: Entry[]): UIMessage[] {
 			});
 		} else if (entry.type === "tool_result") {
 			const tc = toolCallIdMap.get(entry.toolCallId);
-			if (tc) tc.output = entry.content;
+			if (tc) {
+				tc.output = entry.content;
+				if (entry.isError) tc.isError = true;
+			}
 		}
 	}
 	return messages;

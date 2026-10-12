@@ -96,6 +96,7 @@ export function applyServerEvent(state: SessionStreamState, event: ServerEvent):
 					...createUIToolCall(tc.name, tc.args),
 					output: tc.result?.content ?? "",
 					...(tc.result?.meta?.diff ? { diff: tc.result.meta.diff } : {}),
+					...(tc.result?.isError ? { isError: true } : {}),
 				};
 			});
 			return {
@@ -139,6 +140,7 @@ export function applyServerEvent(state: SessionStreamState, event: ServerEvent):
 				...existing,
 				output: event.result.content,
 				...(event.result.meta?.diff ? { diff: event.result.meta.diff } : {}),
+				...(event.result.isError ? { isError: true } : {}),
 			};
 			return { ...state, draftToolCalls };
 		}

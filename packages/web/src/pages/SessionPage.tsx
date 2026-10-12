@@ -96,12 +96,7 @@ export function SessionPage() {
 							onSignOut={() => void signOut()}
 							onOpenSettings={goToSettings}
 						/>
-						<ChatView
-							model={config.data!.model}
-							version={VERSION}
-							userName={me.data!.name}
-							avatarUrl={me.data!.avatarUrl}
-						/>
+						<ChatView model={config.data!.model} version={VERSION} />
 						<Composer sessionId={sessionId()} />
 						<ApprovalDialog sessionId={sessionId()} />
 					</main>
