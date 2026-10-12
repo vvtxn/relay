@@ -297,7 +297,7 @@ export class RunManager {
 							content: assistantMessage.content,
 							...(assistantMessage.tool_calls?.length && { toolCalls: assistantMessage.tool_calls }),
 						});
-						// Draft tool calls carry the full results (including isError),
+						// Draft tool calls carry the full results (including isError and the diff),
 						// which the LLM-facing tool messages don't preserve.
 						const results = this.draftToolCalls.get(sessionId) ?? [];
 						const resultById = new Map(results.map((tc) => [tc.id, tc.result]));
@@ -309,6 +309,7 @@ export class RunManager {
 								toolName: tr.name!,
 								content: tr.content!,
 								...(result?.isError ? { isError: true } : {}),
+								...(result?.meta?.diff ? { diff: result.meta.diff } : {}),
 							});
 						}
 						this.emit(sessionId, { type: "turn_complete" });

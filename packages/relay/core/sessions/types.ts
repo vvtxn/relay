@@ -37,6 +37,8 @@ export interface ToolResultEntry extends EntryBase {
 	toolName: string;
 	content: string;
 	isError?: boolean;
+	/** Unified diff from file-editing tools, so reloaded transcripts can still show the change. */
+	diff?: string;
 }
 
 export type Entry = MessageEntry | ToolResultEntry;

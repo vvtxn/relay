@@ -180,7 +180,7 @@ If any command fails, fix the issues and re-run until all pass cleanly.
 - Tools use `defineTool()` helper for consistent structure
 - Tools have a `readonly` flag for parallel execution optimization
 - Use `ToolResult` with `isError` flag for error reporting
-- `ToolResult.meta.diff` carries unified diff output from `write_file` and `edit_file` for UI rendering
+- `ToolResult.meta.diff` carries unified diff output from `write_file` and `edit_file` for UI rendering; the server persists it on `tool_result` entries (`ToolResultEntry.diff`) so reloaded transcripts keep the diff
 - `diff.ts` generates unified diffs with a pure Myers algorithm and emits git-style headers (`diff --git` + file name) so UIs can render them with path-aware diff viewers
 - Agent loop is an async generator for streaming updates
 - `runAgentLoop()` is the recommended entry point for all clients; `run()` for custom event handling
