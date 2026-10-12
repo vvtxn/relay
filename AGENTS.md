@@ -115,6 +115,11 @@ import type { Message } from "#/api/types.ts";
 import { Box, Text } from "#/tui/render/components.tsx";
 ```
 
+> **Native-Node caveat**: `#/` specifiers are only resolved by bundlers (Vite / `vp pack`). Node's native ESM
+> loader rejects `#/` (`ERR_INVALID_MODULE_SPECIFIER`), and the server runs unbundled (`node packages/server/main.ts`).
+> Files reachable at runtime by the server (or any `node` entry) must use **relative** imports for runtime bindings;
+> `import type` is fine either way since it is erased. The bundled CLI and web clients can keep using `#/`.
+
 Cross-package imports use the `@vvtxn/` prefix with subpaths:
 
 ```typescript

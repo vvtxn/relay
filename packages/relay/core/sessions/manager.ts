@@ -64,7 +64,7 @@ export function entriesToMessages(entries: Entry[]): Message[] {
 	return entries.map(entryToMessage);
 }
 
-export { stripAttachedContext } from "#/core/display.ts";
+export { stripAttachedContext } from "../display.ts";
 
 // ---------------------------------------------------------------------------
 // SessionManager

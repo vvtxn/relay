@@ -2,7 +2,7 @@ export { createToolRegistry, defineTool, getDefinitions } from "./types.ts";
 export type { Tool, ToolRegistry, ToolResult } from "./types.ts";
 export { type ApprovalHandler, type ApprovalOptions, withApproval } from "./approval.ts";
 
-import { resolveRealWithinRoot } from "#/core/workspace.ts";
+import { resolveRealWithinRoot } from "../workspace.ts";
 import { bashTool, createBashTool } from "./bash.ts";
 import { editFileTool } from "./edit.ts";
 import { grepTool } from "./grep.ts";

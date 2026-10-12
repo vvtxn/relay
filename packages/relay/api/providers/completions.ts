@@ -1,4 +1,4 @@
-import { parseSSEStream } from "#/api/streaming/stream.ts";
+import { parseSSEStream } from "../streaming/stream.ts";
 import type { CompletionRequest, CompletionResponse, LLMProvider, ProviderConfig, StreamChunk } from "#/api/types.ts";
 
 export interface GenerationStats {

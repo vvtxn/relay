@@ -1,7 +1,7 @@
 import type { DeltaToolCall, LLMProvider, Message, ToolCall, Usage } from "#/api/types.ts";
-import { getDefinitions } from "#/core/tools/types.ts";
+import { getDefinitions } from "./tools/types.ts";
 import type { ToolRegistry, ToolResult } from "#/core/tools/types.ts";
-import { trimContext, type TrimOptions } from "#/core/context.ts";
+import { trimContext, type TrimOptions } from "./context.ts";
 
 // ---------------------------------------------------------------------------
 // Agent events — yielded by run() for the UI to consume
