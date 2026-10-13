@@ -8,6 +8,12 @@ import { defineConfig } from "vite-plus";
  *   double quotes, semicolons.
  */
 export default defineConfig({
+	// TEMP(effect-migration): characterization tests for the Effect migration
+	// (phase 0). Removed/refined as phases complete — see docs/effect-migration.md.
+	test: {
+		include: ["packages/*/test/**/*.test.ts"],
+		environment: "node",
+	},
 	fmt: {
 		useTabs: true,
 		tabWidth: 4,
