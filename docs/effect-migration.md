@@ -313,4 +313,6 @@ merge lands. Merge bottom-up:
 | 5       | `refactor/effect-phase-5-client-layer`| #77  |
 
 Validation per merge: `pnpm install && pnpm check && pnpm exec vp test`, plus the phase's manual smoke (each PR lists
-one). Phases 6 (CLI runtime) and 7 (cleanup/prune the temporary suites) follow after this stack soaks.
+one). CI runs for a PR once it targets `main`, so each stacked PR gets the full check/test/build job as it retargets
+bottom-up; before that, validate a tip locally with the commands above. Phases 6 (CLI runtime) and 7 (cleanup/prune
+the temporary suites) follow after this stack soaks.
