@@ -51,8 +51,9 @@ Pain points that motivate the refactor, in order of value:
 - **Server**: Layers for all composition; HTTP served by `effect/http` (`HttpRouter`, `HttpServer`,
   `HttpServerResponse.stream`) with `NodeHttpServer` from `@effect/platform-node` (v4 does not have a standalone
   `@effect/platform` for the server: HTTP lives in `effect/http`, Node bindings in `@effect/platform-node`).
-- **Core**: provider `stream()` becomes `Stream`; `agent.run()` becomes `Stream<AgentEvent, AgentError>`; tools execute
-  as `Effect<ToolResult, ToolError>`; retries via `Schedule.exponential`; timeouts via `Stream.timeout`.
+- **Core**: provider `stream()` returns `Stream<StreamChunk, ProviderError>`; `agent.run()` returns
+  `Stream<AgentEvent>` with failures surfacing in-band as `error` events (the UI-visible contract); tools execute as
+  `Effect<ToolResult, ToolError>`; retries via `Schedule.exponential`; timeouts via `Stream.timeoutOrElse`.
 - **Client**: `protocol.ts` and the raw `RelayClient` Promise API stay plain. The Effect `Api`/`SessionStream` service
   layer that currently lives in web **moves into `@vvtxn/client`**, so web stops duplicating it and the CLI inherits it.
   `session-state.ts` stays a pure reducer.
@@ -91,6 +92,7 @@ The repo deliberately carries no tests. This migration reintroduces tests as **s
 | 1 | Composition → Layers               | server         | DB/stores/RunManager as Layers, process `ManagedRuntime`          | identical behavior, services built by layers              |
 | 2 | RunManager → structured concurrency | server (+core) | fiber per run, subscriber queues, `Deferred`, `Ref`, interrupt-fold | all RunManager semantics preserved, approvals auto-deny   |
 | 3 | Core runtime                       | relay          | provider/agent → `Stream`, tools → `Effect`, `Schedule` retries   | same `AgentEvent` sequence, typed errors, TestClock green |
+| 3.5 | Effect-native store interfaces   | relay + server | `SessionStore`/auth stores speak `Effect`, promise bridges deleted | no promise facades in server paths                        |
 | 4 | HTTP → effect/http + platform-node | server         | `HttpRouter`, SSE as stream, `HttpStaticServer` (spa), state file | route/status parity, exit 75 preserved, adapter deleted   |
 | 5 | Client Effect layer                | client + web   | move web's `Api`/`SessionStream` into client, dedupe web          | web unchanged visually, CLI can adopt services            |
 | 6 | CLI runtime                        | cli            | `ManagedRuntime` for data layer, fibers for SSE/approvals         | TUI behavior unchanged, bundle builds                     |
@@ -151,21 +153,46 @@ RunManager internals rewritten (public API and SSE handler unchanged):
 Exit (met): every phase-0 RunManager test passes, plus new guards for mid-run `run_state` snapshots, late subscribers,
 sequential runs on one session, and immediate cancel; `pnpm check` clean; real server boot smoke green.
 
-### Phase 3 — Core runtime (provider, agent loop, tools)
+### Phase 3 — Core runtime (provider, agent loop, tools) — as shipped
 
-- `LLMProvider.stream()` gains a `Stream`-typed variant (`Stream<Chunk, ProviderError>`); the fetch/SSE parsing stays,
-  the async-iterable bridge goes.
-- `agent.run()` becomes `Stream<AgentEvent, AgentError>` driven by an effectful loop (queue-backed stream). Retries use
-  `Schedule.exponential` + a predicate replacing `isRetryableError`; `withStreamTimeout` becomes `Stream.timeout`;
-  readonly tools run via `Effect.forEach(..., { concurrency: "unbounded" })`, side-effect tools sequentially.
-- `Tool.execute` becomes `Effect<ToolResult, ToolError>`; `defineTool` updated; `withApproval` gates on
-  `Effect<boolean>`.
-- `runAgentLoop` survives as a compatibility adapter initially (callbacks), then RunManager consumes the `Stream`
-  directly (small second touch from phase 2).
-- Typed errors: `ProviderError`, `AgentError` variants; no more string-matching in retry logic.
+- `LLMProvider.stream()` now returns `Stream<StreamChunk, ProviderError>`; fetch/SSE parsing stays promise-based behind a
+  single `Stream.fromAsyncIterable` bridge. Failures are classified where they occur: `ProviderError.retryable` comes
+  from the HTTP status (429/5xx), timeouts/transport (retryable), and aborts / unreadable bodies (not retryable). No
+  error-message pattern matching anywhere.
+- `agent.run()` returns `Stream<AgentEvent>` (error channel `never`). The loop keeps its imperative shape via
+  `Stream.callback`, but all waiting is Effectful: retries are `Effect.retry` with `Schedule.exponential(1s)`,
+  `while: (error) => error.retryable`, `times: 2`; the 60s stream timeout is `Stream.timeoutOrElse` failing with a
+  retryable `ProviderError`; readonly tools run through `Effect.forEach(..., { concurrency: "unbounded" })`, side-effect
+  tools sequentially. Provider failures still surface as in-band `error` events (UI-visible contract), so an
+  `AgentError` channel is deliberately absent.
+- **As shipped, `tool_call_end` carries `name` and `args`** (the accumulator values the old runner callbacks had to
+  rebuild for every consumer).
+- `Tool.execute` returns `Effect<ToolResult, ToolError>` (typed `ToolError`); `defineTool` still authors tool bodies as
+  async functions and lifts them. `withApproval` takes an `Effect<boolean>` handler.
+- `RunManager` consumes `run()` directly: the callbacks bridge is gone, and the approval wait is now `Deferred.await`
+  inside the run fiber, so interruption cancels it with no promise to leak.
+- `runAgentLoop` survives as a public compatibility adapter implemented over the stream; it has no internal consumers.
+- Testing note: `@effect/vitest` cannot run under `vp test` (the bundled Vitest is a different module instance than an
+  installed `vitest` peer), so agent tests import `vite-plus/test` and provide a `TestClock.layer()` themselves. A small
+  `joinDrivingClock` helper polls the fiber while stepping the clock, because `TestClock.adjust` only releases sleepers
+  that are already registered.
 
-Exit: scripted-provider tests reproduce the exact event sequence; `TestClock` proves backoff timing without real waits;
-UI-visible behavior unchanged.
+Exit (met): the scripted-provider tests reproduce the prior event sequences; retry/backoff and the timeout budget are
+proven on `TestClock` without real waits; `pnpm check` clean; web build and real server boot smoke green.
+
+### Phase 3.5 — Effect-native store interfaces
+
+The decisions log commits us to Effect-native session storage, but no phase owned it. This is its home, sized to land
+just before the HTTP rewrite (phase 4), which will then be Effect-native end to end.
+
+- `SessionStore` / `SessionHandle` (`database.ts`, `sessions/db.ts`, `sessions/file.ts`, `sessions/manager.ts`) convert
+  to `Effect<...>` methods; the DB leaf wraps its promise client once (`Effect.tryPromise`), nothing above speaks
+  `Promise`.
+- Same treatment for the auth stores the server composes (`DatabaseUserStore`, `DatabaseUserSettingsStore`,
+  `DatabaseAuthSessionStore`) and `identity.ts`.
+- Update `RunManager`, the auth routes, and the session handlers to consume Effect directly; delete the `attempt(...)`
+  bridges added in phases 1–3.
+- Exit: no store call in `packages/server` goes through a promise facade; characterization tests unchanged and green.
 
 ### Phase 4 — HTTP on `effect/http` + `@effect/platform-node`
 
@@ -238,8 +265,8 @@ Exit: `pnpm relay` smoke matches current behavior; bundle size delta reviewed.
 
 ## Decisions log
 
-1. **`SessionStore` becomes Effect-native all the way down** (decided): the DB leaf is wrapped once with
-   `Effect.tryPromise` at the adapter, and every interface above it speaks `Effect`. No mixed Promise/Effect store
+1. **`SessionStore` becomes Effect-native all the way down** (decided, owned by phase 3.5): the DB leaf is wrapped once
+   with `Effect.tryPromise` at the adapter, and every interface above it speaks `Effect`. No mixed Promise/Effect store
    contracts.
 2. **CLI timing** (decided): phase 6 starts only after the client (phase 5) and the server have soaked in real use.
 3. **Test retention** (open): default delete-at-phase-exit; revisit at phase 7 whether any RunManager lifecycle
