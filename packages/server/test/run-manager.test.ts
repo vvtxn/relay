@@ -11,6 +11,7 @@ import type { LLMProvider } from "@vvtxn/relay/api/types.ts";
 import { RunConflictError, RunManager } from "../run.ts";
 import {
 	chunks,
+	chunksThenHangUntilAborted,
 	doneChunk,
 	hangUntilAborted,
 	makeConfig,
@@ -198,6 +199,79 @@ describe("RunManager", () => {
 		const resolved = run.events.find((event) => event.type === "approval_resolved");
 		expect(resolved).toMatchObject({ toolCallId: approval.approval.toolCallId, decision: "deny" });
 		expect(await fileExists(join(cwd, "a.txt"))).toBe(false);
+		run.unsubscribe();
+	});
+
+	it("exposes a run_state snapshot while a run is active", async () => {
+		const provider = new ScriptedProvider([chunksThenHangUntilAborted(textChunk("partial"))]);
+		const { runs, sessionId } = await setupRun(provider);
+
+		runs.startMessage(sessionId, "hello");
+		await waitFor(() => runs.getRunState(sessionId)?.draftText === "partial");
+
+		const snapshot = runs.getRunState(sessionId);
+		expect(snapshot).toMatchObject({
+			type: "run_state",
+			draftText: "partial",
+			toolCalls: [],
+			pendingApproval: null,
+			tokens: 0,
+			cost: 0,
+		});
+
+		runs.cancel(sessionId);
+		await waitFor(() => !runs.isRunning(sessionId));
+		expect(runs.getRunState(sessionId)).toBeNull();
+	});
+
+	it("delivers events to a subscriber that attaches mid-run", async () => {
+		const provider = new ScriptedProvider([chunksThenHangUntilAborted(textChunk("partial"))]);
+		const { runs, sessionId } = await setupRun(provider);
+
+		runs.startMessage(sessionId, "hello");
+		await waitFor(() => runs.getRunState(sessionId)?.draftText === "partial");
+
+		// Attach after the run already started (late SSE subscriber).
+		const run = collect(runs, sessionId);
+		runs.cancel(sessionId);
+		const finished = await run.finished();
+
+		expect(finished.reason).toBe("cancelled");
+		run.unsubscribe();
+	});
+
+	it("supports sequential runs on the same session", async () => {
+		const provider = new ScriptedProvider([
+			chunks(textChunk("one"), doneChunk()),
+			chunks(textChunk("two"), doneChunk()),
+		]);
+		const { runs, sessionId, handle } = await setupRun(provider);
+		const run = collect(runs, sessionId);
+
+		runs.startMessage(sessionId, "first");
+		expect((await run.finished()).reason).toBe("completed");
+
+		runs.startMessage(sessionId, "second");
+		await waitFor(() => !runs.isRunning(sessionId));
+
+		expect(runs.activeCount).toBe(0);
+		const entries = handle.getEntries();
+		expect(entries.map((entry) => entry.type)).toEqual(["message", "message", "message", "message"]);
+		expect(entries[3]).toMatchObject({ type: "message", role: "assistant", content: "two" });
+		run.unsubscribe();
+	});
+
+	it("cancels a run immediately after it starts", async () => {
+		const provider = new ScriptedProvider([hangUntilAborted()]);
+		const { runs, sessionId } = await setupRun(provider);
+		const run = collect(runs, sessionId);
+
+		runs.startMessage(sessionId, "hello");
+		expect(runs.cancel(sessionId)).toBe(true);
+		const finished = await run.finished();
+
+		expect(finished.reason).toBe("cancelled");
+		expect(runs.activeCount).toBe(0);
 		run.unsubscribe();
 	});
 

@@ -236,6 +236,20 @@ export function hang(): StreamScript {
 	return () => iterableOf(() => new Promise<IteratorResult<StreamChunk>>(() => {}));
 }
 
+/** Yields the given chunks, then hangs until the request is aborted. */
+export function chunksThenHangUntilAborted(...items: StreamChunk[]): StreamScript {
+	return (request) =>
+		(async function* () {
+			for (const item of items) yield item;
+			if (request.signal?.aborted) throw new DOMException("Aborted", "AbortError");
+			await new Promise<never>((_, reject) => {
+				request.signal?.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")), {
+					once: true,
+				});
+			});
+		})();
+}
+
 /** Hangs until the request is aborted (models an interrupted provider fetch). */
 export function hangUntilAborted(): StreamScript {
 	return (request) =>
