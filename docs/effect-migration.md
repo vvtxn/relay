@@ -296,3 +296,21 @@ Exit: `pnpm relay` smoke matches current behavior; bundle size delta reviewed.
 - Branch per phase: `refactor/effect-phase-N-<slug>`; small commits following Conventional Commits.
 - Run `pnpm exec vp fmt` and `pnpm check` before each phase is considered done.
 - One phase = one merge; no long-lived migration branch.
+
+## Branch stack & merge order
+
+The migration landed as stacked PRs. Each targets the previous phase; GitHub retargets the children to `main` as each
+merge lands. Merge bottom-up:
+
+| Phase   | Branch                                | PR   |
+| ------- | ------------------------------------- | ---- |
+| 0       | `refactor/effect-phase-0-baseline`    | #71  |
+| 1       | `refactor/effect-phase-1-layers`      | #72  |
+| 2       | `refactor/effect-phase-2-runmanager`  | #73  |
+| 3       | `refactor/effect-phase-3-core-runtime`| #74  |
+| 3.5     | `refactor/effect-phase-3.5-stores`    | #75  |
+| 4       | `refactor/effect-phase-4-http`        | #76  |
+| 5       | `refactor/effect-phase-5-client-layer`| #77  |
+
+Validation per merge: `pnpm install && pnpm check && pnpm exec vp test`, plus the phase's manual smoke (each PR lists
+one). Phases 6 (CLI runtime) and 7 (cleanup/prune the temporary suites) follow after this stack soaks.
