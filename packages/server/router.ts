@@ -306,7 +306,7 @@ export function createAppLayer(services: ServerServices) {
 				"/*",
 				respond(
 					Effect.gen(function* () {
-						const request = yield* HttpServerRequest;
+						const request = yield* HttpServerRequest.HttpServerRequest;
 						const url = requestUrl(request);
 						if (url.pathname.startsWith("/api/")) {
 							// The old central dispatcher checked CSRF before routing, so
