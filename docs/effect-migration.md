@@ -116,12 +116,16 @@ next six phases can move fast.
 
 ### Phase 1 — Server composition as Layers
 
-- `ServerConfig` provided as a service (`Layer.succeed`); stores become `Layer`s whose acquisition runs `ready`
-  (sequential DDL order preserved) and whose finalizers close the client scope.
-- `providerFor` becomes an Effect-returning function backed by `DatabaseUserSettingsStore`.
-- `RunManager` construction becomes a Layer over `SessionStore` + provider factory.
-- `main.ts`: build one `ManagedRuntime` (`createServices` retained as a thin promise facade for `mod.ts`/CLI
-  compatibility); `startHttpServer` stays for now.
+- `ServerConfig` provided as a service (`Layer.succeed`); stores constructed through `Layer.effectContext` whose
+  acquisition awaits each `ready` in sequence (DDL order preserved, `users` before `auth_sessions`).
+- First scoped resource caveat (as shipped): the Turso client exposes only `execute`/`batch` — no `close` — so there is
+  nothing to finalize yet. Scoped acquisition and the process `ManagedRuntime` therefore arrive with the first
+  scope-owned resource (the HTTP server layer in phase 4); until then `createServices` materializes the bundle with a
+  plain `Effect.runPromise`.
+- `RunManager` construction becomes a `Runs` layer over `SessionStore` + provider factory. The provider factory stays
+  promise-shaped until phase 2 converts the manager itself.
+- `main.ts` is untouched (`createServices` retained as a thin promise facade for `mod.ts`/CLI compatibility);
+  `startHttpServer` stays for now.
 - Handlers keep their signatures — this phase proves the Layer pattern with zero behavior change.
 
 Exit: tests pass; `pnpm relay` smoke works; no handler file changed.
