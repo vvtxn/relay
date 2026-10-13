@@ -1,4 +1,6 @@
+import type { Effect } from "effect";
 import { createDatabaseClient, type DatabaseClient, databaseCredentialsFromEnv } from "../database.ts";
+import { storeEffect, type StoreError } from "../effect.ts";
 import type { AuthenticatedUser, AuthIdentity, UserDirectory, UserStore } from "./types.ts";
 
 const SCHEMA = `
@@ -76,15 +78,19 @@ export class DatabaseUserStore implements UserStore, UserDirectory {
 	}
 
 	/** Resolves once the store's schema has been initialized. */
-	get ready(): Promise<void> {
-		return this.schemaReady;
+	get ready(): Effect.Effect<void, StoreError> {
+		return storeEffect(() => this.schemaReady);
 	}
 
 	static fromEnv(options: Omit<DatabaseUserStoreOptions, "url" | "authToken" | "client"> = {}): DatabaseUserStore {
 		return new DatabaseUserStore({ ...databaseCredentialsFromEnv(), ...options });
 	}
 
-	async resolve(identity: AuthIdentity): Promise<AuthenticatedUser> {
+	resolve(identity: AuthIdentity): Effect.Effect<AuthenticatedUser, StoreError> {
+		return storeEffect(() => this.resolvePromise(identity));
+	}
+
+	private async resolvePromise(identity: AuthIdentity): Promise<AuthenticatedUser> {
 		await this.schemaReady;
 		const existing = await this.execute({
 			sql: `SELECT ai.user_id, ai.email, u.display_name, u.avatar_url
@@ -143,7 +149,11 @@ export class DatabaseUserStore implements UserStore, UserDirectory {
 		}
 	}
 
-	async getById(id: string): Promise<AuthenticatedUser | null> {
+	getById(id: string): Effect.Effect<AuthenticatedUser | null, StoreError> {
+		return storeEffect(() => this.getByIdPromise(id));
+	}
+
+	private async getByIdPromise(id: string): Promise<AuthenticatedUser | null> {
 		await this.schemaReady;
 		const result = await this.execute({
 			sql: `SELECT u.id AS user_id, u.display_name, u.avatar_url, ai.email, ai.provider

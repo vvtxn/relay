@@ -1,7 +1,9 @@
+import type { Effect } from "effect";
 import { createReadStream } from "node:fs";
 import { mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import type { Message } from "#/api/types.ts";
+import { storeEffect, type StoreError } from "../effect.ts";
 import { sessionDir, sessionFilePath } from "./paths.ts";
 import {
 	CURRENT_VERSION,
@@ -246,7 +248,11 @@ export class SessionManager {
 	}
 
 	/** Append a new entry to the session. Creates the file on first call. */
-	async append(entry: NewEntry): Promise<string> {
+	append(entry: NewEntry): Effect.Effect<string, StoreError> {
+		return storeEffect(() => this.appendQueued(entry));
+	}
+
+	private async appendQueued(entry: NewEntry): Promise<string> {
 		let id = "";
 		const operation = this.appendQueue.then(async () => {
 			id = newId();
@@ -268,7 +274,11 @@ export class SessionManager {
 	}
 
 	/** Flush the header to disk. Call on session switch, quit, or idle. */
-	async flush(): Promise<void> {
+	flush(): Effect.Effect<void, StoreError> {
+		return storeEffect(() => this.flushQueued());
+	}
+
+	private async flushQueued(): Promise<void> {
 		await this.appendQueue;
 		await this.flushHeader();
 	}

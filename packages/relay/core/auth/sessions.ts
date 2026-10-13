@@ -1,4 +1,6 @@
+import type { Effect } from "effect";
 import { createDatabaseClient, type DatabaseClient, databaseCredentialsFromEnv } from "../database.ts";
+import { storeEffect, type StoreError } from "../effect.ts";
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS auth_sessions (
@@ -22,11 +24,11 @@ export interface AuthSession {
  * the database stores a SHA-256 hash so a leaked database cannot be replayed.
  */
 export interface AuthSessionStore {
-	create(userId: string, ttlMs: number): Promise<{ token: string; expiresAt: string }>;
+	create(userId: string, ttlMs: number): Effect.Effect<{ token: string; expiresAt: string }, StoreError>;
 	/** Resolve a token; when `extendMs` is given the expiry slides forward. */
-	resolve(token: string, extendMs?: number): Promise<AuthSession | null>;
-	revoke(token: string): Promise<void>;
-	revokeAllForUser(userId: string): Promise<void>;
+	resolve(token: string, extendMs?: number): Effect.Effect<AuthSession | null, StoreError>;
+	revoke(token: string): Effect.Effect<void, StoreError>;
+	revokeAllForUser(userId: string): Effect.Effect<void, StoreError>;
 }
 
 export interface DatabaseAuthSessionStoreOptions {
@@ -72,8 +74,8 @@ export class DatabaseAuthSessionStore implements AuthSessionStore {
 	}
 
 	/** Resolves once the store's schema has been initialized. */
-	get ready(): Promise<void> {
-		return this.schemaReady;
+	get ready(): Effect.Effect<void, StoreError> {
+		return storeEffect(() => this.schemaReady);
 	}
 
 	static fromEnv(
@@ -82,7 +84,11 @@ export class DatabaseAuthSessionStore implements AuthSessionStore {
 		return new DatabaseAuthSessionStore({ ...databaseCredentialsFromEnv(), ...options });
 	}
 
-	async create(userId: string, ttlMs: number): Promise<{ token: string; expiresAt: string }> {
+	create(userId: string, ttlMs: number): Effect.Effect<{ token: string; expiresAt: string }, StoreError> {
+		return storeEffect(() => this.createPromise(userId, ttlMs));
+	}
+
+	private async createPromise(userId: string, ttlMs: number): Promise<{ token: string; expiresAt: string }> {
 		await this.schemaReady;
 		const token = generateToken();
 		const tokenHash = await hashToken(token);
@@ -101,7 +107,11 @@ export class DatabaseAuthSessionStore implements AuthSessionStore {
 		return { token, expiresAt };
 	}
 
-	async resolve(token: string, extendMs?: number): Promise<AuthSession | null> {
+	resolve(token: string, extendMs?: number): Effect.Effect<AuthSession | null, StoreError> {
+		return storeEffect(() => this.resolvePromise(token, extendMs));
+	}
+
+	private async resolvePromise(token: string, extendMs?: number): Promise<AuthSession | null> {
 		await this.schemaReady;
 		const tokenHash = await hashToken(token);
 		const result = (await this.client.execute({
@@ -113,7 +123,7 @@ export class DatabaseAuthSessionStore implements AuthSessionStore {
 
 		const expiresAt = rowString(row, "expires_at");
 		if (Date.parse(expiresAt) <= Date.now()) {
-			await this.revoke(token);
+			await this.revokePromise(token);
 			return null;
 		}
 
@@ -126,7 +136,11 @@ export class DatabaseAuthSessionStore implements AuthSessionStore {
 		return { userId: rowString(row, "user_id"), expiresAt: nextExpiry };
 	}
 
-	async revoke(token: string): Promise<void> {
+	revoke(token: string): Effect.Effect<void, StoreError> {
+		return storeEffect(() => this.revokePromise(token));
+	}
+
+	private async revokePromise(token: string): Promise<void> {
 		await this.schemaReady;
 		const tokenHash = await hashToken(token);
 		await this.client.execute({
@@ -135,7 +149,11 @@ export class DatabaseAuthSessionStore implements AuthSessionStore {
 		});
 	}
 
-	async revokeAllForUser(userId: string): Promise<void> {
+	revokeAllForUser(userId: string): Effect.Effect<void, StoreError> {
+		return storeEffect(() => this.revokeAllForUserPromise(userId));
+	}
+
+	private async revokeAllForUserPromise(userId: string): Promise<void> {
 		await this.schemaReady;
 		await this.client.execute({
 			sql: "DELETE FROM auth_sessions WHERE user_id = ?",

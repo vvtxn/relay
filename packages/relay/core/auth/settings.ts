@@ -1,4 +1,6 @@
+import type { Effect } from "effect";
 import { createDatabaseClient, type DatabaseClient, databaseCredentialsFromEnv } from "../database.ts";
+import { storeEffect, type StoreError } from "../effect.ts";
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS user_settings (
@@ -30,8 +32,8 @@ export class DatabaseUserSettingsStore {
 	}
 
 	/** Resolves once the store's schema has been initialized. */
-	get ready(): Promise<void> {
-		return this.schemaReady;
+	get ready(): Effect.Effect<void, StoreError> {
+		return storeEffect(() => this.schemaReady);
 	}
 
 	static fromEnv(
@@ -41,7 +43,11 @@ export class DatabaseUserSettingsStore {
 	}
 
 	/** The user's LLM API key, or null when none is configured. */
-	async getApiKey(userId: string): Promise<string | null> {
+	getApiKey(userId: string): Effect.Effect<string | null, StoreError> {
+		return storeEffect(() => this.getApiKeyPromise(userId));
+	}
+
+	private async getApiKeyPromise(userId: string): Promise<string | null> {
 		await this.schemaReady;
 		const result = (await this.client.execute({
 			sql: "SELECT llm_api_key FROM user_settings WHERE user_id = ?",
@@ -52,7 +58,11 @@ export class DatabaseUserSettingsStore {
 	}
 
 	/** Set (or, with null, clear) the user's LLM API key. */
-	async setApiKey(userId: string, apiKey: string | null): Promise<void> {
+	setApiKey(userId: string, apiKey: string | null): Effect.Effect<void, StoreError> {
+		return storeEffect(() => this.setApiKeyPromise(userId, apiKey));
+	}
+
+	private async setApiKeyPromise(userId: string, apiKey: string | null): Promise<void> {
 		await this.schemaReady;
 		// Upsert rather than delete so future per-user settings columns survive
 		// clearing the key.
