@@ -2,7 +2,9 @@
 // Kept in a dedicated `test/` folder so the suite deletes as one directory —
 // see docs/effect-migration.md ("Testing strategy").
 
+import { Stream } from "effect";
 import type { CompletionRequest, CompletionResponse, LLMProvider, StreamChunk, Usage } from "@vvtxn/relay/api/types.ts";
+import { ProviderError } from "@vvtxn/relay/api/errors.ts";
 import type {
 	Entry,
 	NewEntry,
@@ -141,7 +143,7 @@ export class MemorySessionStore implements SessionStore {
 // ---------------------------------------------------------------------------
 
 /** One response for one `stream()` call, in order. */
-export type StreamScript = (request: CompletionRequest) => AsyncIterable<StreamChunk>;
+export type StreamScript = () => Stream.Stream<StreamChunk, ProviderError>;
 
 export class ScriptedProvider implements LLMProvider {
 	readonly requests: CompletionRequest[] = [];
@@ -155,11 +157,13 @@ export class ScriptedProvider implements LLMProvider {
 		throw new Error("ScriptedProvider.complete is not implemented");
 	}
 
-	stream(request: CompletionRequest): AsyncIterable<StreamChunk> {
+	stream(request: CompletionRequest): Stream.Stream<StreamChunk, ProviderError> {
 		this.requests.push(request);
 		const script = this.scripts.shift();
-		if (!script) throw new Error("ScriptedProvider: no script left for this request");
-		return script(request);
+		if (!script) {
+			return Stream.fail(new ProviderError({ message: "ScriptedProvider: no script left", retryable: false }));
+		}
+		return script();
 	}
 }
 
@@ -217,54 +221,26 @@ export function twoToolCallsChunk(
 // -- scripts ----------------------------------------------------------------
 
 export function chunks(...items: StreamChunk[]): StreamScript {
-	return () =>
-		(async function* () {
-			for (const item of items) yield item;
-		})();
+	return () => Stream.fromIterable(items);
 }
 
-function iterableOf(next: () => Promise<IteratorResult<StreamChunk>>): AsyncIterable<StreamChunk> {
-	return { [Symbol.asyncIterator]: () => ({ next }) };
-}
-
-export function fail(error: Error): StreamScript {
-	return () => iterableOf(() => Promise.reject(error));
+export function fail(error: ProviderError): StreamScript {
+	return () => Stream.fail(error);
 }
 
 /** Never yields; used to model a stalled stream. */
 export function hang(): StreamScript {
-	return () => iterableOf(() => new Promise<IteratorResult<StreamChunk>>(() => {}));
+	return () => Stream.never;
 }
 
-/** Yields the given chunks, then hangs until the request is aborted. */
+/** Yields the given chunks, then hangs forever (cancellation stops the run). */
 export function chunksThenHangUntilAborted(...items: StreamChunk[]): StreamScript {
-	return (request) =>
-		(async function* () {
-			for (const item of items) yield item;
-			if (request.signal?.aborted) throw new DOMException("Aborted", "AbortError");
-			await new Promise<never>((_, reject) => {
-				request.signal?.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")), {
-					once: true,
-				});
-			});
-		})();
+	return () => Stream.concat(Stream.fromIterable(items), Stream.never);
 }
 
-/** Hangs until the request is aborted (models an interrupted provider fetch). */
+/** Hangs forever; cancellation (fiber interruption) stops consumption. */
 export function hangUntilAborted(): StreamScript {
-	return (request) =>
-		iterableOf(
-			() =>
-				new Promise<IteratorResult<StreamChunk>>((_, reject) => {
-					if (request.signal?.aborted) {
-						reject(new DOMException("Aborted", "AbortError"));
-						return;
-					}
-					request.signal?.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")), {
-						once: true,
-					});
-				}),
-		);
+	return () => Stream.never;
 }
 
 // ---------------------------------------------------------------------------

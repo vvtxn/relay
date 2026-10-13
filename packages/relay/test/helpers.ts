@@ -1,6 +1,9 @@
-// TEMP(effect-migration): shared fakes for the phase-0 agent-loop
-// characterization tests. Remove after phase 3 — see docs/effect-migration.md.
+// TEMP(effect-migration): shared fakes for the agent-loop tests (phase 3).
+// Remove or fold into a permanent suite once the core runtime settles — see
+// docs/effect-migration.md ("Testing strategy").
 
+import { Effect, Stream } from "effect";
+import { ProviderError } from "../api/errors.ts";
 import type { CompletionRequest, CompletionResponse, LLMProvider, StreamChunk, Usage } from "../api/types.ts";
 import type { Tool, ToolResult } from "../core/tools/types.ts";
 
@@ -9,7 +12,7 @@ import type { Tool, ToolResult } from "../core/tools/types.ts";
 // ---------------------------------------------------------------------------
 
 /** One response for one `stream()` call, in order. */
-export type StreamScript = (request: CompletionRequest) => AsyncIterable<StreamChunk>;
+export type StreamScript = () => Stream.Stream<StreamChunk, ProviderError>;
 
 export class ScriptedProvider implements LLMProvider {
 	readonly requests: CompletionRequest[] = [];
@@ -23,11 +26,13 @@ export class ScriptedProvider implements LLMProvider {
 		throw new Error("ScriptedProvider.complete is not implemented");
 	}
 
-	stream(request: CompletionRequest): AsyncIterable<StreamChunk> {
+	stream(request: CompletionRequest): Stream.Stream<StreamChunk, ProviderError> {
 		this.requests.push(request);
 		const script = this.scripts.shift();
-		if (!script) throw new Error("ScriptedProvider: no script left for this request");
-		return script(request);
+		if (!script) {
+			return Stream.fail(new ProviderError({ message: "ScriptedProvider: no script left", retryable: false }));
+		}
+		return script();
 	}
 }
 
@@ -69,24 +74,26 @@ export function toolCallsChunk(calls: Array<{ id: string; name: string; args: st
 
 // -- scripts ----------------------------------------------------------------
 
+export function providerError(message: string, retryable: boolean): ProviderError {
+	return new ProviderError({ message, retryable });
+}
+
 export function chunks(...items: StreamChunk[]): StreamScript {
-	return () =>
-		(async function* () {
-			for (const item of items) yield item;
-		})();
+	return () => Stream.fromIterable(items);
 }
 
-function iterableOf(next: () => Promise<IteratorResult<StreamChunk>>): AsyncIterable<StreamChunk> {
-	return { [Symbol.asyncIterator]: () => ({ next }) };
-}
-
-export function fail(error: Error): StreamScript {
-	return () => iterableOf(() => Promise.reject(error));
+export function fail(error: ProviderError): StreamScript {
+	return () => Stream.fail(error);
 }
 
 /** Never yields; models a stalled stream. */
 export function hang(): StreamScript {
-	return () => iterableOf(() => new Promise<IteratorResult<StreamChunk>>(() => {}));
+	return () => Stream.never;
+}
+
+/** Yields the given chunks, then hangs (never completes). */
+export function chunksThenHang(...items: StreamChunk[]): StreamScript {
+	return () => Stream.concat(Stream.fromIterable(items), Stream.never);
 }
 
 // ---------------------------------------------------------------------------
@@ -96,7 +103,7 @@ export function hang(): StreamScript {
 export function fakeTool(options: {
 	name: string;
 	readonly: boolean;
-	execute: (input: unknown) => Promise<ToolResult>;
+	execute: (input: unknown) => Effect.Effect<ToolResult>;
 }): Tool {
 	return {
 		definition: {
