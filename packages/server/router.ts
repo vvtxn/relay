@@ -306,9 +306,14 @@ export function createAppLayer(services: ServerServices) {
 				"/*",
 				respond(
 					Effect.gen(function* () {
-						const request = yield* HttpServerRequest.HttpServerRequest;
+						const request = yield* HttpServerRequest;
 						const url = requestUrl(request);
 						if (url.pathname.startsWith("/api/")) {
+							// The old central dispatcher checked CSRF before routing, so
+							// unknown state-changing API paths need it too.
+							if (isStateChanging(request.method) && !originAllowed(services, request)) {
+								return error(403, "Cross-origin request rejected");
+							}
 							const sessionMatch = url.pathname.match(
 								/^\/api\/sessions\/([^/]+)(?:\/(messages|approve|cancel|events|files))?$/,
 							);
