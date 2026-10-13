@@ -1,5 +1,5 @@
+import { Cause, Deferred, Effect, Exit, Fiber, Option, Queue, Ref, Result, Stream } from "effect";
 import type { LLMProvider, Message, Usage } from "@vvtxn/relay/api/types.ts";
-import type { ToolResult } from "@vvtxn/relay/core/tools/index.ts";
 import { createToolRegistry, createWorkspaceTools, withApproval } from "@vvtxn/relay/core/tools/index.ts";
 import { summarizeToolArgs } from "@vvtxn/relay/core/display.ts";
 import { expandMentions, validateWorkspacePath } from "@vvtxn/relay/core/workspace.ts";
@@ -9,48 +9,87 @@ import {
 	type SessionStore,
 	stripAttachedContext,
 } from "@vvtxn/relay/core/sessions/index.ts";
-import { runAgentLoop } from "@vvtxn/relay/core/runner.ts";
+import { type RunnerCallbacks, runAgentLoop } from "@vvtxn/relay/core/runner.ts";
 import { SYSTEM_PROMPT } from "@vvtxn/relay/core/system-prompt.ts";
 import type { ApprovalDecision, PendingApprovalInfo, RunStateEvent, ServerEvent } from "@vvtxn/client/protocol.ts";
 import type { ServerConfig } from "./config.ts";
 
 type Subscriber = (event: ServerEvent) => void;
+type RunFinishReason = Extract<ServerEvent, { type: "run_finished" }>["reason"];
+type DraftToolCall = RunStateEvent["toolCalls"][number];
 
-interface PendingApproval {
-	resolve: (decision: ApprovalDecision) => void;
-	info: PendingApprovalInfo;
+/** Mutable run state, owned by the run's fiber and read by snapshot/handlers. */
+interface RunState {
+	draftText: string;
+	draftToolCalls: DraftToolCall[];
+	draftIndex: Map<string, number>;
+	pendingApprovals: Map<string, { deferred: Deferred.Deferred<ApprovalDecision>; info: PendingApprovalInfo }>;
+	hadError: boolean;
+}
+
+/** One in-flight run: its fiber, its state, and the abort handle for the loop. */
+interface ActiveRun {
+	readonly ref: Ref.Ref<RunState>;
+	readonly fiber: Fiber.Fiber<RunFinishReason, never>;
+	readonly abort: AbortController;
+}
+
+/**
+ * Per-session record: the cached handle, per-session approval memory, token /
+ * cost totals, the active run (if any), and the SSE subscriber queues.
+ */
+interface SessionRecord {
+	handle: SessionHandle | null;
+	ownerId: string | null;
+	readonly subscribers: Set<Queue.Queue<ServerEvent>>;
+	readonly alwaysApproved: Set<string>;
+	tokens: number;
+	cost: number;
+	run: ActiveRun | null;
+}
+
+/** Wraps a promise as an Effect, normalizing thrown values to `Error`. */
+function attempt<A>(f: () => Promise<A>): Effect.Effect<A, Error> {
+	return Effect.tryPromise({
+		try: f,
+		catch: (error) => (error instanceof Error ? error : new Error(String(error))),
+	});
+}
+
+/** Best-effort human-readable message for a failed run. */
+function causeMessage(cause: Cause.Cause<unknown>): string {
+	const failure = Cause.findErrorOption(cause);
+	if (Option.isSome(failure)) {
+		return failure.value instanceof Error ? failure.value.message : String(failure.value);
+	}
+	const defect = Cause.findDefect(cause);
+	if (Result.isSuccess(defect)) {
+		return defect.success instanceof Error ? defect.success.message : String(defect.success);
+	}
+	return Cause.pretty(cause);
 }
 
 /**
  * Owns the active agent runs: one per session at a time.
  *
- * Responsibilities:
- * - Serialize runs per session (409-equivalent via `isRunning`)
- * - Bridge runner callbacks onto a per-session SSE subscriber bus
- * - Gate side-effecting tools through `withApproval` + pending-approval map
- * - Persist assistant/tool entries and token/cost on the session handle
+ * Structured concurrency (phase 2 of the Effect migration):
+ * - One fiber per run; `cancel` interrupts it and the finish reason comes from
+ *   the run's `Exit` (`completed` / `error` / `cancelled`)
+ * - Draft state lives in a `Ref` owned by the run
+ * - Approvals are `Deferred`s; a finalizer denies whatever is still pending so
+ *   the promises can never leak
+ * - SSE fan-out goes through per-subscriber `Queue`s, registered synchronously
+ *   so no event can slip between a subscriber's snapshot and its subscription
+ *
+ * Everything the run executes is a `runAgentLoop` promise for now (phase 3
+ * converts the loop itself to a `Stream`); the fiber only supervises it.
  */
 export class RunManager {
 	private readonly config: ServerConfig;
 	private readonly sessionStore: SessionStore;
 	private readonly providerFor: (ownerId: string) => Promise<LLMProvider | null>;
 
-	private readonly activeRuns = new Set<string>();
-	private readonly aborts = new Map<string, AbortController>();
-	private readonly subscribers = new Map<string, Set<Subscriber>>();
-	private readonly pendingApprovals = new Map<string, Map<string, PendingApproval>>();
-	private readonly alwaysApproved = new Map<string, Set<string>>();
-	private readonly handles = new Map<string, { handle: SessionHandle; ownerId: string }>();
-
-	/** In-flight draft state for run_state snapshots (late subscribers). */
-	private readonly draftText = new Map<string, string>();
-	private readonly draftToolCalls = new Map<
-		string,
-		{ id: string; name: string; args: string; result?: ToolResult }[]
-	>();
-	private readonly draftIndex = new Map<string, Map<string, number>>();
-	private readonly tokens = new Map<string, number>();
-	private readonly cost = new Map<string, number>();
+	private readonly sessions = new Map<string, SessionRecord>();
 
 	constructor(options: {
 		config: ServerConfig;
@@ -63,153 +102,269 @@ export class RunManager {
 	}
 
 	isRunning(sessionId: string): boolean {
-		return this.activeRuns.has(sessionId);
+		return this.sessions.get(sessionId)?.run != null;
 	}
 
 	subscribe(sessionId: string, subscriber: Subscriber): () => void {
-		let set = this.subscribers.get(sessionId);
-		if (!set) {
-			set = new Set();
-			this.subscribers.set(sessionId, set);
-		}
-		set.add(subscriber);
+		const session = this.ensureSession(sessionId);
+		// The queue is registered synchronously, before any fiber runs, so an
+		// event published right after `subscribe` cannot be lost (the SSE
+		// handler sends its `run_state` snapshot immediately before this call).
+		const queue = Effect.runSync(Queue.unbounded<ServerEvent>());
+		const fiber = Effect.runFork(
+			Stream.runForEach(Stream.fromQueue(queue), (event) =>
+				Effect.sync(() => {
+					try {
+						subscriber(event);
+					} catch {
+						// A broken subscriber must not break the run
+					}
+				}),
+			),
+		);
+		session.subscribers.add(queue);
 		return () => {
-			set.delete(subscriber);
-			if (set.size === 0) {
-				this.subscribers.delete(sessionId);
-				this.releaseIfIdle(sessionId);
-			}
+			if (!session.subscribers.delete(queue)) return;
+			void Effect.runPromise(Fiber.interrupt(fiber)).catch(() => {});
+			this.releaseIfIdle(sessionId);
 		};
 	}
 
-	/** Drop the cached handle and totals once a session is idle and unwatched. */
+	/** Drop the session record once it is idle and unwatched. */
 	private releaseIfIdle(sessionId: string): void {
-		if (this.activeRuns.has(sessionId)) return;
-		if ((this.subscribers.get(sessionId)?.size ?? 0) > 0) return;
-		this.handles.delete(sessionId);
-		this.tokens.delete(sessionId);
-		this.cost.delete(sessionId);
-		this.alwaysApproved.delete(sessionId);
+		const session = this.sessions.get(sessionId);
+		if (!session) return;
+		if (session.run) return;
+		if (session.subscribers.size > 0) return;
+		this.sessions.delete(sessionId);
 	}
 
-	private emit(sessionId: string, event: ServerEvent): void {
-		const set = this.subscribers.get(sessionId);
-		if (!set) return;
-		for (const subscriber of set) {
-			try {
-				subscriber(event);
-			} catch {
-				// A broken subscriber must not break the run
-			}
+	private publish(sessionId: string, event: ServerEvent): void {
+		const session = this.sessions.get(sessionId);
+		if (!session) return;
+		for (const queue of session.subscribers) {
+			Queue.offerUnsafe(queue, event);
 		}
 	}
 
 	/** Current snapshot for a subscriber joining mid-run. */
 	getRunState(sessionId: string): RunStateEvent | null {
-		if (!this.activeRuns.has(sessionId)) return null;
-		const pending = this.pendingApprovals.get(sessionId);
-		const firstPending = pending?.values().next().value;
+		const session = this.sessions.get(sessionId);
+		const run = session?.run;
+		if (!session || !run) return null;
+		const state = Ref.getUnsafe(run.ref);
+		const firstPending = state.pendingApprovals.values().next().value;
 		return {
 			type: "run_state",
-			draftText: this.draftText.get(sessionId) ?? "",
-			toolCalls: [...(this.draftToolCalls.get(sessionId) ?? [])],
+			draftText: state.draftText,
+			toolCalls: [...state.draftToolCalls],
 			pendingApproval: firstPending ? firstPending.info : null,
-			tokens: this.tokens.get(sessionId) ?? 0,
-			cost: this.cost.get(sessionId) ?? 0,
+			tokens: session.tokens,
+			cost: session.cost,
 		};
 	}
 
 	/** Resolve a pending approval; returns false when no approval is pending for that tool call. */
 	resolveApproval(sessionId: string, toolCallId: string, decision: ApprovalDecision): boolean {
-		const pending = this.pendingApprovals.get(sessionId);
-		const approval = pending?.get(toolCallId);
-		if (!pending || !approval) return false;
+		const run = this.sessions.get(sessionId)?.run;
+		if (!run) return false;
 
-		pending.delete(toolCallId);
-		this.emit(sessionId, { type: "approval_resolved", toolCallId, decision });
-		approval.resolve(decision);
+		// Take the Deferred out atomically so a concurrent finalizer cannot
+		// resolve it twice.
+		const deferred = Effect.runSync(
+			Ref.modify(run.ref, (state): readonly [Deferred.Deferred<ApprovalDecision> | null, RunState] => {
+				const pending = state.pendingApprovals.get(toolCallId);
+				if (!pending) return [null, state];
+				const pendingApprovals = new Map(state.pendingApprovals);
+				pendingApprovals.delete(toolCallId);
+				return [pending.deferred, { ...state, pendingApprovals }];
+			}),
+		);
+		if (!deferred) return false;
+
+		this.publish(sessionId, { type: "approval_resolved", toolCallId, decision });
+		Deferred.doneUnsafe(deferred, Effect.succeed(decision));
 		return true;
 	}
 
 	cancel(sessionId: string): boolean {
-		const controller = this.aborts.get(sessionId);
-		if (!controller) return false;
-		controller.abort();
+		const run = this.sessions.get(sessionId)?.run;
+		if (!run) return false;
+		void Effect.runPromise(Fiber.interrupt(run.fiber)).catch(() => {});
 		return true;
 	}
 
 	/** Number of active runs (for tests and diagnostics). */
 	get activeCount(): number {
-		return this.activeRuns.size;
+		let count = 0;
+		for (const session of this.sessions.values()) {
+			if (session.run) count += 1;
+		}
+		return count;
 	}
 
 	/** True when the manager holds a handle for this session (opened or created). */
 	hasHandle(sessionId: string, ownerId?: string): boolean {
-		const entry = this.handles.get(sessionId);
-		if (!entry) return false;
-		return ownerId === undefined || entry.ownerId === ownerId;
+		const session = this.sessions.get(sessionId);
+		if (!session?.handle) return false;
+		return ownerId === undefined || session.ownerId === ownerId;
 	}
 
 	/** The live handle for a session, when the server has one open (created or used this process). */
 	getHandle(sessionId: string, ownerId?: string): SessionHandle | null {
-		const entry = this.handles.get(sessionId);
-		if (!entry) return null;
-		if (ownerId !== undefined && entry.ownerId !== ownerId) return null;
-		return entry.handle;
+		const session = this.sessions.get(sessionId);
+		if (!session?.handle) return null;
+		if (ownerId !== undefined && session.ownerId !== ownerId) return null;
+		return session.handle;
 	}
 
 	/** Returns 202-style start; throws RunConflictError when a run is active. */
 	startMessage(sessionId: string, content: string): void {
-		if (this.activeRuns.has(sessionId)) throw new RunConflictError(sessionId);
-		// Claim the slot synchronously before the async work begins
-		this.activeRuns.add(sessionId);
-		void this.sendMessage(sessionId, content).catch(() => {
-			// Errors are surfaced as SSE error events inside sendMessage
+		const session = this.ensureSession(sessionId);
+		if (session.run) throw new RunConflictError(sessionId);
+
+		const ref = Ref.makeUnsafe<RunState>({
+			draftText: "",
+			draftToolCalls: [],
+			draftIndex: new Map(),
+			pendingApprovals: new Map(),
+			hadError: false,
 		});
+		const abort = new AbortController();
+		// The slot is claimed synchronously (above); the run itself executes on
+		// its own fiber.
+		const fiber = Effect.runFork(this.runProgram(sessionId, content, ref, abort));
+		session.run = { ref, fiber, abort };
 	}
 
-	private async sendMessage(sessionId: string, content: string): Promise<void> {
-		// The slot was claimed by startMessage before this async body runs.
+	private runProgram(
+		sessionId: string,
+		content: string,
+		runRef: Ref.Ref<RunState>,
+		abort: AbortController,
+	): Effect.Effect<RunFinishReason, never> {
+		const config = this.config;
+		const providerFor = this.providerFor;
+		const getSession = () => this.sessions.get(sessionId);
+		const publish = (event: ServerEvent): void => this.publish(sessionId, event);
+		const updateRun = (f: (state: RunState) => RunState): void => {
+			Effect.runSync(Ref.update(runRef, f));
+		};
+		const requestApproval = (tool: { definition: { function: { name: string } } }, input: unknown) =>
+			this.requestApproval(sessionId, runRef, tool, input);
 
-		// Get or open the handle for this session. The handle stays cached so
-		// token/cost tracking persists across runs.
-		const entry = this.handles.get(sessionId);
-		if (!entry) {
-			this.activeRuns.delete(sessionId);
-			throw new Error(`No open session handle for ${sessionId}`);
-		}
-		const { handle, ownerId } = entry;
+		const callbacks: RunnerCallbacks = {
+			onTextDelta: (delta) => {
+				updateRun((state) => ({ ...state, draftText: state.draftText + delta }));
+				publish({ type: "text_delta", content: delta });
+			},
+			onToolCallStart: (id, name) => {
+				publish({ type: "tool_call_start", id, name });
+			},
+			onToolCallArgsDelta: (id, args) => {
+				publish({ type: "tool_call_args_delta", id, args });
+			},
+			onToolCallEnd: (id, name, args) => {
+				updateRun((state) => {
+					const draftIndex = new Map(state.draftIndex);
+					draftIndex.set(id, state.draftToolCalls.length);
+					return { ...state, draftToolCalls: [...state.draftToolCalls, { id, name, args }], draftIndex };
+				});
+				publish({ type: "tool_call_end", id, name, args });
+			},
+			onToolResult: (id, result) => {
+				updateRun((state) => {
+					const at = state.draftIndex.get(id);
+					if (at === undefined || at >= state.draftToolCalls.length) return state;
+					const draftToolCalls = [...state.draftToolCalls];
+					const existing = draftToolCalls[at];
+					if (existing) draftToolCalls[at] = { ...existing, result };
+					return { ...state, draftToolCalls };
+				});
+				publish({ type: "tool_result", id, result });
+			},
+			onMessageComplete: (usage?: Usage) => {
+				const session = getSession();
+				if (usage && session) {
+					// `tokens` is the current context-window usage (this call's
+					// prompt + completion), not a running total: clients render it
+					// against the model's context limit. `cost` does accumulate.
+					session.tokens = usage.prompt_tokens + usage.completion_tokens;
+					if (usage.cost) session.cost += usage.cost;
+					session.handle?.setTokens(session.tokens);
+					session.handle?.setCost(session.cost);
+				}
+				publish({
+					type: "message_complete",
+					...(usage ? { usage } : {}),
+					tokens: session?.tokens ?? 0,
+					cost: session?.cost ?? 0,
+				});
+			},
+			onTurnComplete: async (assistantMessage: Message, toolResults: Message[]) => {
+				const handle = getSession()?.handle;
+				if (!handle) return;
+				await handle.append({
+					type: "message",
+					role: "assistant",
+					content: assistantMessage.content,
+					...(assistantMessage.tool_calls?.length && { toolCalls: assistantMessage.tool_calls }),
+				});
+				// Draft tool calls carry the full results (including isError and the diff),
+				// which the LLM-facing tool messages don't preserve.
+				const results = Ref.getUnsafe(runRef).draftToolCalls;
+				const resultById = new Map(results.map((tc) => [tc.id, tc.result]));
+				for (const tr of toolResults) {
+					const toolCallId = tr.tool_call_id;
+					const toolName = tr.name;
+					if (!toolCallId || !toolName) continue;
+					const result = resultById.get(toolCallId);
+					await handle.append({
+						type: "tool_result",
+						toolCallId,
+						toolName,
+						content: tr.content ?? "",
+						...(result?.isError ? { isError: true } : {}),
+						...(result?.meta?.diff ? { diff: result.meta.diff } : {}),
+					});
+				}
+				publish({ type: "turn_complete" });
+			},
+			onError: (error) => {
+				if (abort.signal.aborted) return;
+				updateRun((state) => ({ ...state, hadError: true }));
+				publish({ type: "error", message: error.message });
+			},
+		};
 
-		const ac = new AbortController();
-		this.aborts.set(sessionId, ac);
+		const runLoop = Effect.gen(function* () {
+			const session = getSession();
+			const handle = session?.handle;
+			if (!handle) {
+				return yield* Effect.fail(new Error(`No open session handle for ${sessionId}`));
+			}
 
-		// Reset draft state
-		this.draftText.set(sessionId, "");
-		this.draftToolCalls.set(sessionId, []);
-		this.draftIndex.set(sessionId, new Map());
-
-		let finished: ServerEvent = { type: "run_finished", reason: "completed" };
-
-		try {
 			// Build the provider from the owner's stored key. Per-user keys live in
 			// the database, so a run without one is a configuration error.
-			const provider = await this.providerFor(ownerId);
+			const provider = yield* attempt(() => providerFor(session.ownerId ?? ""));
 			if (!provider) {
-				throw new Error("No API key configured. Add one in Settings.");
+				return yield* Effect.fail(new Error("No API key configured. Add one in Settings."));
 			}
 
 			// Re-validate the workspace before every run: the directory may have
 			// been deleted or replaced by a symlink since the session was created.
 			const storedCwd = handle.getHeader().cwd;
-			const workspace = await validateWorkspacePath(storedCwd, this.config.workspaceRoots);
+			const workspace = yield* attempt(() => validateWorkspacePath(storedCwd, config.workspaceRoots));
 			if (!workspace.ok) {
-				throw new Error(`Workspace "${storedCwd}" is not usable: ${workspace.message}`);
+				return yield* Effect.fail(new Error(`Workspace "${storedCwd}" is not usable: ${workspace.message}`));
 			}
 			const cwd = workspace.path;
 
 			// Expand @mentions against the session workspace, persist the stripped version
-			const expanded = await expandMentions(content, cwd);
-			await handle.append({ type: "message", role: "user", content: stripAttachedContext(expanded) });
+			const expanded = yield* attempt(() => expandMentions(content, cwd));
+			yield* attempt(() =>
+				handle.append({ type: "message", role: "user", content: stripAttachedContext(expanded) }),
+			);
 			const messages = entriesToMessages(handle.getEntries());
 
 			// The LLM sees the expanded content for the latest user message
@@ -222,165 +377,130 @@ export class RunManager {
 			}
 
 			const tools = createToolRegistry(
-				withApproval(createWorkspaceTools(cwd), (tool, input) =>
-					this.requestApproval(sessionId, tool, input, ac.signal),
+				withApproval(createWorkspaceTools(cwd), (tool, input) => requestApproval(tool, input)),
+			);
+
+			yield* attempt(() =>
+				runAgentLoop(
+					messages,
+					{
+						provider,
+						tools,
+						model: config.model,
+						systemPrompt: SYSTEM_PROMPT,
+						temperature: config.temperature,
+						contextLimit: {
+							maxTokens: config.maxTokens,
+							preserveRecentTurns: config.preserveRecentTurns,
+						},
+						maxTokens: config.maxCompletionTokens,
+						signal: abort.signal,
+					},
+					callbacks,
 				),
 			);
 
-			await runAgentLoop(
-				messages,
-				{
-					provider,
-					tools,
-					model: this.config.model,
-					systemPrompt: SYSTEM_PROMPT,
-					temperature: this.config.temperature,
-					contextLimit: {
-						maxTokens: this.config.maxTokens,
-						preserveRecentTurns: this.config.preserveRecentTurns,
-					},
-					maxTokens: this.config.maxCompletionTokens,
-					signal: ac.signal,
-				},
-				{
-					onTextDelta: (delta) => {
-						this.draftText.set(sessionId, (this.draftText.get(sessionId) ?? "") + delta);
-						this.emit(sessionId, { type: "text_delta", content: delta });
-					},
-					onToolCallStart: (id, name) => {
-						this.emit(sessionId, { type: "tool_call_start", id, name });
-					},
-					onToolCallArgsDelta: (id, args) => {
-						this.emit(sessionId, { type: "tool_call_args_delta", id, args });
-					},
-					onToolCallEnd: (id, name, args) => {
-						const calls = this.draftToolCalls.get(sessionId);
-						const index = this.draftIndex.get(sessionId);
-						if (!calls || !index) return;
-						index.set(id, calls.length);
-						calls.push({ id, name, args });
-						this.emit(sessionId, { type: "tool_call_end", id, name, args });
-					},
-					onToolResult: (id, result) => {
-						const calls = this.draftToolCalls.get(sessionId);
-						const index = this.draftIndex.get(sessionId);
-						const at = index?.get(id);
-						if (calls && at !== undefined && at < calls.length) {
-							const existing = calls[at];
-							if (existing) calls[at] = { ...existing, result };
-						}
-						this.emit(sessionId, { type: "tool_result", id, result });
-					},
-					onMessageComplete: (usage?: Usage) => {
-						if (usage) {
-							// `tokens` is the current context-window usage (this call's
-							// prompt + completion), not a running total: clients render it
-							// against the model's context limit. `cost` does accumulate.
-							this.tokens.set(sessionId, usage.prompt_tokens + usage.completion_tokens);
-							if (usage.cost) {
-								this.cost.set(sessionId, (this.cost.get(sessionId) ?? 0) + usage.cost);
-							}
-							handle.setTokens(this.tokens.get(sessionId) ?? 0);
-							handle.setCost(this.cost.get(sessionId) ?? 0);
-						}
-						this.emit(sessionId, {
-							type: "message_complete",
-							...(usage ? { usage } : {}),
-							tokens: this.tokens.get(sessionId) ?? 0,
-							cost: this.cost.get(sessionId) ?? 0,
-						});
-					},
-					onTurnComplete: async (assistantMessage: Message, toolResults: Message[]) => {
-						await handle.append({
-							type: "message",
-							role: "assistant",
-							content: assistantMessage.content,
-							...(assistantMessage.tool_calls?.length && { toolCalls: assistantMessage.tool_calls }),
-						});
-						// Draft tool calls carry the full results (including isError and the diff),
-						// which the LLM-facing tool messages don't preserve.
-						const results = this.draftToolCalls.get(sessionId) ?? [];
-						const resultById = new Map(results.map((tc) => [tc.id, tc.result]));
-						for (const tr of toolResults) {
-							const result = tr.tool_call_id ? resultById.get(tr.tool_call_id) : undefined;
-							await handle.append({
-								type: "tool_result",
-								toolCallId: tr.tool_call_id!,
-								toolName: tr.name!,
-								content: tr.content!,
-								...(result?.isError ? { isError: true } : {}),
-								...(result?.meta?.diff ? { diff: result.meta.diff } : {}),
-							});
-						}
-						this.emit(sessionId, { type: "turn_complete" });
-					},
-					onError: (error) => {
-						if (ac.signal.aborted) return;
-						finished = { type: "run_finished", reason: "error" };
-						this.emit(sessionId, { type: "error", message: error.message });
-					},
-				},
-			);
+			if (abort.signal.aborted) return "cancelled";
+			return Ref.getUnsafe(runRef).hadError ? "error" : "completed";
+		});
 
-			if (ac.signal.aborted && finished.reason === "completed") {
-				finished = { type: "run_finished", reason: "cancelled" };
-			}
-		} catch (error) {
-			if (ac.signal.aborted) {
-				finished = { type: "run_finished", reason: "cancelled" };
-			} else {
-				finished = { type: "run_finished", reason: "error" };
-				this.emit(sessionId, {
-					type: "error",
-					message: error instanceof Error ? error.message : String(error),
-				});
-			}
-		} finally {
-			// Deny any approvals still pending so their promises don't leak
-			const pending = this.pendingApprovals.get(sessionId);
-			if (pending) {
-				for (const [id, approval] of pending) {
-					this.emit(sessionId, { type: "approval_resolved", toolCallId: id, decision: "deny" });
-					approval.resolve("deny");
+		const program = runLoop.pipe(
+			Effect.catchCause((cause) =>
+				Effect.sync((): RunFinishReason => {
+					if (abort.signal.aborted) return "cancelled";
+					publish({ type: "error", message: causeMessage(cause) });
+					return "error";
+				}),
+			),
+		);
+
+		return program.pipe(
+			Effect.onExit((exit) => {
+				const reason: RunFinishReason = Exit.isSuccess(exit)
+					? exit.value
+					: Cause.hasInterruptsOnly(exit.cause)
+						? "cancelled"
+						: "error";
+				return this.finalizeRun(sessionId, reason);
+			}),
+		);
+	}
+
+	/**
+	 * Run teardown, guaranteed to execute on completion, failure, and
+	 * interruption: abort any in-flight provider call, deny still-pending
+	 * approvals (their promises must never leak), flush the session, announce
+	 * `run_finished`, and drop the session if nobody is watching.
+	 */
+	private finalizeRun(sessionId: string, reason: RunFinishReason): Effect.Effect<void> {
+		const getSession = () => this.sessions.get(sessionId);
+		const publish = (event: ServerEvent): void => this.publish(sessionId, event);
+		const release = (): void => this.releaseIfIdle(sessionId);
+		return Effect.gen(function* () {
+			const session = getSession();
+			if (!session) return;
+			const run = session.run;
+			session.run = null;
+			if (run) {
+				if (reason === "cancelled") run.abort.abort();
+				for (const [toolCallId, pending] of Ref.getUnsafe(run.ref).pendingApprovals) {
+					publish({ type: "approval_resolved", toolCallId, decision: "deny" });
+					Deferred.doneUnsafe(pending.deferred, Effect.succeed<ApprovalDecision>("deny"));
 				}
-				pending.clear();
 			}
-
-			this.activeRuns.delete(sessionId);
-			this.aborts.delete(sessionId);
-			this.draftText.delete(sessionId);
-			this.draftToolCalls.delete(sessionId);
-			this.draftIndex.delete(sessionId);
-			await handle.flush().catch(() => {});
-			this.emit(sessionId, finished);
-			this.releaseIfIdle(sessionId);
-		}
+			const handle = session.handle;
+			if (handle) {
+				yield* Effect.tryPromise(() => handle.flush()).pipe(Effect.catchCause(() => Effect.void));
+			}
+			publish({ type: "run_finished", reason });
+			release();
+		}).pipe(Effect.uninterruptible);
 	}
 
 	/** Attach an opened session handle so the run can persist to it. */
 	attachHandle(sessionId: string, handle: SessionHandle, ownerId: string): void {
-		this.handles.set(sessionId, { handle, ownerId });
-		this.tokens.set(sessionId, handle.getTokens());
-		this.cost.set(sessionId, handle.getCost());
+		const session = this.ensureSession(sessionId);
+		session.handle = handle;
+		session.ownerId = ownerId;
+		session.tokens = handle.getTokens();
+		session.cost = handle.getCost();
 	}
 
-	private async requestApproval(
+	private ensureSession(sessionId: string): SessionRecord {
+		let session = this.sessions.get(sessionId);
+		if (!session) {
+			session = {
+				handle: null,
+				ownerId: null,
+				subscribers: new Set(),
+				alwaysApproved: new Set(),
+				tokens: 0,
+				cost: 0,
+				run: null,
+			};
+			this.sessions.set(sessionId, session);
+		}
+		return session;
+	}
+
+	/**
+	 * Ask the user for permission to run a side-effecting tool. The caller
+	 * (`withApproval`) still awaits a promise; it is fulfilled by a `Deferred`
+	 * that `resolveApproval` completes and that {@link finalizeRun} denies if
+	 * the run ends first.
+	 */
+	private requestApproval(
 		sessionId: string,
+		runRef: Ref.Ref<RunState>,
 		tool: { definition: { function: { name: string } } },
 		input: unknown,
-		signal: AbortSignal,
 	): Promise<boolean> {
 		const name = tool.definition.function.name;
-		const always = this.alwaysApproved.get(sessionId);
-		if (always?.has(name)) return true;
-		if (signal.aborted) return false;
+		const session = this.sessions.get(sessionId);
+		if (session?.alwaysApproved.has(name)) return Promise.resolve(true);
+		if (session?.run?.abort.signal.aborted) return Promise.resolve(false);
 
-		let pending = this.pendingApprovals.get(sessionId);
-		if (!pending) {
-			pending = new Map();
-			this.pendingApprovals.set(sessionId, pending);
-		}
-
+		const deferred = Deferred.makeUnsafe<ApprovalDecision>();
 		const toolCallId = crypto.randomUUID();
 		const info: PendingApprovalInfo = {
 			toolCallId,
@@ -388,30 +508,19 @@ export class RunManager {
 			summary: summarizeToolArgs(name, JSON.stringify(input)),
 		};
 
-		const decision = await new Promise<ApprovalDecision>((resolve) => {
-			pending!.set(toolCallId, { resolve, info });
-			this.emit(sessionId, { type: "approval_required", approval: info });
-			signal.addEventListener(
-				"abort",
-				() => {
-					if (pending!.delete(toolCallId)) {
-						this.emit(sessionId, { type: "approval_resolved", toolCallId, decision: "deny" });
-						resolve("deny");
-					}
-				},
-				{ once: true },
-			);
-		});
+		Effect.runSync(
+			Ref.update(runRef, (state) => {
+				const pendingApprovals = new Map(state.pendingApprovals);
+				pendingApprovals.set(toolCallId, { deferred, info });
+				return { ...state, pendingApprovals };
+			}),
+		);
+		this.publish(sessionId, { type: "approval_required", approval: info });
 
-		if (decision === "always") {
-			let set = this.alwaysApproved.get(sessionId);
-			if (!set) {
-				set = new Set();
-				this.alwaysApproved.set(sessionId, set);
-			}
-			set.add(name);
-		}
-		return decision !== "deny";
+		return Effect.runPromise(Deferred.await(deferred)).then((decision) => {
+			if (decision === "always") session?.alwaysApproved.add(name);
+			return decision !== "deny";
+		});
 	}
 }
 
