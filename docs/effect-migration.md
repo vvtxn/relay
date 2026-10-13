@@ -89,7 +89,7 @@ The repo deliberately carries no tests. This migration reintroduces tests as **s
 | - | ---------------------------------- | -------------- | ----------------------------------------------------------------- | --------------------------------------------------------- |
 | 0 | Baseline & scaffolding             | tooling        | version alignment, vitest wiring, characterization tests          | tests green on current code                               |
 | 1 | Composition → Layers               | server         | DB/stores/RunManager as Layers, process `ManagedRuntime`          | identical behavior, services built by layers              |
-| 2 | RunManager → structured concurrency | server (+core) | fiber per run, `PubSub`, `Deferred`, `Ref`, interrupt-fold       | all RunManager semantics preserved, approvals auto-deny   |
+| 2 | RunManager → structured concurrency | server (+core) | fiber per run, subscriber queues, `Deferred`, `Ref`, interrupt-fold | all RunManager semantics preserved, approvals auto-deny   |
 | 3 | Core runtime                       | relay          | provider/agent → `Stream`, tools → `Effect`, `Schedule` retries   | same `AgentEvent` sequence, typed errors, TestClock green |
 | 4 | HTTP → effect/http + platform-node | server         | `HttpRouter`, SSE as stream, `HttpStaticServer` (spa), state file | route/status parity, exit 75 preserved, adapter deleted   |
 | 5 | Client Effect layer                | client + web   | move web's `Api`/`SessionStream` into client, dedupe web          | web unchanged visually, CLI can adopt services            |
@@ -132,19 +132,24 @@ Exit: tests pass; `pnpm relay` smoke works; no handler file changed.
 
 ### Phase 2 — RunManager → structured concurrency
 
-Rewrite RunManager internals (API shape preserved where practical):
+RunManager internals rewritten (public API and SSE handler unchanged):
 
-- One **fiber per run**; `cancel` = `Fiber.interrupt`. `run_finished` reason comes from the `Exit`
-  (`completed`/`error`/`interrupted`) instead of manual abort bookkeeping.
-- Per-session **`PubSub<ServerEvent>`**; `subscribe`/`getRunState` derive from it so late subscribers still get the
-  `run_state` snapshot first. SSE handler only changes mechanically.
-- Approvals as **`Deferred<ApprovalDecision>`**; interruption propagates automatically and a finalizer denies anything
-  still pending. The handler passed to `withApproval` gains an Effect-returning variant that RunManager fulfills via
-  `Deferred` (core tools stay Promise-based in this phase; the seam is adapted locally).
-- Draft text / tool calls / tokens / cost move into `Ref`s; `releaseIfIdle` becomes refcounted or scope-based.
+- One **fiber per run**; `cancel` = `Fiber.interrupt`. The `run_finished` reason is derived from the run effect's `Exit`
+  (success value, or interruption) instead of manual abort bookkeeping. A single uninterruptible finalizer aborts the
+  provider call, denies pending approvals, flushes the handle, announces `run_finished`, and releases the session.
+- Fan-out **as shipped**: per-subscriber `Queue`s registered synchronously (`Queue.unbounded` + `Queue.offerUnsafe`),
+  not `PubSub` — v4's `PubSub.subscribe` is scoped and therefore asynchronous, which would open a drop window between
+  the SSE handler's `run_state` snapshot and its subscription. Queues preserve the deterministic
+  snapshot-then-listen contract with no SSE changes; phase 4 may revisit `PubSub` inside an Effect-native SSE handler.
+- Approvals as **`Deferred<ApprovalDecision>`**; `resolveApproval` takes the Deferred out of the run `Ref` atomically.
+  The finalizer denies whatever is still pending, so promises cannot leak. Core tools stay Promise-based this phase:
+  the `withApproval` handler bridges via `Deferred.await` → Promise.
+- Draft text / tool calls / pending approvals live in a per-run `Ref<RunState>`; tokens / cost / "always" approvals are
+  session-scoped fields on the session record (they persist across runs until the session is released).
+- `providerFor` stays promise-shaped until phase 3 converts the agent loop.
 
-Exit: every phase-0 RunManager test passes; long-run stress (send, approve, cancel, reconnect SSE mid-run) behaves
-identically; no `Promise` leak on cancel (approvals resolve).
+Exit (met): every phase-0 RunManager test passes, plus new guards for mid-run `run_state` snapshots, late subscribers,
+sequential runs on one session, and immediate cancel; `pnpm check` clean; real server boot smoke green.
 
 ### Phase 3 — Core runtime (provider, agent loop, tools)
 
