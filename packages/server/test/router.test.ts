@@ -2,6 +2,7 @@
 // (phase 4, effect/http + @effect/platform-node). Remove after phase 4 — see
 // docs/effect-migration.md ("Testing strategy").
 
+import { Effect } from "effect";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -30,15 +31,15 @@ async function makeServices(provider: LLMProvider) {
 	const cwd = await mkdtemp(join(tmpdir(), "relay-router-test-"));
 	const config = makeConfig(cwd);
 	const store = new MemorySessionStore();
-	const runs = new RunManager({ config, sessionStore: store, providerFor: async () => provider });
+	const runs = new RunManager({ config, providerFor: () => Effect.succeed(provider) });
 	const user: AuthenticatedUser = { id: USER_ID, name: "Test User", provider: "github" };
 
 	const services = {
 		config,
 		db: {},
-		userStore: { getById: async (id: string) => (id === USER_ID ? user : null) },
-		userSettings: { getApiKey: async () => "fake-key" },
-		authSessions: { resolve: async (token: string) => (token === TEST_TOKEN ? { userId: USER_ID } : null) },
+		userStore: { getById: (id: string) => Effect.succeed(id === USER_ID ? user : null) },
+		userSettings: { getApiKey: () => Effect.succeed("fake-key") },
+		authSessions: { resolve: (token: string) => Effect.succeed(token === TEST_TOKEN ? { userId: USER_ID } : null) },
 		sessionStore: store,
 		runs,
 	} as unknown as ServerServices;

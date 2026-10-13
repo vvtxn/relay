@@ -77,25 +77,25 @@ export const storesLayer = Layer.effectContext(
 		const config = yield* Config;
 
 		const userStore = new DatabaseUserStore({ url: config.tursoUrl, authToken: config.tursoToken, client: db });
-		yield* Effect.tryPromise(() => userStore.ready);
+		yield* userStore.ready;
 		const userSettings = new DatabaseUserSettingsStore({
 			url: config.tursoUrl,
 			authToken: config.tursoToken,
 			client: db,
 		});
-		yield* Effect.tryPromise(() => userSettings.ready);
+		yield* userSettings.ready;
 		const authSessions = new DatabaseAuthSessionStore({
 			url: config.tursoUrl,
 			authToken: config.tursoToken,
 			client: db,
 		});
-		yield* Effect.tryPromise(() => authSessions.ready);
+		yield* authSessions.ready;
 		const sessionStore = new DatabaseSessionStore({
 			url: config.tursoUrl,
 			authToken: config.tursoToken,
 			client: db,
 		});
-		yield* Effect.tryPromise(() => sessionStore.ready);
+		yield* sessionStore.ready;
 
 		return Context.empty()
 			.pipe(Context.add(UserStore, userStore))
@@ -108,20 +108,19 @@ export const storesLayer = Layer.effectContext(
 /**
  * The per-process RunManager. Each run builds a provider from the owning
  * user's stored key: the key is per-user and lives in the database, not in
- * server config. The factory stays promise-shaped until phase 2 converts the
- * manager to structured concurrency.
+ * server config.
  */
 const runsLayer = Layer.effect(
 	Runs,
 	Effect.gen(function* () {
 		const config = yield* Config;
-		const sessionStore = yield* SessionStore;
 		const userSettings = yield* UserSettings;
-		const providerFor = async (ownerId: string) => {
-			const apiKey = await userSettings.getApiKey(ownerId);
-			return apiKey ? new CompletionsProvider({ apiKey, baseURL: config.baseURL }) : null;
-		};
-		return new RunManager({ config, sessionStore, providerFor });
+		const providerFor = (ownerId: string) =>
+			Effect.gen(function* () {
+				const apiKey = yield* userSettings.getApiKey(ownerId);
+				return apiKey ? new CompletionsProvider({ apiKey, baseURL: config.baseURL }) : null;
+			});
+		return new RunManager({ config, providerFor });
 	}),
 );
 

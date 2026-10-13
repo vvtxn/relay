@@ -1,3 +1,4 @@
+import { Effect } from "effect";
 import {
 	authenticate,
 	clearStoredSession,
@@ -110,8 +111,8 @@ export async function handleCallback(services: ServerServices, request: Request,
 		if (!isGithubAllowed(config.allowedGithub, profile)) {
 			return error(403, "GitHub account is not authorized");
 		}
-		const user = await authenticate(new GitHubAuthProvider(), profile, services.userStore);
-		const { token } = await services.authSessions.create(user.id, sessionTtlMs(services));
+		const user = await Effect.runPromise(authenticate(new GitHubAuthProvider(), profile, services.userStore));
+		const { token } = await Effect.runPromise(services.authSessions.create(user.id, sessionTtlMs(services)));
 
 		// Hand the session to the local CLI so it acts as the same user (browsers
 		// and the terminal don't share cookies). Loopback-only.
@@ -139,7 +140,7 @@ export async function handleCallback(services: ServerServices, request: Request,
 export async function handleLogout(services: ServerServices, request: Request): Promise<Response> {
 	const token = readSessionToken(request);
 	if (token) {
-		await services.authSessions.revoke(token);
+		await Effect.runPromise(services.authSessions.revoke(token));
 		if (readStoredSession()?.token === token) clearStoredSession();
 	}
 	const response = json({ status: "ok" } satisfies StatusResponse);

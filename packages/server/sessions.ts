@@ -1,3 +1,4 @@
+import { Effect } from "effect";
 import { resolve } from "node:path";
 import { stat } from "node:fs/promises";
 import { getGitBranch, validateWorkspacePath } from "@vvtxn/relay/core/workspace.ts";
@@ -25,7 +26,7 @@ import { RunConflictError } from "./run.ts";
  */
 export async function openSessionHandle(services: RequestServices, sessionId: string): Promise<SessionHandle> {
 	try {
-		return await services.sessionStore.open(sessionId, services.user.id);
+		return await Effect.runPromise(services.sessionStore.open(sessionId, services.user.id));
 	} catch {
 		const handle = services.runs.getHandle(sessionId, services.user.id);
 		if (handle) return handle;
@@ -71,13 +72,13 @@ export function handleConfig(services: RequestServices): Response {
 
 export async function handleListSessions(services: RequestServices, url: URL): Promise<Response> {
 	const cwd = resolveCwd(services, url);
-	const sessions = await services.sessionStore.listSummaries({ ownerId: services.user.id, cwd });
+	const sessions = await Effect.runPromise(services.sessionStore.listSummaries({ ownerId: services.user.id, cwd }));
 	return json({ sessions } satisfies SessionListResponse);
 }
 
 /** Distinct workspaces for the user's workspace picker. */
 export async function handleListWorkspaces(services: RequestServices): Promise<Response> {
-	const summaries = await services.sessionStore.listWorkspaces(services.user.id);
+	const summaries = await Effect.runPromise(services.sessionStore.listWorkspaces(services.user.id));
 	const byCwd = new Map(summaries.map((summary) => [summary.cwd, summary]));
 	// Always surface the server's default workspace (the CLI's cwd) so a freshly
 	// launched project appears before its first session.
@@ -110,7 +111,7 @@ export async function handleCreateSession(services: RequestServices, request: Re
 	const scope = { ownerId: services.user.id, cwd: validation.path };
 	// Register eagerly so the workspace appears in the picker before the first
 	// append persists the session row.
-	await services.sessionStore.registerWorkspace(scope);
+	await Effect.runPromise(services.sessionStore.registerWorkspace(scope));
 	const handle = services.sessionStore.create(scope);
 	services.runs.attachHandle(handle.getHeader().id, handle, services.user.id);
 	return json({ id: handle.getHeader().id, header: handle.getHeader() } satisfies CreateSessionResponse, 201);
@@ -150,7 +151,7 @@ export async function handleSendMessage(
 
 	// Fail fast with a clear message rather than starting a run that can only
 	// error out: a provider cannot be built without the user's API key.
-	if (!(await services.userSettings.getApiKey(services.user.id))) {
+	if (!(await Effect.runPromise(services.userSettings.getApiKey(services.user.id)))) {
 		return error(400, "No API key configured. Add one in Settings.");
 	}
 

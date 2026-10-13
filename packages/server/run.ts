@@ -3,14 +3,9 @@ import type { LLMProvider } from "@vvtxn/relay/api/types.ts";
 import { createToolRegistry, createWorkspaceTools, withApproval } from "@vvtxn/relay/core/tools/index.ts";
 import { summarizeToolArgs } from "@vvtxn/relay/core/display.ts";
 import { expandMentions, validateWorkspacePath } from "@vvtxn/relay/core/workspace.ts";
-import {
-	entriesToMessages,
-	type SessionHandle,
-	type SessionStore,
-	stripAttachedContext,
-} from "@vvtxn/relay/core/sessions/index.ts";
+import { entriesToMessages, type SessionHandle, stripAttachedContext } from "@vvtxn/relay/core/sessions/index.ts";
 import { type AgentEvent, run } from "@vvtxn/relay/core/agent.ts";
-import { attempt, causeMessage } from "@vvtxn/relay/core/effect.ts";
+import { attempt, causeMessage, type StoreError } from "@vvtxn/relay/core/effect.ts";
 import { SYSTEM_PROMPT } from "@vvtxn/relay/core/system-prompt.ts";
 import type { ApprovalDecision, PendingApprovalInfo, RunStateEvent, ServerEvent } from "@vvtxn/client/protocol.ts";
 import type { ServerConfig } from "./config.ts";
@@ -66,18 +61,15 @@ interface SessionRecord {
  */
 export class RunManager {
 	private readonly config: ServerConfig;
-	private readonly sessionStore: SessionStore;
-	private readonly providerFor: (ownerId: string) => Promise<LLMProvider | null>;
+	private readonly providerFor: (ownerId: string) => Effect.Effect<LLMProvider | null, StoreError>;
 
 	private readonly sessions = new Map<string, SessionRecord>();
 
 	constructor(options: {
 		config: ServerConfig;
-		sessionStore: SessionStore;
-		providerFor: (ownerId: string) => Promise<LLMProvider | null>;
+		providerFor: (ownerId: string) => Effect.Effect<LLMProvider | null, StoreError>;
 	}) {
 		this.config = options.config;
-		this.sessionStore = options.sessionStore;
 		this.providerFor = options.providerFor;
 	}
 
@@ -241,7 +233,7 @@ export class RunManager {
 
 			// Build the provider from the owner's stored key. Per-user keys live in
 			// the database, so a run without one is a configuration error.
-			const provider = yield* attempt(() => providerFor(session.ownerId ?? ""));
+			const provider = yield* providerFor(session.ownerId ?? "");
 			if (!provider) {
 				return yield* Effect.fail(new Error("No API key configured. Add one in Settings."));
 			}
@@ -257,9 +249,7 @@ export class RunManager {
 
 			// Expand @mentions against the session workspace, persist the stripped version
 			const expanded = yield* attempt(() => expandMentions(content, cwd));
-			yield* attempt(() =>
-				handle.append({ type: "message", role: "user", content: stripAttachedContext(expanded) }),
-			);
+			yield* handle.append({ type: "message", role: "user", content: stripAttachedContext(expanded) });
 			const messages = entriesToMessages(handle.getEntries());
 
 			// The LLM sees the expanded content for the latest user message
@@ -397,16 +387,14 @@ export class RunManager {
 				case "turn_complete": {
 					const handle = getSession()?.handle;
 					if (handle) {
-						yield* attempt(() =>
-							handle.append({
-								type: "message",
-								role: "assistant",
-								content: event.assistantMessage.content,
-								...(event.assistantMessage.tool_calls?.length && {
-									toolCalls: event.assistantMessage.tool_calls,
-								}),
+						yield* handle.append({
+							type: "message",
+							role: "assistant",
+							content: event.assistantMessage.content,
+							...(event.assistantMessage.tool_calls?.length && {
+								toolCalls: event.assistantMessage.tool_calls,
 							}),
-						);
+						});
 						// Draft tool calls carry the full results (including isError and the diff),
 						// which the LLM-facing tool messages don't preserve.
 						const results = Ref.getUnsafe(runRef).draftToolCalls;
@@ -416,16 +404,14 @@ export class RunManager {
 							const toolName = tr.name;
 							if (!toolCallId || !toolName) continue;
 							const result = resultById.get(toolCallId);
-							yield* attempt(() =>
-								handle.append({
-									type: "tool_result",
-									toolCallId,
-									toolName,
-									content: tr.content ?? "",
-									...(result?.isError ? { isError: true } : {}),
-									...(result?.meta?.diff ? { diff: result.meta.diff } : {}),
-								}),
-							);
+							yield* handle.append({
+								type: "tool_result",
+								toolCallId,
+								toolName,
+								content: tr.content ?? "",
+								...(result?.isError ? { isError: true } : {}),
+								...(result?.meta?.diff ? { diff: result.meta.diff } : {}),
+							});
 						}
 					}
 					publish({ type: "turn_complete" });
@@ -465,7 +451,7 @@ export class RunManager {
 			}
 			const handle = session.handle;
 			if (handle) {
-				yield* Effect.tryPromise(() => handle.flush()).pipe(Effect.catchCause(() => Effect.void));
+				yield* handle.flush().pipe(Effect.catchCause(() => Effect.void));
 			}
 			publish({ type: "run_finished", reason });
 			release();

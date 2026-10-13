@@ -1,3 +1,4 @@
+import { Effect } from "effect";
 import { isAbsolute, resolve } from "node:path";
 import { validateWorkspacePath } from "@vvtxn/relay/core/workspace.ts";
 import type {
@@ -37,7 +38,9 @@ export async function handleRegisterWorkspace(services: RequestServices, request
 		if (validation.reason === "outside-roots") throw new ForbiddenError(validation.message);
 		throw new BadRequestError(validation.message);
 	}
-	await services.sessionStore.registerWorkspace({ ownerId: services.user.id, cwd: validation.path });
+	await Effect.runPromise(
+		services.sessionStore.registerWorkspace({ ownerId: services.user.id, cwd: validation.path }),
+	);
 	return json(
 		{
 			workspace: { cwd: validation.path, sessionCount: 0, lastActivity: "", exists: true },
@@ -53,6 +56,8 @@ export async function handleRegisterWorkspace(services: RequestServices, request
 export async function handleUnregisterWorkspace(services: RequestServices, url: URL): Promise<Response> {
 	const raw = url.searchParams.get("cwd")?.trim();
 	if (!raw || !isAbsolute(raw)) throw new BadRequestError("An absolute cwd query parameter is required");
-	await services.sessionStore.unregisterWorkspace({ ownerId: services.user.id, cwd: resolve(raw) });
+	await Effect.runPromise(
+		services.sessionStore.unregisterWorkspace({ ownerId: services.user.id, cwd: resolve(raw) }),
+	);
 	return json({ status: "ok" } satisfies StatusResponse);
 }

@@ -2,6 +2,7 @@
 // (phase 2, structured concurrency). Remove after phase 2 — see
 // docs/effect-migration.md ("Testing strategy").
 
+import { Effect } from "effect";
 import { mkdtemp, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -32,7 +33,7 @@ async function setupRun(provider: LLMProvider | null) {
 	const config = makeConfig(cwd);
 	const store = new MemorySessionStore();
 	const handle = store.create({ ownerId: USER_ID, cwd }) as MemorySessionHandle;
-	const runs = new RunManager({ config, sessionStore: store, providerFor: async () => provider });
+	const runs = new RunManager({ config, providerFor: () => Effect.succeed(provider) });
 	const sessionId = handle.getHeader().id;
 	runs.attachHandle(sessionId, handle, USER_ID);
 	return { cwd, runs, sessionId, handle };

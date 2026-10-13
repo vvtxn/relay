@@ -1,3 +1,4 @@
+import { Effect } from "effect";
 import type { SetApiKeyRequest, SettingsResponse, StatusResponse } from "@vvtxn/client/protocol.ts";
 import type { RequestServices } from "./services.ts";
 import { BadRequestError, json, readJsonBody } from "./http.ts";
@@ -15,7 +16,7 @@ function hintFor(apiKey: string): string {
  * whether one is set plus a masked hint.
  */
 export async function handleGetSettings(services: RequestServices): Promise<Response> {
-	const apiKey = await services.userSettings.getApiKey(services.user.id);
+	const apiKey = await Effect.runPromise(services.userSettings.getApiKey(services.user.id));
 	return json({
 		apiKey: { set: apiKey !== null, hint: apiKey !== null ? hintFor(apiKey) : null },
 	} satisfies SettingsResponse);
@@ -31,6 +32,6 @@ export async function handleSetApiKey(services: RequestServices, request: Reques
 	if (trimmed.length > MAX_API_KEY_LENGTH) {
 		throw new BadRequestError(`API key must be at most ${MAX_API_KEY_LENGTH} characters`);
 	}
-	await services.userSettings.setApiKey(services.user.id, trimmed.length > 0 ? trimmed : null);
+	await Effect.runPromise(services.userSettings.setApiKey(services.user.id, trimmed.length > 0 ? trimmed : null));
 	return json({ status: "ok" } satisfies StatusResponse);
 }

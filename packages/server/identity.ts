@@ -1,3 +1,4 @@
+import { Effect } from "effect";
 import type { AuthenticatedUser } from "@vvtxn/relay/core/index.ts";
 import type { ServerServices } from "./services.ts";
 import { parseCookies } from "./cookies.ts";
@@ -32,7 +33,7 @@ export async function resolveRequestUser(
 ): Promise<AuthenticatedUser | null> {
 	const token = readSessionToken(request);
 	if (!token) return null;
-	const session = await services.authSessions.resolve(token, sessionTtlMs(services));
+	const session = await Effect.runPromise(services.authSessions.resolve(token, sessionTtlMs(services)));
 	if (!session) return null;
-	return await services.userStore.getById(session.userId);
+	return await Effect.runPromise(services.userStore.getById(session.userId));
 }

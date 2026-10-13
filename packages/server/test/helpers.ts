@@ -2,7 +2,7 @@
 // Kept in a dedicated `test/` folder so the suite deletes as one directory —
 // see docs/effect-migration.md ("Testing strategy").
 
-import { Stream } from "effect";
+import { Effect, Stream } from "effect";
 import type { CompletionRequest, CompletionResponse, LLMProvider, StreamChunk, Usage } from "@vvtxn/relay/api/types.ts";
 import { ProviderError } from "@vvtxn/relay/api/errors.ts";
 import type {
@@ -60,10 +60,12 @@ export class MemorySessionHandle implements SessionHandle {
 		this.header = { type: "session", version: 1, id, timestamp: new Date().toISOString(), cwd };
 	}
 
-	async append(entry: NewEntry): Promise<string> {
-		const id = crypto.randomUUID();
-		this.appended.push({ ...entry, id, timestamp: new Date().toISOString() } as Entry);
-		return id;
+	append(entry: NewEntry): Effect.Effect<string> {
+		return Effect.sync(() => {
+			const id = crypto.randomUUID();
+			this.appended.push({ ...entry, id, timestamp: new Date().toISOString() } as Entry);
+			return id;
+		});
 	}
 
 	getEntries(): Entry[] {
@@ -92,7 +94,9 @@ export class MemorySessionHandle implements SessionHandle {
 		this.header.cost = cost;
 	}
 
-	async flush(): Promise<void> {}
+	flush(): Effect.Effect<void> {
+		return Effect.void;
+	}
 }
 
 export class MemorySessionStore implements SessionStore {
@@ -106,35 +110,41 @@ export class MemorySessionStore implements SessionStore {
 		return handle;
 	}
 
-	async continueRecent(_scope: SessionScope): Promise<SessionHandle | null> {
-		return null;
+	continueRecent(_scope: SessionScope): Effect.Effect<SessionHandle | null> {
+		return Effect.succeed(null);
 	}
 
-	async open(reference: string, _ownerId: string): Promise<SessionHandle> {
-		const handle = this.handles.get(reference);
-		if (!handle) throw new Error(`Session not found: ${reference}`);
-		return handle;
+	open(reference: string, _ownerId: string): Effect.Effect<SessionHandle> {
+		return Effect.suspend(() => {
+			const handle = this.handles.get(reference);
+			if (!handle) return Effect.die(new Error(`Session not found: ${reference}`));
+			return Effect.succeed(handle);
+		});
 	}
 
-	async listSummaries(_scope: SessionScope): Promise<SessionSummary[]> {
-		return [];
+	listSummaries(_scope: SessionScope): Effect.Effect<SessionSummary[]> {
+		return Effect.succeed([]);
 	}
 
-	async listWorkspaces(ownerId: string): Promise<WorkspaceSummary[]> {
-		return [...(this.workspaces.get(ownerId) ?? [])].map((cwd) => ({
-			cwd,
-			sessionCount: 0,
-			lastActivity: "",
-		}));
+	listWorkspaces(ownerId: string): Effect.Effect<WorkspaceSummary[]> {
+		return Effect.sync(() =>
+			[...(this.workspaces.get(ownerId) ?? [])].map((cwd) => ({
+				cwd,
+				sessionCount: 0,
+				lastActivity: "",
+			})),
+		);
 	}
 
-	async registerWorkspace(scope: SessionScope): Promise<void> {
-		let set = this.workspaces.get(scope.ownerId);
-		if (!set) {
-			set = new Set();
-			this.workspaces.set(scope.ownerId, set);
-		}
-		set.add(scope.cwd);
+	registerWorkspace(scope: SessionScope): Effect.Effect<void> {
+		return Effect.sync(() => {
+			let set = this.workspaces.get(scope.ownerId);
+			if (!set) {
+				set = new Set();
+				this.workspaces.set(scope.ownerId, set);
+			}
+			set.add(scope.cwd);
+		});
 	}
 }
 
