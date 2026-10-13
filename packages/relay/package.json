@@ -10,7 +10,8 @@
 		"./*": "./*"
 	},
 	"dependencies": {
-		"@tursodatabase/serverless": "^1.4.0"
+		"@tursodatabase/serverless": "^1.4.0",
+		"effect": "^4.0.4"
 	},
 	"devDependencies": {
 		"@types/node": "^26.6.5"

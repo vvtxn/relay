@@ -17,7 +17,7 @@
 		"@tanstack/solid-router": "^1",
 		"@vvtxn/client": "workspace:*",
 		"@vvtxn/relay": "workspace:*",
-		"effect": "^4.0.3",
+		"effect": "^4.0.4",
 		"markdown-it": "^15.0.2",
 		"shiki": "^4.5.0",
 		"solid-js": "^1.9"
