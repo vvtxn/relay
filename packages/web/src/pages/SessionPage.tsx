@@ -2,7 +2,7 @@ import { createEffect, onCleanup, Show } from "solid-js";
 import { Outlet, useChildMatches, useNavigate, useParams } from "@tanstack/solid-router";
 import { useQuery } from "@tanstack/solid-query";
 import { configQuery, meQuery, sessionQuery } from "#/api/queries.ts";
-import { RelayError } from "#/api/services.ts";
+import { RelayError } from "@vvtxn/client/services.ts";
 import { signOut } from "#/auth/auth.ts";
 import { ApprovalDialog } from "#/components/ApprovalDialog.tsx";
 import { BootError, BootScreen } from "#/components/BootScreen.tsx";

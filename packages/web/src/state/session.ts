@@ -10,7 +10,7 @@ import {
 import type { OpenSessionResponse, ServerEvent } from "@vvtxn/client/protocol.ts";
 import { entriesToUIMessages } from "@vvtxn/relay/core/display.ts";
 import { fork, interrupt } from "#/api/runtime.ts";
-import { SessionStream } from "#/api/services.ts";
+import { SessionStream } from "@vvtxn/client/services.ts";
 import { queryClient, queryKeys } from "#/api/query-client.ts";
 import { writeStoredSessionId } from "#/api/storage.ts";
 

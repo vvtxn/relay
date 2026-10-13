@@ -22,8 +22,7 @@ web/
     ├── api/
     │   ├── client.ts      # RelayClient singleton (credentials: include, localStorage server URL)
     │   ├── storage.ts     # localStorage helpers (server URL, cwd, session id)
-    │   ├── services.ts    # Effect Api + SessionStream services, RelayError, AppLayer
-    │   ├── runtime.ts     # ManagedRuntime + runApi/fork/interrupt helpers
+    │   ├── runtime.ts     # ManagedRuntime over @vvtxn/client's appLayer + runApi/fork/interrupt helpers
     │   ├── query-client.ts# QueryClient + query key helpers
     │   ├── queries.ts     # queryOptions for me/config/workspace/workspaces/sessions/session/files
     │   ├── mutations.ts   # createSession/sendMessage/approve/cancel (Effect-backed)
@@ -57,9 +56,9 @@ web/
 
 ### Effect owns the stream, TanStack owns the request cache
 
-- `api/services.ts` wraps `RelayClient` in two Effect services: `Api` (REST as `Effect<A, RelayError>`) and
-  `SessionStream` (SSE as `Stream<ServerEvent, RelayError>`). `AppLayer` provides both; `api/runtime.ts` holds the
-  single `ManagedRuntime`.
+- `@vvtxn/client/services.ts` wraps `RelayClient` in two Effect services: `Api` (REST as `Effect<A, RelayError>`) and
+  `SessionStream` (SSE as `Stream<ServerEvent, RelayError>`). `appLayer(client)` provides both; the web's
+  `api/runtime.ts` installs it (with the browser-configured client) into the single `ManagedRuntime`.
 - `api/queries.ts` / `api/mutations.ts` run those Effect programs into Promise-returning TanStack functions. Query owns
   caching, dedup, retries, and invalidation for REST; it does **not** cache the live stream.
 - `state/session.ts` forks a reconnect loop onto the runtime: consume the stream, and on end/failure back off (500ms →
