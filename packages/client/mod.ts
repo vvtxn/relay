@@ -21,6 +21,8 @@
 
 export { RelayApiError, RelayClient } from "./client.ts";
 export type { RelayClientOptions, SubscribeOptions } from "./client.ts";
+export { Api, appLayer, isUnauthorized, RelayError, SessionStream } from "./services.ts";
+export type { ApiShape, SessionStreamShape } from "./services.ts";
 export { encodeSSEFrame, readSSEStream } from "./sse.ts";
 export {
 	applyServerEvent,

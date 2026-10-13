@@ -45,6 +45,9 @@ importers:
       '@vvtxn/relay':
         specifier: workspace:*
         version: link:../relay
+      effect:
+        specifier: ^4.0.4
+        version: 4.0.4
     devDependencies:
       '@types/node':
         specifier: ^26.6.5
