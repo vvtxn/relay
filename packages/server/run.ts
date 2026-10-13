@@ -102,6 +102,24 @@ export class RunManager {
 		};
 	}
 
+	/**
+	 * Subscribes as a `Stream` of events, for Effect-native consumers (the SSE
+	 * response). The queue is registered synchronously; the subscription is
+	 * released when the stream ends or is interrupted.
+	 */
+	subscribeStream(sessionId: string): Stream.Stream<ServerEvent> {
+		const session = this.ensureSession(sessionId);
+		const queue = Effect.runSync(Queue.unbounded<ServerEvent>());
+		session.subscribers.add(queue);
+		return Stream.fromQueue(queue).pipe(
+			Stream.ensuring(
+				Effect.sync(() => {
+					if (session.subscribers.delete(queue)) this.releaseIfIdle(sessionId);
+				}),
+			),
+		);
+	}
+
 	/** Drop the session record once it is idle and unwatched. */
 	private releaseIfIdle(sessionId: string): void {
 		const session = this.sessions.get(sessionId);

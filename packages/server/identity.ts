@@ -1,7 +1,8 @@
-import { Effect } from "effect";
+import { Effect, Option } from "effect";
+import { Headers as HttpHeaders, type HttpServerRequest } from "effect/http";
 import type { AuthenticatedUser } from "@vvtxn/relay/core/index.ts";
+import type { StoreError } from "@vvtxn/relay/core/effect.ts";
 import type { ServerServices } from "./services.ts";
-import { parseCookies } from "./cookies.ts";
 
 /** Session cookie name; the value is the opaque session token. */
 export const SESSION_COOKIE = "relay_session";
@@ -14,26 +15,28 @@ export function sessionTtlMs(services: ServerServices): number {
 	return services.config.sessionTtlDays * 24 * 60 * 60 * 1000;
 }
 
-export function readBearerToken(request: Request): string | null {
-	const header = request.headers.get("authorization");
+export function readBearerToken(request: HttpServerRequest.HttpServerRequest): string | null {
+	const header = Option.getOrUndefined(HttpHeaders.get(request.headers, "authorization"));
 	if (!header?.startsWith("Bearer ")) return null;
 	const token = header.slice("Bearer ".length).trim();
 	return token.length > 0 ? token : null;
 }
 
 /** Session token from an `Authorization: Bearer` header or the cookie. */
-export function readSessionToken(request: Request): string | null {
-	return readBearerToken(request) ?? parseCookies(request.headers.get("cookie"))[SESSION_COOKIE] ?? null;
+export function readSessionToken(request: HttpServerRequest.HttpServerRequest): string | null {
+	return readBearerToken(request) ?? request.cookies[SESSION_COOKIE] ?? null;
 }
 
 /** Resolve the caller from the session cookie or bearer token, if any. */
-export async function resolveRequestUser(
+export function resolveRequestUser(
 	services: ServerServices,
-	request: Request,
-): Promise<AuthenticatedUser | null> {
+	request: HttpServerRequest.HttpServerRequest,
+): Effect.Effect<AuthenticatedUser | null, StoreError> {
 	const token = readSessionToken(request);
-	if (!token) return null;
-	const session = await Effect.runPromise(services.authSessions.resolve(token, sessionTtlMs(services)));
-	if (!session) return null;
-	return await Effect.runPromise(services.userStore.getById(session.userId));
+	if (!token) return Effect.succeed(null);
+	return Effect.gen(function* () {
+		const session = yield* services.authSessions.resolve(token, sessionTtlMs(services));
+		if (!session) return null;
+		return yield* services.userStore.getById(session.userId);
+	});
 }

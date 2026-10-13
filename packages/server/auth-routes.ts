@@ -1,4 +1,5 @@
 import { Effect } from "effect";
+import { HttpServerResponse, type HttpServerRequest } from "effect/http";
 import {
 	authenticate,
 	clearStoredSession,
@@ -7,27 +8,18 @@ import {
 	readStoredSession,
 	writeStoredSession,
 } from "@vvtxn/relay/core/index.ts";
+import { attempt, causeMessage, type StoreError } from "@vvtxn/relay/core/effect.ts";
 import type { StatusResponse } from "@vvtxn/client/protocol.ts";
 import type { ServerServices } from "./services.ts";
-import { error, json } from "./http.ts";
-import { clearCookie, isSecureOrigin, parseCookies, serializeCookie } from "./cookies.ts";
+import { error, json, requestUrl } from "./http.ts";
+import { clearCookie, isSecureOrigin, serializeCookie } from "./cookies.ts";
 import { isLoopbackHost } from "./config.ts";
-import {
-	OAUTH_RETURN_COOKIE,
-	OAUTH_STATE_COOKIE,
-	OAUTH_VERIFIER_COOKIE,
-	readSessionToken,
-	SESSION_COOKIE,
-	sessionTtlMs,
-} from "./identity.ts";
+import { readSessionToken, SESSION_COOKIE, sessionTtlMs } from "./identity.ts";
+import { OAUTH_RETURN_COOKIE, OAUTH_STATE_COOKIE, OAUTH_VERIFIER_COOKIE } from "./identity.ts";
 import { buildAuthorizeUrl, createPkce, createState, exchangeCode, fetchGitHubProfile } from "./github-oauth.ts";
 
 const OAUTH_COOKIE_MAX_AGE_SECONDS = 600;
 const SECONDS_PER_DAY = 86_400;
-
-function redirect(location: string): Response {
-	return new Response(null, { status: 302, headers: { Location: location } });
-}
 
 function cookieOptions(services: ServerServices) {
 	return {
@@ -36,6 +28,11 @@ function cookieOptions(services: ServerServices) {
 		secure: isSecureOrigin(services.config.publicUrl),
 		path: "/",
 	};
+}
+
+/** A redirect response carrying one or more `Set-Cookie` headers. */
+function redirectWithCookies(location: string, cookies: string[]): HttpServerResponse.HttpServerResponse {
+	return HttpServerResponse.setHeaders(HttpServerResponse.redirect(location), { "set-cookie": cookies });
 }
 
 /**
@@ -60,59 +57,69 @@ export function isGithubAllowed(allowed: string[], profile: GitHubProfile): bool
 	return allowed.some((entry) => entry === id || entry === login);
 }
 
-export async function handleLogin(services: ServerServices, url: URL): Promise<Response> {
-	const { config } = services;
-	const returnTo = safeReturnTo(url.searchParams.get("returnTo"));
+export function handleLogin(
+	services: ServerServices,
+	request: HttpServerRequest.HttpServerRequest,
+): Effect.Effect<HttpServerResponse.HttpServerResponse, Error> {
+	return Effect.gen(function* () {
+		const { config } = services;
+		const returnTo = safeReturnTo(requestUrl(request).searchParams.get("returnTo"));
 
-	const { verifier, challenge } = await createPkce();
-	const state = createState();
-	const redirectUri = `${config.publicUrl}/api/auth/callback`;
-	const authorizeUrl = buildAuthorizeUrl({
-		clientId: config.githubClientId,
-		redirectUri,
-		state,
-		challenge,
+		const { verifier, challenge } = yield* attempt(() => createPkce());
+		const state = createState();
+		const redirectUri = `${config.publicUrl}/api/auth/callback`;
+		const authorizeUrl = buildAuthorizeUrl({
+			clientId: config.githubClientId,
+			redirectUri,
+			state,
+			challenge,
+		});
+
+		const options = { ...cookieOptions(services), maxAgeSeconds: OAUTH_COOKIE_MAX_AGE_SECONDS };
+		return redirectWithCookies(authorizeUrl, [
+			serializeCookie(OAUTH_STATE_COOKIE, state, options),
+			serializeCookie(OAUTH_VERIFIER_COOKIE, verifier, options),
+			serializeCookie(OAUTH_RETURN_COOKIE, returnTo, options),
+		]);
 	});
-
-	const response = redirect(authorizeUrl);
-	const options = { ...cookieOptions(services), maxAgeSeconds: OAUTH_COOKIE_MAX_AGE_SECONDS };
-	response.headers.append("Set-Cookie", serializeCookie(OAUTH_STATE_COOKIE, state, options));
-	response.headers.append("Set-Cookie", serializeCookie(OAUTH_VERIFIER_COOKIE, verifier, options));
-	response.headers.append("Set-Cookie", serializeCookie(OAUTH_RETURN_COOKIE, returnTo, options));
-	return response;
 }
 
-export async function handleCallback(services: ServerServices, request: Request, url: URL): Promise<Response> {
-	const { config } = services;
+export function handleCallback(
+	services: ServerServices,
+	request: HttpServerRequest.HttpServerRequest,
+): Effect.Effect<HttpServerResponse.HttpServerResponse> {
+	const run = Effect.gen(function* () {
+		const { config } = services;
+		const url = requestUrl(request);
 
-	const oauthError = url.searchParams.get("error");
-	if (oauthError) return error(400, url.searchParams.get("error_description") ?? oauthError);
+		const oauthError = url.searchParams.get("error");
+		if (oauthError) return error(400, url.searchParams.get("error_description") ?? oauthError);
 
-	const cookies = parseCookies(request.headers.get("cookie"));
-	const expectedState = cookies[OAUTH_STATE_COOKIE];
-	const verifier = cookies[OAUTH_VERIFIER_COOKIE];
-	const returnTo = safeReturnTo(cookies[OAUTH_RETURN_COOKIE]);
-	const code = url.searchParams.get("code");
-	const state = url.searchParams.get("state");
+		const expectedState = request.cookies[OAUTH_STATE_COOKIE];
+		const verifier = request.cookies[OAUTH_VERIFIER_COOKIE];
+		const returnTo = safeReturnTo(request.cookies[OAUTH_RETURN_COOKIE]);
+		const code = url.searchParams.get("code");
+		const state = url.searchParams.get("state");
 
-	if (!code || !state || !expectedState || state !== expectedState || !verifier) {
-		return error(400, "Invalid OAuth callback");
-	}
+		if (!code || !state || !expectedState || state !== expectedState || !verifier) {
+			return error(400, "Invalid OAuth callback");
+		}
 
-	try {
-		const accessToken = await exchangeCode({
-			clientId: config.githubClientId,
-			clientSecret: config.githubClientSecret,
-			code,
-			redirectUri: `${config.publicUrl}/api/auth/callback`,
-			verifier,
-		});
-		const profile = await fetchGitHubProfile(accessToken);
+		const accessToken = yield* attempt(() =>
+			exchangeCode({
+				clientId: config.githubClientId,
+				clientSecret: config.githubClientSecret,
+				code,
+				redirectUri: `${config.publicUrl}/api/auth/callback`,
+				verifier,
+			}),
+		);
+		const profile = yield* attempt(() => fetchGitHubProfile(accessToken));
 		if (!isGithubAllowed(config.allowedGithub, profile)) {
 			return error(403, "GitHub account is not authorized");
 		}
-		const user = await Effect.runPromise(authenticate(new GitHubAuthProvider(), profile, services.userStore));
-		const { token } = await Effect.runPromise(services.authSessions.create(user.id, sessionTtlMs(services)));
+		const user = yield* authenticate(new GitHubAuthProvider(), profile, services.userStore);
+		const { token } = yield* services.authSessions.create(user.id, sessionTtlMs(services));
 
 		// Hand the session to the local CLI so it acts as the same user (browsers
 		// and the terminal don't share cookies). Loopback-only.
@@ -120,41 +127,33 @@ export async function handleCallback(services: ServerServices, request: Request,
 			writeStoredSession({ serverUrl: config.publicUrl, token, createdAt: new Date().toISOString() });
 		}
 
-		const response = redirect(returnTo);
-		response.headers.append(
-			"Set-Cookie",
+		return redirectWithCookies(returnTo, [
 			serializeCookie(SESSION_COOKIE, token, {
 				...cookieOptions(services),
 				maxAgeSeconds: config.sessionTtlDays * SECONDS_PER_DAY,
 			}),
-		);
-		for (const name of [OAUTH_STATE_COOKIE, OAUTH_VERIFIER_COOKIE, OAUTH_RETURN_COOKIE]) {
-			response.headers.append("Set-Cookie", clearCookie(name));
+			clearCookie(OAUTH_STATE_COOKIE),
+			clearCookie(OAUTH_VERIFIER_COOKIE),
+			clearCookie(OAUTH_RETURN_COOKIE),
+		]);
+	});
+
+	return run.pipe(
+		Effect.catchCause((cause) => Effect.succeed(error(400, causeMessage(cause) || "GitHub authentication failed"))),
+	);
+}
+
+export function handleLogout(
+	services: ServerServices,
+	request: HttpServerRequest.HttpServerRequest,
+): Effect.Effect<HttpServerResponse.HttpServerResponse, StoreError> {
+	return Effect.gen(function* () {
+		const token = readSessionToken(request);
+		if (token) {
+			yield* services.authSessions.revoke(token);
+			if (readStoredSession()?.token === token) clearStoredSession();
 		}
-		return response;
-	} catch (cause) {
-		return error(400, cause instanceof Error ? cause.message : "GitHub authentication failed");
-	}
-}
-
-export async function handleLogout(services: ServerServices, request: Request): Promise<Response> {
-	const token = readSessionToken(request);
-	if (token) {
-		await Effect.runPromise(services.authSessions.revoke(token));
-		if (readStoredSession()?.token === token) clearStoredSession();
-	}
-	const response = json({ status: "ok" } satisfies StatusResponse);
-	response.headers.append("Set-Cookie", clearCookie(SESSION_COOKIE));
-	return response;
-}
-
-/** Dispatch `/api/auth/*`; returns null when the path is not an auth route. */
-export async function handleAuthRoutes(services: ServerServices, request: Request, url: URL): Promise<Response | null> {
-	const path = url.pathname;
-	if (path === "/api/auth/login" && request.method === "GET") return await handleLogin(services, url);
-	if (path === "/api/auth/callback" && request.method === "GET") {
-		return await handleCallback(services, request, url);
-	}
-	if (path === "/api/auth/logout" && request.method === "POST") return await handleLogout(services, request);
-	return null;
+		const response = json({ status: "ok" } satisfies StatusResponse);
+		return HttpServerResponse.setHeaders(response, { "set-cookie": [clearCookie(SESSION_COOKIE)] });
+	});
 }
