@@ -180,19 +180,23 @@ sequential runs on one session, and immediate cancel; `pnpm check` clean; real s
 Exit (met): the scripted-provider tests reproduce the prior event sequences; retry/backoff and the timeout budget are
 proven on `TestClock` without real waits; `pnpm check` clean; web build and real server boot smoke green.
 
-### Phase 3.5 — Effect-native store interfaces
+### Phase 3.5 — Effect-native store interfaces — as shipped
 
-The decisions log commits us to Effect-native session storage, but no phase owned it. This is its home, sized to land
-just before the HTTP rewrite (phase 4), which will then be Effect-native end to end.
+- `SessionHandle` / `SessionStore` (`sessions/types.ts`, `db.ts`, `file.ts`, `manager.ts`) and the auth stores
+  (`DatabaseUserStore`, `DatabaseUserSettingsStore`, `DatabaseAuthSessionStore`, plus the `UserStore` /
+  `UserDirectory` / `AuthSessionStore` interfaces and `authenticate()`) now expose `Effect` operations.
+- A tagged `StoreError` and a `storeEffect()` helper (in `core/effect.ts`) wrap the promise-based adapter bodies at
+  the public boundary; internal mechanics that are meaningful as promises (the handle append queue, the schema-ready
+  latch) stay promise-based behind it. Synchronous in-memory reads (`getEntries`, `getHeader`, tokens/cost) stay sync.
+- `ready` becomes `Effect<void, StoreError>` on every store; the services layer consumes it with a plain `yield*`.
+- `RunManager` consumes the stores directly: `providerFor` is Effect-returning and the handle's `append`/`flush` are
+  piped into the run fiber; its unused `sessionStore` option was removed.
+- Session / auth / settings / workspace handlers still materialize store effects with one `Effect.runPromise` per call
+  — a transitional bridge that phase 4 deletes when the handlers become Effects.
+- Deliberately untouched: `auth/session-file.ts` (the CLI's sync token handoff file, not a store contract).
 
-- `SessionStore` / `SessionHandle` (`database.ts`, `sessions/db.ts`, `sessions/file.ts`, `sessions/manager.ts`) convert
-  to `Effect<...>` methods; the DB leaf wraps its promise client once (`Effect.tryPromise`), nothing above speaks
-  `Promise`.
-- Same treatment for the auth stores the server composes (`DatabaseUserStore`, `DatabaseUserSettingsStore`,
-  `DatabaseAuthSessionStore`) and `identity.ts`.
-- Update `RunManager`, the auth routes, and the session handlers to consume Effect directly; delete the `attempt(...)`
-  bridges added in phases 1–3.
-- Exit: no store call in `packages/server` goes through a promise facade; characterization tests unchanged and green.
+Exit (met): no store call in `packages/server` goes through a promise facade (handlers bridge instead); the
+characterization suite is unchanged and green; `pnpm check`, build, and real boot + auth-path smokes pass.
 
 ### Phase 4 — HTTP on `effect/http` + `@effect/platform-node`
 
@@ -265,9 +269,9 @@ Exit: `pnpm relay` smoke matches current behavior; bundle size delta reviewed.
 
 ## Decisions log
 
-1. **`SessionStore` becomes Effect-native all the way down** (decided, owned by phase 3.5): the DB leaf is wrapped once
-   with `Effect.tryPromise` at the adapter, and every interface above it speaks `Effect`. No mixed Promise/Effect store
-   contracts.
+1. **`SessionStore` becomes Effect-native all the way down** (decided; shipped in phase 3.5): the DB leaf is wrapped
+   once with `Effect.tryPromise` at the adapter, and every interface above it speaks `Effect`. No mixed Promise/Effect
+   store contracts.
 2. **CLI timing** (decided): phase 6 starts only after the client (phase 5) and the server have soaked in real use.
 3. **Test retention** (open): default delete-at-phase-exit; revisit at phase 7 whether any RunManager lifecycle
    behaviors deserve permanent guards.
