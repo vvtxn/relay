@@ -311,6 +311,9 @@ merge lands. Merge bottom-up:
 | 3.5     | `refactor/effect-phase-3.5-stores`    | #75  |
 | 4       | `refactor/effect-phase-4-http`        | #76  |
 | 5       | `refactor/effect-phase-5-client-layer`| #77  |
+| 7       | `chore/effect-phase-7-cleanup`        | #79  |
+
+(Phase 6 is deferred; see the decisions log.)
 
 Validation per merge: `pnpm install && pnpm check && pnpm exec vp test`, plus the phase's manual smoke (each PR lists
 one). CI runs for a PR once it targets `main`, so each stacked PR gets the full check/test/build job as it retargets
