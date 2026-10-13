@@ -1,7 +1,7 @@
 # AGENTS.md - Server
 
-HTTP + SSE server hosting the Relay agent runtime. Plain TypeScript on `node:http` (via a small Fetch adapter) — no web
-framework.
+HTTP + SSE server hosting the Relay agent runtime, built on `effect/http` and
+`@effect/platform-node`. Routing, handlers, streaming, and persistence all speak Effect from the edge inward.
 
 ## Architecture
 
@@ -9,60 +9,76 @@ framework.
 server/
 ├── package.json     # @vvtxn/server; exports "./main" for the CLI serve subcommand
 ├── mod.ts           # Public exports (startServer, createServices, handleRequest, RunManager)
-├── main.ts          # Entry point: config from env → createServices → startHttpServer
-├── http-server.ts   # node:http ↔ Request/Response adapter (streaming, aborts, EADDRINUSE)
+├── main.ts          # Entry: config from env → createServices → HttpRouter.serve + Layer.launch
 ├── config.ts        # serverConfigFromEnv: port, host, LLM key/model, Turso, auth, static dir
-├── services.ts      # ServerServices + createServices() — the composition seam
-├── router.ts        # Manual route matching; per-request auth gate; error mapping (400/401/404/405/500)
+├── services.ts      # ServerServices + serverLayer — the composition seam
+├── router.ts        # HttpRouter app: routes, CSRF/auth guards, error mapping, SPA fallback, handleRequest
 ├── identity.ts      # Per-request user resolution (cookie/bearer session)
 ├── auth-routes.ts   # /api/auth/login|callback|logout (GitHub OAuth)
-├── github-oauth.ts  # GitHub authorize/token/profile calls + PKCE
-├── cookies.ts       # Cookie parse/serialize helpers
-├── http.ts          # json()/error() helpers, readJsonBody, BadRequest/NotFound errors
+├── github-oauth.ts  # GitHub authorize/token/profile calls + PKCE (promise-based fetch leaf)
+├── cookies.ts       # Cookie serialization helpers
+├── http.ts          # json()/error() helpers, requestUrl, readJsonBody, HTTP error classes
 ├── sessions.ts      # /api/me, /api/config, session CRUD, message submission
-├── run.ts           # RunManager: one active run per session, SSE fan-out, approvals
+├── run.ts           # RunManager: one fiber per run, SSE fan-out, approvals
 ├── approvals.ts     # /api/sessions/:id/approve + /cancel handlers
 ├── sse.ts           # GET /api/sessions/:id/events (snapshot + live stream + heartbeat)
 ├── files.ts         # GET /api/sessions/:id/files (project file listing for @-mentions)
-├── workspace.ts     # GET /api/workspace (server default cwd)
-└── static.ts        # Static web app serving with SPA fallback + path confinement
+├── workspace.ts     # /api/workspace(s) routes
+└── settings.ts      # Per-user API key routes
 ```
 
 ## Key Concepts
 
 ### Composition seam (`services.ts`)
 
-`createServices(config)` builds every long-lived service once and returns a plain `ServerServices` object that each
-route handler receives as a parameter. There is no module-level hidden state — this is the Effect-ready boundary: each
-field can later become an Effect Layer without touching handlers.
+`serverLayer(config)` composes tagged services (`Config`, `Database`, the stores, `Runs`) as Effect Layers; acquisition
+is sequential (config → database → stores → RunManager) and the store layer awaits each schema `ready` in order
+(`users` backs the `auth_sessions` foreign key — a test pins the DDL order). `createServices(config)` materializes the
+bundle once for `main.ts`. The Turso client exposes only `execute`/`batch` (no close), so the layers are unscoped.
+
+### HTTP (`router.ts`, `main.ts`)
+
+`createAppLayer(services)` builds the `HttpRouter` application; `main.ts` serves it through `NodeHttpServer.layer` +
+`HttpRouter.serve` + `Layer.launch`, and a `Layer.tap` writes the CLI state file **after** the listener binds.
+`startServer()` keeps its signature. `handleRequest(services, request)` is an in-process `toWebHandler` adapter used by
+the test suite and `mod.ts` consumers.
+
+- Route handlers are Effects returning `HttpServerResponse`; `authenticated` wraps the CSRF origin check and the
+  per-request identity resolution (401 when unauthenticated), `withCsrf` covers public state-changing routes.
+- `respond()` maps typed errors to 400/401/403/404/413; anything else logs and returns a 500. Unknown `/api/*` paths
+  return JSON 404s, and the `/api/sessions/*` pattern keeps the historical 405 for known paths with wrong methods.
+- Non-API GETs fall through to `HttpStaticServer` (`spa: true`): the SPA shell is served for extension-less paths that
+  accept `text/html`, everything else 404s. `RELAY_STATIC_DIR` overrides the built `packages/web/dist`.
+- Request bodies go through `readJsonBody` (streamed, 1 MiB cap); cookies come from `HttpServerRequest.cookies`.
 
 ### RunManager (`run.ts`)
 
 Owns active runs, one per session:
 
-- `startMessage()` claims the slot synchronously (409-equivalent via `RunConflictError`) then runs the agent loop in the
-  background; concurrent submits are rejected
-- Bridges runner callbacks to `ServerEvent`s fanned out to per-session SSE subscribers
-- Tracks in-flight draft state (text, tool calls, results) for `run_state` snapshots sent to late subscribers
-- Gates side-effecting tools via `withApproval`: pending approvals live in a map, decisions arrive via
-  `resolveApproval()`, and the handler races the run's AbortSignal (mirrors the CLI pattern)
+- `startMessage()` claims the slot synchronously (409-equivalent via `RunConflictError`) then forks the run fiber
+- The fiber consumes the agent `run()` stream and mirrors events onto a run `Ref` and per-subscriber `Queue`s
+  (registered synchronously, so the SSE snapshot-then-subscribe sequence cannot drop events)
+- `cancel()` interrupts the fiber; a single uninterruptible finalizer aborts the provider call, denies still-pending
+  approvals (their `Deferred`s resolve), flushes the session handle, publishes `run_finished`, and releases the session
+  when idle and unwatched
+- Approvals are `Deferred`s; `resolveApproval()` takes one out of the `Ref` atomically and resolves it
+- `subscribe`/`subscribeStream` register SSE consumers; `getRunState` serves the catch-up `run_state` snapshot
 - "always allow" is per session, in memory
-- Persists assistant/tool entries on `turn_complete` and token/cost on the session handle; flushes on run end
-- Denies any still-pending approvals in `finally` so promises never leak
 
 ### Sessions
 
-The database store inserts sessions lazily (on first append), so sessions created in-process are not yet visible to
-`store.open()`. All session routes go through `openSessionHandle()` (sessions.ts): try the store, fall back to the live
-RunManager handle.
+Store contracts are Effect-native (`SessionHandle`/`SessionStore`, `StoreError`); synchronous in-memory reads
+(`getEntries`, `getHeader`, tokens/cost) stay synchronous. Database stores insert sessions lazily (on first append), so
+sessions created in-process are not yet visible to `store.open()`; all session routes go through `openSessionHandle()`
+(sessions.ts), which falls back to the live RunManager handle.
 
 The per-session workspace cwd comes from the client (CLI sends its terminal cwd). File tools are confined to that cwd;
 bash is not (documented in relay core AGENTS.md).
 
 Workspace creation and registration run through `validateWorkspacePath` (core): the path must be an absolute, existing
 directory whose canonical (symlink-resolved) path sits within `config.workspaceRoots`. `handleCreateSession` stores the
-canonical path and registers it so the workspace appears in the picker before its first append; `handleListWorkspaces`
-marks deleted directories with `exists: false`; `RunManager` re-validates the cwd before every run.
+canonical path and registers it; `handleListWorkspaces` marks deleted directories with `exists: false`; `RunManager`
+re-validates the cwd before every run.
 
 ### Auth
 
@@ -76,9 +92,9 @@ GitHub OAuth is the only auth transport:
 - `GITHUB_APP_CLIENT_ID`/`GITHUB_APP_CLIENT_SECRET` are required at startup; there is no local/no-auth fallback.
 
 `createServices()` returns long-lived services **without** a user. `handleRequest` resolves the caller per request
-(`identity.ts`) and passes `RequestServices = ServerServices & { user }` to handlers. `/api/health` and `/api/auth/*`
-are public; every other `/api/*` route returns 401 when unauthenticated. GitHub identity mapping and the session store
-are the only new storage — sessions are already scoped by `ownerId`.
+(`resolveRequestUser` in `identity.ts`, an Effect) and passes `RequestServices = ServerServices & { user }` to
+handlers. `/api/health` and `/api/auth/*` are public; every other `/api/*` route returns 401 when unauthenticated.
+GitHub identity mapping and the session store are the only new storage — sessions are already scoped by `ownerId`.
 
 ### API key
 
@@ -87,21 +103,15 @@ as a Bearer token) and never returned to clients — `GET /api/settings` exposes
 a provider from the owning user's key at run start; a missing key fails the run with a clear message, and
 `handleSendMessage` returns 400 before a doomed run begins.
 
-### Static serving
-
-The server always serves a web app for non-API GET requests: `RELAY_STATIC_DIR` when set (a deployment override),
-otherwise the built `packages/web/dist` (`pnpm web:build`). Unknown paths fall back to `index.html` for SPA routing;
-paths are confined to the root.
-
 ### Background state
 
-When the CLI supervisor starts the server it sets `RELAY_STATE_FILE`; once the listener is bound the server writes
+When the CLI supervisor starts the server it sets `RELAY_STATE_FILE`; once the listener is bound `main.ts` writes
 `{ url, port, pid, cwd, webUrl }` (mode `0600`, write-then-rename so readers never see a partial file) so
 `relay stop`/`relay status` can find it. A plain `relay serve` leaves no state behind.
 
 The configured port is bound strictly: when it is taken the server prints the conflict (stale server, `relay stop`,
 `RELAY_PORT`) and exits with code 75 (`EX_TEMPFAIL`). The CLI supervisor treats that as "another server may be
-starting": it adopts a healthy winner, or falls back to a free ephemeral port in development. The server itself never
+starting": it adopts a healthy winner, or falls back to an ephemeral port in development. The server itself never
 chooses a random port.
 
 ## API Surface
@@ -151,16 +161,24 @@ pnpm serve:dev      # from repo root, loads development env files
 pnpm serve:prod     # production env files
 ```
 
+## Testing
+
+`pnpm exec vp test` runs the suites under `test/`. They use in-memory stores and scripted `Stream` providers, and the
+`handleRequest` adapter gives black-box HTTP coverage without binding a socket (including SSE frames and SPA
+precedence).
+
 ## Task Completion Checklist
 
 After concluding that a task is complete, always run these commands from the repo root:
 
 1. `pnpm exec vp fmt` — auto-format all code
 2. `pnpm check` — format, lint, and type-check (Oxfmt, Oxlint, tsgo via Vite+)
+3. `pnpm exec vp test` — run the test suites
 
 ## Code Patterns
 
-- Handlers receive `services` explicitly; never read env at request time
-- Route handlers throw `BadRequestError`/`NotFoundError`; the router maps them to responses
-- SSE frames via `encodeSSEFrame` from `@vvtxn/client`; heartbeats as SSE comments every 15s
+- Handlers are Effects returning `HttpServerResponse` (never `async`); route them through `authenticated`/`withCsrf`
+- Route handlers fail with `BadRequestError`/`ForbiddenError`/`NotFoundError`/`PayloadTooLargeError`; `respond()` maps
+- SSE frames via `encodeSSEFrame` from `@vvtxn/client`; heartbeats via a `Stream.tick`
+- Prefer Effect primitives for new server code: `Effect.gen`, `Ref`, `Deferred`, `Queue`, `Stream`, `Schedule`
 - `oxlint-disable-next-line` is rarely needed — prefer extracting non-async generators
