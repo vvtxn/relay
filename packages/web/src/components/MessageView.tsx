@@ -22,7 +22,7 @@ export function MessageView(props: { msg: UIMessage }) {
 	}
 
 	return (
-		<article class="message agent">
+		<article class="message agent" data-tools={toolCalls().length > 0 ? "" : undefined}>
 			<div class="message-content">
 				<Show when={hasText()}>
 					<Markdown content={props.msg.content.trim()} />

@@ -117,6 +117,7 @@ export function entriesToUIMessages(entries: Entry[]): UIMessage[] {
 			if (tc) {
 				tc.output = entry.content;
 				if (entry.isError) tc.isError = true;
+				if (entry.diff) tc.diff = entry.diff;
 			}
 		}
 	}

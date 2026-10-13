@@ -1,5 +1,6 @@
 import { createSignal, For, type JSX, Show } from "solid-js";
 import { getToolDisplayName, type UIToolCall } from "@vvtxn/relay/core/display.ts";
+import { openDiffPreview } from "#/state/diff-preview.ts";
 import { DiffBlock } from "./DiffBlock.tsx";
 
 /**
@@ -63,27 +64,41 @@ function ToolCall(props: { tool: UIToolCall }) {
 			data-details={hasDetails() ? "" : undefined}
 			data-expanded={expanded() ? "" : undefined}
 		>
-			<button
-				type="button"
-				class="tool-call-head"
-				aria-expanded={expanded()}
-				disabled={!hasDetails()}
-				onClick={toggle}
-			>
-				<span class="tool-call-name">{getToolDisplayName(tool().name)}</span>
-				<span class="tool-call-arg" title={tool().input}>
-					{tool().input}
-				</span>
-				<Show when={pending()}>
-					<span class="tool-call-status">running…</span>
-				</Show>
-				<ResultBadge tool={tool()} />
-				<Show when={hasDetails()}>
-					<span class="tool-call-chevron" aria-hidden="true">
-						›
+			<div class="tool-call-row">
+				<button
+					type="button"
+					class="tool-call-head"
+					aria-expanded={expanded()}
+					disabled={!hasDetails()}
+					onClick={toggle}
+				>
+					<span class="tool-call-name">{getToolDisplayName(tool().name)}</span>
+					<span class="tool-call-arg" title={tool().input}>
+						{tool().input}
 					</span>
+					<Show when={pending()}>
+						<span class="tool-call-status">running…</span>
+					</Show>
+					<ResultBadge tool={tool()} />
+					<Show when={hasDetails()}>
+						<span class="tool-call-chevron" aria-hidden="true">
+							›
+						</span>
+					</Show>
+				</button>
+				<Show when={tool().diff}>
+					{(diff) => (
+						<button
+							type="button"
+							class="tool-call-diff"
+							aria-label={`View diff for ${tool().input}`}
+							onClick={() => openDiffPreview({ name: tool().name, path: tool().input, diff: diff() })}
+						>
+							View diff
+						</button>
+					)}
 				</Show>
-			</button>
+			</div>
 			<Show when={expanded()}>
 				<div class="tool-call-details">
 					<Show when={tool().diff}>{(diff) => <DiffBlock diff={diff()} />}</Show>

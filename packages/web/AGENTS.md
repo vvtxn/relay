@@ -32,6 +32,7 @@ web/
     ├── state/
     │   ├── session.ts     # Live stream store (survives navigation) + reconnect fiber + query invalidation
     │   ├── workspace.ts   # Active cwd signal (persisted)
+    │   ├── diff-preview.ts # Diff open in the review modal (module-level; survives chat re-renders)
     │   └── theme.ts       # Palette preference (persisted; dark default)
     ├── pages/
     │   ├── BootPage.tsx   # Runs bootstrap, seeds query cache, redirects to a session
@@ -40,11 +41,12 @@ web/
     └── components/
         ├── Sidebar.tsx         # Workspace switcher, session list, new chat
         ├── ChatView.tsx        # Message list + in-flight draft + auto-scroll
-        ├── MessageView.tsx     # Terminal-style turn: `│` user / `●` agent gutter, tool panel below
+        ├── MessageView.tsx     # Turn with an `info` (user) or `brand` (agent) left border, tool panel below
         ├── Markdown.tsx        # markdown-it token stream → Solid vnodes (no innerHTML)
         ├── CodeBlock.tsx       # Fenced code block highlighted by the shared Shiki instance
         ├── ToolCalls.tsx       # Per-call rows: tool accents, grep matches, output previews
         ├── DiffBlock.tsx       # Unified diffs via @pierre/diffs (plain-line fallback)
+        ├── DiffModal.tsx       # Review modal (native dialog, showModal) for one edit/write diff, scrollable
         ├── Composer.tsx        # Textarea + @-mention picker + send/stop
         ├── ApprovalDialog.tsx  # allow / always / deny overlay
         ├── StatusBar.tsx       # Branch, tokens, cost, user, sign out
@@ -141,12 +143,16 @@ languages stay plain text.
 
 Turn rendering is a web-native take on the terminal client: user turns carry an `info` left border, agent turns
 `brand`, turns are separated by the chat gap, and tool activity is the only element on a background (`surface`) panel.
+Turns that run tools drop the `brand` stripe and its padding, so only their per-tool accents show.
 Each tool call is a single collapsed row — per-tool accent border (from the shared theme's `toolRead`, `toolWrite`, …
 tokens), display name, argument, and a short result stat (`3 matches in 2 files`, `+4 −3`, `40 lines`, `error`, or a
 pulsing `running…`). Clicking a row expands the full result: edit/write diffs render through `@pierre/diffs` (see
 `DiffBlock.tsx`; falls back to `parseDiffLines` coloring when a patch cannot be parsed), grep output is split into
 colored file/line/text, and other results show as preformatted text. Collapsed by default is deliberate — long outputs
-stay one line unless the reader asks for them.
+stay one line unless the reader asks for them. Edit and write calls that produced a diff also get a **View diff**
+button beside the row. It opens `DiffModal.tsx`, a native modal `<dialog>` with the full diff in a scrollable body;
+Escape, the Close button, or a backdrop click dismisses it. Its state lives in `state/diff-preview.ts`, outside the
+message list, so streamed deltas cannot close it.
 
 ### File mentions
 
