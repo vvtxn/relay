@@ -1,6 +1,5 @@
-// TEMP(effect-migration): characterization tests for the RunManager rewrite
-// (phase 2, structured concurrency). Remove after phase 2 — see
-// docs/effect-migration.md ("Testing strategy").
+// RunManager lifecycle tests: run conflicts, cancellation, approvals, and the
+// run_state snapshot for late subscribers.
 
 import { Effect } from "effect";
 import { mkdtemp, readFile } from "node:fs/promises";

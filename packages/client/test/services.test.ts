@@ -1,5 +1,4 @@
-// TEMP(effect-migration): pin tests for the shared client service layer
-// (phase 5). Kept while the CLI adopts the layer — see docs/effect-migration.md.
+// Tests for the shared Effect service layer over RelayClient.
 
 import { Effect, Layer, Stream } from "effect";
 import { describe, expect, it } from "vite-plus/test";

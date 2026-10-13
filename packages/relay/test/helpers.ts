@@ -1,6 +1,5 @@
-// TEMP(effect-migration): shared fakes for the agent-loop tests (phase 3).
-// Remove or fold into a permanent suite once the core runtime settles — see
-// docs/effect-migration.md ("Testing strategy").
+// Shared fakes for the agent-loop tests: a scripted `Stream` provider and
+// lightweight tools.
 
 import { Effect, Stream } from "effect";
 import { ProviderError } from "../api/errors.ts";

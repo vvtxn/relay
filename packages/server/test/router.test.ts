@@ -1,6 +1,5 @@
-// TEMP(effect-migration): characterization tests for the HTTP layer rewrite
-// (phase 4, effect/http + @effect/platform-node). Remove after phase 4 — see
-// docs/effect-migration.md ("Testing strategy").
+// HTTP contract tests: auth gate, CSRF, 404/405 mapping, the session flow,
+// SSE streaming, and SPA/API precedence.
 
 import { Effect } from "effect";
 import { mkdtemp, writeFile } from "node:fs/promises";
