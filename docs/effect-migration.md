@@ -225,14 +225,20 @@ serving, JSON API 404s, the state file, and the exit-75 bind conflict.
 
 **Decision gate**: client + CLI only proceed once phases 1–4 have soaked in real use.
 
-### Phase 5 — Client Effect layer (dedupe web)
+### Phase 5 — Client Effect layer (dedupe web) — as shipped
 
-- Move `Api`, `SessionStream`, `RelayError` (currently in `packages/web/src/api/services.ts`) into
-  `@vvtxn/client`, built on the existing Promise `RelayClient`. Web imports them from there and deletes its copy.
-- `protocol.ts` and `RelayClient` remain plain/Promise — the transport must stay usable without an Effect runtime.
-- `session-state.ts` reducer untouched.
+- `@vvtxn/client/services.ts` now owns `RelayError`, `isUnauthorized`, the `Api` service (`ApiLive(client)`), the
+  `SessionStream` service, and the `appLayer(client)` combinator. Web's `api/services.ts` is deleted;
+  `api/runtime.ts` installs `appLayer(client)` from the browser-configured client.
+- The transport (`client.ts`), protocol, SSE parser, and reducer stay Promise/pure; `effect` joins the client package
+  only for this module, so the CLI can adopt the layer incrementally (phase 6).
+- Exports join `mod.ts` for discoverability. Web already bundles `effect` (nothing changes there); the CLI bundle
+  externalizes workspace dependencies, so it stays untouched until phase 6.
+- Pin tests in `packages/client/test/services.test.ts` cover success passthrough, `RelayApiError` → `RelayError`
+  status mapping, transport failures without a status, and SSE streaming through `SessionStream`.
 
-Exit: web bundle unchanged in behavior; service layer importable from server-side CLI context.
+Exit (met): web type-checks and builds with behavior unchanged (same client, same layer semantics); the shared layer is
+exercised under Node in the suite.
 
 ### Phase 6 — CLI on Effect
 
