@@ -198,21 +198,30 @@ proven on `TestClock` without real waits; `pnpm check` clean; web build and real
 Exit (met): no store call in `packages/server` goes through a promise facade (handlers bridge instead); the
 characterization suite is unchanged and green; `pnpm check`, build, and real boot + auth-path smokes pass.
 
-### Phase 4 — HTTP on `effect/http` + `@effect/platform-node`
+### Phase 4 — HTTP on `effect/http` + `@effect/platform-node` — as shipped
 
-- Serve via `NodeHttpServer.layerConfig` + `HttpServer.serve`; routes become an `HttpRouter` app. Middleware: CSRF
-  origin check, per-request identity (`identity.ts`), API-key guard.
-- SSE via `HttpServerResponse.stream` fed by RunManager's `Stream`; heartbeats reimplemented with a scheduled stream
-  (behavior: comment frame every 15s, catch-up `run_state` first).
-- Static serving via `HttpStaticServer.make({ root, index: true, spa: true })` — replaces `static.ts`, keeps path
-  confinement; API 404s must stay JSON while non-API GETs fall back to `index.html` (test route precedence).
-- Delete `http-server.ts` adapter. `startServer()` keeps its signature and still writes the state file; EADDRINUSE is
-  detected from `ServeError.cause` and still exits 75. Preserve an internal `handleRequest`-shaped web-handler adapter
-  (`HttpEffect.toWebHandler`) so phase-0 tests survive the migration.
-- Structured teardown: server close and DB close become scope finalizers (graceful shutdown option on the layer).
+- Production serving: `NodeHttpServer.layer` + `HttpRouter.serve(app)`, launched with `Layer.launch`; a `Layer.tap`
+  runs after the listener is bound and writes the CLI state file, so `relay stop`/`status` are unaffected.
+  EADDRINUSE stays exit code 75 (the `ServeError` cause chain is walked) — verified against a live second bind.
+- Routing: an `HttpRouter` app with per-route guards instead of the central dispatcher — `withCsrf` (origin check) and
+  `authenticated` (identity resolution → 401) wrap each handler; one `respond()` error mapper turns the tagged errors
+  into 400/401/403/404/413 and everything else into a 500. The session pattern regex reproduces the old 404-vs-405
+  semantics for `/api/sessions/*`.
+- Handlers are Effects end to end (sessions, approvals, files, workspace, settings, auth, SSE); the `runPromise`
+  bridges from phase 3.5 are gone. Body parsing reimplements the 1 MiB cap over `request.stream`; request cookies come
+  from `HttpServerRequest.cookies` (the old `parseCookies` was deleted).
+- SSE is `HttpServerResponse.stream`: connected comment + `run_state` snapshot preamble, then
+  `RunManager.subscribeStream` merged with a `Stream.tick` heartbeat.
+- Static serving is `HttpStaticServer` (`spa: true`, `index.html`) mounted as the catch-all for non-API GETs, replacing
+  `static.ts`. Refinements vs the old blanket fallback: SPA fallback requires an extension-less path with
+  `Accept: text/html`, and stale asset URLs now 404 instead of returning the shell. `RouteNotFound` maps to the JSON
+  404 the API expects.
+- `handleRequest(services, request)` survives as an in-process adapter (`HttpRouter.toWebHandler`, cached per services
+  instance) so the characterization suite kept its shape. `http-server.ts` and `static.ts` are deleted.
 
-Exit: endpoint parity table verified against phase-0 tests; dev proxy + prod static + OAuth redirect + SSE reconnect all
-smoke-tested; `relay stop`/`status` unaffected.
+Exit (met): endpoint parity through the phase-0 router tests plus new SSE-streaming and SPA-precedence coverage (28
+tests total); `pnpm check` clean; build green; live smokes cover health, identity 401 against the real database, SPA
+serving, JSON API 404s, the state file, and the exit-75 bind conflict.
 
 **Decision gate**: client + CLI only proceed once phases 1–4 have soaked in real use.
 
