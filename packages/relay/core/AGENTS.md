@@ -27,6 +27,7 @@ core/
 ├── system-prompt.ts      # Re-exports the default system prompt (raw .md import)
 ├── system-prompt.md      # Default system prompt for coding agents (shared across clients)
 ├── workspace.ts          # Workspace-rooted fs helpers: expandMentions, listProjectFiles, git metadata
+├── workspace-token.ts    # URL-safe workspace path tokens shared by the web routes and CLI deep links
 ├── tools/                # Tool system
 │   ├── index.ts          # Tool exports, defaultTools registry, createWorkspaceTools
 │   ├── types.ts          # Tool, ToolRegistry, ToolResult, ToolError types; defineTool helper

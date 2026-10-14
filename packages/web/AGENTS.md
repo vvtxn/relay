@@ -14,7 +14,7 @@ web/
 ├── dist/            # Build output (gitignored) — served by the server in production
 └── src/
     ├── main.tsx     # render + apply theme + QueryClientProvider + RouterProvider
-    ├── router.tsx   # Code-based routes: "/" boot → "/s/$sessionId" (+ its "/settings" overlay)
+    ├── router.tsx   # Code-based routes: "/" overview, "/w/$token" workspace, "/s/$sessionId" chat (+ settings)
     ├── theme.ts     # applyTheme(mode): palette + color-scheme → --relay-* CSS variables
     ├── version.ts   # Display version
     ├── highlight.ts # Shared Shiki bridge (lazy grammars; pierre-dark/light, light-dark())
@@ -25,19 +25,23 @@ web/
     │   ├── runtime.ts     # ManagedRuntime over @vvtxn/client's appLayer + runApi/fork/interrupt helpers
     │   ├── query-client.ts# QueryClient + query key helpers
     │   ├── queries.ts     # queryOptions for me/config/workspace/workspaces/sessions/session/files
-    │   ├── mutations.ts   # createSession/sendMessage/approve/cancel (Effect-backed)
-    │   └── bootstrap.ts   # Effect program: health → me → config → workspace → session
+    │   ├── mutations.ts   # createSession/sendMessage/approve/cancel/register/unregister (Effect-backed)
+    │   ├── open-chat.ts   # startChat(): create + seed a session in a workspace, return its id
+    │   ├── workspaces.ts  # addWorkspace(): validate + register + invalidate
+    │   └── bootstrap.ts   # Effect program: health → me → config + workspace picker (no session)
     ├── auth/auth.ts       # OAuth seam: login/logout URLs, redirect helpers
     ├── state/
     │   ├── session.ts     # Live stream store (survives navigation) + reconnect fiber + query invalidation
-    │   ├── workspace.ts   # Active cwd signal (persisted)
+    │   ├── workspace.ts   # Workspace path helpers + last-visited memory (route-derived active workspace)
     │   ├── diff-preview.ts # Diff open in the review modal (module-level; survives chat re-renders)
     │   └── theme.ts       # Palette preference (persisted; dark default)
     ├── pages/
-    │   ├── BootPage.tsx   # Runs bootstrap, seeds query cache, redirects to a session
+    │   ├── OverviewPage.tsx # Root view: workspace cards + "continue last chat"; boot/auth gate
+    │   ├── WorkspacePage.tsx# One workspace's threads; new chat; missing/unknown states
     │   ├── SessionPage.tsx# Hydrates session, starts stream, composes the shell
     │   └── SettingsPage.tsx # Account + appearance + API key; overlay under `/s/:id` and standalone `/settings`
     └── components/
+        ├── AppShell.tsx        # Shared sidebar + main-pane frame for all pages
         ├── Sidebar.tsx         # Workspace switcher, session list, new chat
         ├── ChatView.tsx        # Message list + in-flight draft + auto-scroll
         ├── MessageView.tsx     # Turn with an `info` (user) or `brand` (agent) left border, tool panel below
@@ -79,8 +83,8 @@ round trip. Keep these rules in mind:
 - The session route's loader (`router.tsx`) fetches a **fresh** snapshot (`fetchQuery` +
   `staleReloadMode: "blocking"`), so a stale router/query cache never paints; a just-created or still-streamed session
   resolves from cache with no request.
-- `BootPage` seeds me/config/sessions/workspaces into the query cache and prefetches settings, so the first session
-  render needs no fetches.
+- `OverviewPage` seeds me/config/workspaces into the query cache and prefetches settings, so the first shell render
+  needs no fetches.
 - Queries not needed for first paint stay lazy: the mention file list is only enabled while the picker is open
   (prefetched on composer focus).
 - Leaving a session stops its stream and invalidates that snapshot, so returning to it always refetches — the stream is
@@ -90,14 +94,15 @@ round trip. Keep these rules in mind:
 ### Boot flow
 
 `api/bootstrap.ts` is an Effect program: health-check (`Cannot reach the Relay server at ...`), load identity, then fetch
-config + the default workspace + validate the persisted workspace in parallel, then open the most recent session or
-create one. `BootPage` runs it via `createResource`, seeds the Query cache, and redirects to `/s/$sessionId`.
+config + the default workspace + the workspace picker in parallel. It never creates or opens a session. `OverviewPage`
+runs it via `createResource`, seeds the Query cache, and renders the root overview; an unauthenticated result renders
+`LoginScreen`.
 
 ### Auth (GitHub OAuth)
 
 `api/client.ts` sends `credentials: "include"` on every request so the session cookie flows automatically. `bootstrap`
-treats a 401 as a first-class `{ kind: "unauthenticated" }` outcome; `BootPage` renders `LoginScreen`, a "Continue with
-GitHub" button linking to `/api/auth/login`. The session route's loader redirects to `/` for a missing, foreign, or
+treats a 401 as a first-class `{ kind: "unauthenticated" }` outcome; `OverviewPage` renders `LoginScreen`, a "Continue
+with GitHub" button linking to `/api/auth/login`. The session route's loader redirects to `/` for a missing, foreign, or
 unauthorized session (the page keeps a redirect effect as a backstop). `auth/auth.ts` centralizes the login/logout URLs
 (`VITE_RELAY_LOGIN_URL` / `VITE_RELAY_LOGOUT_URL`, defaulting to `/api/auth/*`). `MeResponse.avatarUrl` is shown in the
 status bar and sidebar.
@@ -161,15 +166,24 @@ into `<attached_context>` blocks before the run.
 
 ### Workspaces
 
-A workspace is a project directory. `GET /api/workspaces` returns the distinct session `cwd`s plus explicitly registered
-workspaces (and the server default) for the user. The sidebar renders them as an expandable **tree**: each workspace is
-a row with a chevron, session count, and a `missing` flag when its directory is gone; its sessions nest underneath. Only
-expanded workspaces are fetched (`useQueries` over `sessionsQuery(cwd)` per open cwd); the active workspace starts
-expanded and any workspace can be collapsed or expanded by clicking its row. Selecting a workspace scopes the "New chat"
-target (`cwd` in `state/workspace.ts`, persisted) and drives the session queries. "Add workspace" accepts an absolute
-path, calls `GET /api/workspaces/validate` (inline error when missing/outside roots), stores the returned canonical
-path, and registers it via `POST /api/workspaces`. Bootstrap re-validates the persisted cwd and falls back to the server
-default.
+A workspace is a project directory, and it has a URL: `/` is the root overview (workspace cards + "continue the last
+chat"), `/w/<token>` is one workspace's thread list, and chats stay at flat `/s/:id` — the workspace is derived from the
+session header. `<token>` is `base64url` of the canonical cwd via `encodeWorkspaceToken`/`decodeWorkspaceToken`
+(`@vvtxn/relay/core/workspace-token.ts`), a single path segment shared with the CLI's `relay web` deep links.
+
+The sidebar renders workspaces as an expandable **tree**: each row has a chevron, session count, a `missing` flag when
+its directory is gone, and a hide button; its sessions nest underneath. Only expanded workspaces are fetched
+(`useQueries` over `sessionsQuery(cwd)` per open cwd); the active workspace starts expanded (and re-expands when it
+becomes active), while the chevron collapses any workspace — including the active one. "New chat" targets the active
+workspace, falling back to the last visited one
+(`relay.cwd` in localStorage), then the first listed workspace, then the server default. Sessions are created through
+`startChat()`, which seeds the cache; the server reuses an idle empty session, so repeated clicks do not pile up
+handles.
+
+"Add workspace" (sidebar form and the workspace pane's unknown-workspace state) validates via
+`GET /api/workspaces/validate` (inline error when missing/outside roots) and registers the canonical path via
+`POST /api/workspaces`. Hiding a workspace (`DELETE /api/workspaces`) tombstones it server-side: it leaves the picker
+until it is re-added or a new session is created in it, while its threads stay reachable by URL.
 
 ## Building & Running
 

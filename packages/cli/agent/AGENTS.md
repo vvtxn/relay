@@ -8,7 +8,7 @@ starts (or reuses) a background server before running the TUI.
 
 ```
 agent/
-├── index.ts              # Entry: relay | relay web | serve | stop | status | fonts | workspace
+├── index.ts              # Entry: relay [-c|--workspace] | relay web | serve | stop | status | fonts | workspace
 ├── server.ts             # Background-server supervisor (ensureServer/stop/status) + auth + API-key gates
 ├── open.ts               # openBrowser(url) helper
 ├── workspace.ts          # relay workspace add|list|remove (register without the TUI)
@@ -42,8 +42,8 @@ something that is not a healthy Relay server, development starts a fallback serv
 explicit `RELAY_PORT` fails with the bind error. `relay stop` reads the state file and signals the recorded process;
 `relay status` prints it. The server survives the CLI, so the browser stays available.
 
-`relay web` opens the browser (Vite origin in dev when reachable, else the server's bundled SPA) and returns unless
-`--foreground` is passed.
+`relay web` opens the browser at the current (or `--workspace`) directory's workspace route (Vite origin in dev when
+reachable, else the server's bundled SPA) and returns unless `--foreground` is passed.
 
 ## Key Concepts
 
@@ -77,14 +77,25 @@ ask. Switching sessions denies any pending ask server-side so runs never hang.
 
 ### Boot Flow
 
-`index.ts` ensures a server exists (see above), then sets `RELAY_SERVER_URL` before importing `app.tsx`. It then checks
-`/api/me` (using the token handed over by a browser login in `~/.relay/session.json`); if not signed in it opens the web
-client and waits for the sign-in to complete (`ensureAuthenticated`). It then checks `/api/settings` — if no LLM API key
-is configured it opens the web Settings page and waits (`ensureApiKey`), so the TUI never starts in an unusable state.
-`bootstrap()` then health-checks the server, fetches `/api/me` + `/api/config`, and creates a session for
-`process.cwd()`.
+`index.ts` parses `-c`/`--continue` and `--workspace <path>` (the default command's flags), ensures a server exists
+(see above), then sets `RELAY_SERVER_URL` before importing `app.tsx`. It then checks `/api/me` (using the token handed
+over by a browser login in `~/.relay/session.json`); if not signed in it opens the web client and waits for the sign-in
+to complete (`ensureAuthenticated`). `--workspace` is validated and registered server-side at this point; the server's
+canonical path becomes `RELAY_CLI_WORKSPACE`. It then checks `/api/settings` — if no LLM API key is configured it opens
+the web Settings page and waits (`ensureApiKey`), so the TUI never starts in an unusable state. `bootstrap()` then
+health-checks the server, fetches `/api/me` + `/api/config`, and resolves the initial session for the effective
+workspace (`config.ts` `workspaceCwd()`): `--continue` resumes the most recent thread, otherwise a session is created
+(the server reuses an idle empty one, so repeated launches do not pile up blank threads).
 `Root` renders `BootScreen` (loading) or `BootError` (friendly failure) and mounts `App` only once a user, session, and
 server info exist. `info.webUrl` powers the "Open in Browser" command.
+
+### Workspace scoping
+
+The TUI is scoped to one workspace for its lifetime: the launch directory, or the `--workspace` target. Session
+creation, "New Chat", and the `/threads` palette all use that cwd, so a terminal in a project only ever shows that
+project's threads. `relay web` opens the browser at the same workspace's route (`/w/<token>` from the shared
+`workspace-token.ts` encoder); `relay workspace add|list|remove` manages registrations separately, and `remove` hides
+(tombstones) a workspace without deleting its sessions.
 
 ### Cancellation
 
@@ -131,8 +142,11 @@ the same typeface.
 ## Running
 
 ```bash
-pnpm relay           # start/reuse the server + TUI
-pnpm relay web       # open the browser client
+pnpm relay           # start/reuse the server + TUI in the current directory
+pnpm relay -c        # ...resuming the most recent thread for the directory
+pnpm relay --workspace ~/Code/foo  # ...scoped to another registered directory
+pnpm relay web       # open the browser client at the current workspace
+pnpm relay web --workspace ~/Code/foo  # ...at another directory's workspace
 pnpm relay stop      # stop the background server
 pnpm relay status    # show the background server
 pnpm relay workspace add ~/Code/foo  # register a workspace (no TUI)
@@ -141,8 +155,8 @@ pnpm relay fonts status  # check whether the shared font is installed
 ```
 
 The CLI runs from the built bundle (`packages/cli/dist`, produced by `pnpm relay`), using the same commands as the
-source entrypoint: `relay`, `relay web`, `relay serve`, `relay stop`, `relay status`, `relay workspace add|list|remove`,
-`relay fonts`.
+source entrypoint: `relay [-c|--workspace]`, `relay web`, `relay serve`, `relay stop`, `relay status`,
+`relay workspace add|list|remove`, `relay fonts`.
 
 ## Task Completion Checklist
 
