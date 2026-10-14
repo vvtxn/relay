@@ -2,7 +2,7 @@
 // SSE streaming, and SPA/API precedence.
 
 import { Effect } from "effect";
-import { mkdtemp, writeFile } from "node:fs/promises";
+import { mkdtemp, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vite-plus/test";
@@ -152,6 +152,113 @@ describe("handleRequest", () => {
 		const afterBody = (await after.json()) as { entries: Array<{ type: string; role?: string }> };
 		expect(afterBody.entries.map((entry) => entry.type)).toEqual(["message", "message"]);
 		expect(afterBody.entries[1]).toMatchObject({ role: "assistant" });
+	});
+
+	it("reuses the idle empty session until something is sent", async () => {
+		const provider = new ScriptedProvider([chunks(textChunk("hi"), doneChunk())]);
+		const { services, runs } = await makeServices(provider);
+
+		const first = await handleRequest(
+			services,
+			apiRequest("POST", "/api/sessions", { token: TEST_TOKEN, body: {} }),
+		);
+		const second = await handleRequest(
+			services,
+			apiRequest("POST", "/api/sessions", { token: TEST_TOKEN, body: {} }),
+		);
+		expect(first.status).toBe(201);
+		const firstBody = (await first.json()) as { id: string };
+		const secondBody = (await second.json()) as { id: string };
+		expect(secondBody.id).toBe(firstBody.id);
+
+		// Once a message is sent the session is no longer empty: the next create
+		// starts a new thread.
+		const sent = await handleRequest(
+			services,
+			apiRequest("POST", `/api/sessions/${firstBody.id}/messages`, {
+				token: TEST_TOKEN,
+				body: { content: "hello" },
+			}),
+		);
+		expect(sent.status).toBe(202);
+		await waitFor(() => !runs.isRunning(firstBody.id));
+
+		const third = await handleRequest(
+			services,
+			apiRequest("POST", "/api/sessions", { token: TEST_TOKEN, body: {} }),
+		);
+		const thirdBody = (await third.json()) as { id: string };
+		expect(thirdBody.id).not.toBe(firstBody.id);
+	});
+
+	it("resolves a symlinked workspace to the stored canonical path when listing", async () => {
+		const { services } = await makeServices(new ScriptedProvider([]));
+		const real = await mkdtemp(join(tmpdir(), "relay-real-"));
+		const link = `${real}-link`;
+		await symlink(real, link);
+
+		const created = await handleRequest(
+			services,
+			apiRequest("POST", "/api/sessions", { token: TEST_TOKEN, body: { cwd: link } }),
+		);
+		expect(created.status).toBe(201);
+
+		const listed = await handleRequest(
+			services,
+			apiRequest("GET", `/api/sessions?cwd=${encodeURIComponent(link)}`, { token: TEST_TOKEN }),
+		);
+		expect(listed.status).toBe(200);
+		const body = (await listed.json()) as { sessions: unknown[] };
+		expect(body.sessions).toHaveLength(1);
+	});
+
+	it("surfaces the default workspace only until another one is known", async () => {
+		const { services, cwd } = await makeServices(new ScriptedProvider([]));
+		const other = await mkdtemp(join(tmpdir(), "relay-other-"));
+
+		const initial = await handleRequest(services, apiRequest("GET", "/api/workspaces", { token: TEST_TOKEN }));
+		const initialBody = (await initial.json()) as { workspaces: Array<{ cwd: string }> };
+		expect(initialBody.workspaces.map((workspace) => workspace.cwd)).toEqual([cwd]);
+
+		const registered = await handleRequest(
+			services,
+			apiRequest("POST", "/api/workspaces", { token: TEST_TOKEN, body: { cwd: other } }),
+		);
+		expect(registered.status).toBe(201);
+
+		const after = await handleRequest(services, apiRequest("GET", "/api/workspaces", { token: TEST_TOKEN }));
+		const afterBody = (await after.json()) as { workspaces: Array<{ cwd: string }> };
+		expect(afterBody.workspaces.map((workspace) => workspace.cwd)).toEqual([other]);
+	});
+
+	it("keeps a removed workspace hidden until a session is created there", async () => {
+		const { services, cwd } = await makeServices(new ScriptedProvider([]));
+
+		const registered = await handleRequest(
+			services,
+			apiRequest("POST", "/api/workspaces", { token: TEST_TOKEN, body: { cwd } }),
+		);
+		expect(registered.status).toBe(201);
+		const removed = await handleRequest(
+			services,
+			apiRequest("DELETE", `/api/workspaces?cwd=${encodeURIComponent(cwd)}`, { token: TEST_TOKEN }),
+		);
+		expect(removed.status).toBe(200);
+
+		// Hidden — and not re-injected through the server-default fallback either.
+		const hidden = await handleRequest(services, apiRequest("GET", "/api/workspaces", { token: TEST_TOKEN }));
+		const hiddenBody = (await hidden.json()) as { workspaces: Array<{ cwd: string }> };
+		expect(hiddenBody.workspaces).toEqual([]);
+
+		// Creating a session in the directory registers (and unhides) it again.
+		const created = await handleRequest(
+			services,
+			apiRequest("POST", "/api/sessions", { token: TEST_TOKEN, body: { cwd } }),
+		);
+		expect(created.status).toBe(201);
+		const after = await handleRequest(services, apiRequest("GET", "/api/workspaces", { token: TEST_TOKEN }));
+		const afterBody = (await after.json()) as { workspaces: Array<{ cwd: string }> };
+		expect(afterBody.workspaces.map((workspace) => workspace.cwd)).toEqual([cwd]);
 	});
 
 	it("answers 409 when a message is sent while a run is active", async () => {

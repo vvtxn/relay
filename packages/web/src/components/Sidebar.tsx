@@ -1,14 +1,14 @@
-import { createMemo, createSignal, For, Show } from "solid-js";
-import { Link } from "@tanstack/solid-router";
+import { createEffect, createMemo, createSignal, For, on, Show } from "solid-js";
+import { Link, useNavigate } from "@tanstack/solid-router";
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/solid-query";
-import { abbreviateHome } from "@vvtxn/relay/core/display.ts";
 import type { SessionSummary, WorkspaceSummary } from "@vvtxn/relay/core/sessions/index.ts";
-import type { OpenSessionResponse } from "@vvtxn/client/protocol.ts";
-import { sessionsQuery, sessionQuery, workspacesQuery } from "#/api/queries.ts";
-import { createSession, registerWorkspace, validateWorkspace } from "#/api/mutations.ts";
+import { encodeWorkspaceToken } from "@vvtxn/relay/core/workspace-token.ts";
+import { sessionsQuery, workspaceQuery, workspacesQuery } from "#/api/queries.ts";
+import { unregisterWorkspace } from "#/api/mutations.ts";
+import { startChat } from "#/api/open-chat.ts";
+import { addWorkspace } from "#/api/workspaces.ts";
 import { queryKeys } from "#/api/query-client.ts";
-import { appendError } from "#/state/session.ts";
-import { cwd, homeDir, resolveWorkspaceInput, setCwd } from "#/state/workspace.ts";
+import { displayPath, lastWorkspace, resolveWorkspaceInput, workspaceName } from "#/state/workspace.ts";
 
 function formatTimestamp(timestamp: number | string): string {
 	const date = new Date(timestamp);
@@ -22,36 +22,45 @@ function preview(session: SessionSummary): string {
 		: session.firstUserMessage;
 }
 
-/** Last path segment, e.g. `/home/me/project` → `project`. */
-function workspaceName(path: string): string {
-	const parts = path.split(/[\\/]/).filter(Boolean);
-	return parts[parts.length - 1] ?? path;
-}
-
-function workspacePath(workspace: WorkspaceSummary): string {
-	return homeDir() ? abbreviateHome(workspace.cwd, homeDir()) : workspace.cwd;
-}
-
 export function Sidebar(props: {
 	userName?: string | undefined;
 	avatarUrl?: string | undefined;
-	activeSessionId: string;
-	onSelect: (id: string) => void;
+	activeSessionId: string | null;
+	activeWorkspace: string | null;
 	onOpenSettings: () => void;
 }) {
 	const queryClient = useQueryClient();
+	const navigate = useNavigate();
 	const workspaces = useQuery(() => workspacesQuery);
-	const [expanded, setExpanded] = createSignal<Set<string>>(new Set(cwd() ? [cwd()] : []));
+	const defaultWorkspace = useQuery(() => workspaceQuery);
+	const [expanded, setExpanded] = createSignal<Set<string>>(
+		new Set(props.activeWorkspace ? [props.activeWorkspace] : []),
+	);
 	const [addOpen, setAddOpen] = createSignal(false);
 	const [draftCwd, setDraftCwd] = createSignal("");
 	const [addError, setAddError] = createSignal("");
 	const [adding, setAdding] = createSignal(false);
+	/** Failures for New chat / hide; the chat view is not mounted on every page. */
+	const [actionError, setActionError] = createSignal("");
+
+	// The active workspace is expanded when it becomes active (arriving through
+	// a URL may predate any manual expansion); it stays collapsible afterwards.
+	createEffect(
+		on(
+			() => props.activeWorkspace,
+			(active) => {
+				if (active && !expanded().has(active)) setExpanded((prev) => new Set(prev).add(active));
+			},
+			{ defer: true },
+		),
+	);
 
 	// Include the active workspace even when the server has no sessions for it.
 	const items = createMemo<WorkspaceSummary[]>(() => {
 		const list = workspaces.data ?? [];
-		if (cwd() && !list.some((workspace) => workspace.cwd === cwd())) {
-			return [{ cwd: cwd(), sessionCount: 0, lastActivity: "" }, ...list];
+		const active = props.activeWorkspace;
+		if (active && !list.some((workspace) => workspace.cwd === active)) {
+			return [{ cwd: active, sessionCount: 0, lastActivity: "" }, ...list];
 		}
 		return list;
 	});
@@ -70,28 +79,34 @@ export function Sidebar(props: {
 		return index >= 0 ? sessionQueries[index] : undefined;
 	};
 
+	/** Where "New chat" goes: the open workspace, else the last visible one, else the first listed. */
+	const newChatTarget = createMemo(() => {
+		if (props.activeWorkspace) return props.activeWorkspace;
+		const last = lastWorkspace();
+		const visible = items();
+		if (last && visible.some((workspace) => workspace.cwd === last)) return last;
+		return visible[0]?.cwd ?? defaultWorkspace.data?.cwd ?? "";
+	});
+
 	const create = useMutation(() => ({
-		mutationFn: () => createSession(cwd()),
-		onSuccess: (response) => {
-			const active = cwd();
-			if (active) setExpanded((prev) => (prev.has(active) ? prev : new Set(prev).add(active)));
-			// Seed the empty session and open it immediately; the sidebar lists
-			// refresh in the background instead of delaying navigation.
-			queryClient.setQueryData<OpenSessionResponse>(queryKeys.session(response.id), {
-				header: response.header,
-				entries: [],
-				tokens: 0,
-				cost: 0,
-				branch: null,
-				running: false,
-			});
-			// Refresh that snapshot behind the scenes (e.g. to learn the branch).
-			void queryClient.prefetchQuery({ ...sessionQuery(response.id), staleTime: 0 });
-			void queryClient.invalidateQueries({ queryKey: ["sessions"] });
-			void queryClient.invalidateQueries({ queryKey: queryKeys.workspaces });
-			props.onSelect(response.id);
+		mutationFn: () => startChat(newChatTarget()),
+		onSuccess: (id) => {
+			setActionError("");
+			const target = newChatTarget();
+			if (target) setExpanded((prev) => (prev.has(target) ? prev : new Set(prev).add(target)));
+			void navigate({ to: "/s/$sessionId", params: { sessionId: id } });
 		},
-		onError: (error) => appendError(error instanceof Error ? error.message : String(error)),
+		onError: (error) => setActionError(error instanceof Error ? error.message : String(error)),
+	}));
+
+	const remove = useMutation(() => ({
+		mutationFn: (cwd: string) => unregisterWorkspace(cwd),
+		onSuccess: (_status, cwd) => {
+			setActionError("");
+			void queryClient.invalidateQueries({ queryKey: queryKeys.workspaces });
+			if (props.activeWorkspace === cwd) void navigate({ to: "/", replace: true });
+		},
+		onError: (error) => setActionError(error instanceof Error ? error.message : String(error)),
 	}));
 
 	function toggleWorkspace(path: string): void {
@@ -103,9 +118,18 @@ export function Sidebar(props: {
 		});
 	}
 
-	function selectWorkspace(next: string): void {
-		toggleWorkspace(next);
-		if (next !== cwd()) setCwd(next);
+	function openWorkspace(path: string): void {
+		setExpanded((prev) => (prev.has(path) ? prev : new Set(prev).add(path)));
+		void navigate({ to: "/w/$token", params: { token: encodeWorkspaceToken(path) } });
+	}
+
+	function hideWorkspace(workspace: WorkspaceSummary): void {
+		const name = workspaceName(workspace.cwd);
+		const confirmed = globalThis.confirm(
+			`Hide "${name}"? Its threads are kept and stay reachable, and the workspace comes back ` +
+				`if you add it again or start a chat in it.`,
+		);
+		if (confirmed) remove.mutate(workspace.cwd);
 	}
 
 	async function applyCwd(event: SubmitEvent): Promise<void> {
@@ -117,24 +141,15 @@ export function Sidebar(props: {
 		}
 		setAddError("");
 		setAdding(true);
-		try {
-			const validation = await validateWorkspace(resolved);
-			if (!validation.ok || !validation.path) {
-				setAddError(validation.message ?? "That workspace cannot be used.");
-				return;
-			}
-			const validPath = validation.path;
-			await registerWorkspace(validPath);
-			await queryClient.invalidateQueries({ queryKey: queryKeys.workspaces });
-			setCwd(validPath);
-			setExpanded((prev) => (prev.has(validPath) ? prev : new Set(prev).add(validPath)));
-			setDraftCwd("");
-			setAddOpen(false);
-		} catch (error) {
-			setAddError(error instanceof Error ? error.message : String(error));
-		} finally {
-			setAdding(false);
+		const result = await addWorkspace(resolved);
+		setAdding(false);
+		if (!result.ok) {
+			setAddError(result.message);
+			return;
 		}
+		setDraftCwd("");
+		setAddOpen(false);
+		openWorkspace(result.path);
 	}
 
 	return (
@@ -144,11 +159,14 @@ export function Sidebar(props: {
 				<button
 					type="button"
 					class="btn primary block"
-					disabled={create.isPending}
+					disabled={create.isPending || !newChatTarget()}
 					onClick={() => create.mutate()}
 				>
 					{create.isPending ? "Creating…" : "New chat"}
 				</button>
+				<Show when={actionError()}>
+					<p class="workspace-error">{actionError()}</p>
+				</Show>
 			</div>
 
 			<div class="workspace-list">
@@ -159,7 +177,13 @@ export function Sidebar(props: {
 						const result = createMemo(() => sessionsFor(workspace.cwd));
 						return (
 							<div class="workspace-node">
-								<div class={workspace.cwd === cwd() ? "workspace-row active" : "workspace-row"}>
+								<div
+									class={
+										workspace.cwd === props.activeWorkspace
+											? "workspace-row active"
+											: "workspace-row"
+									}
+								>
 									<button
 										type="button"
 										class="workspace-toggle"
@@ -177,7 +201,7 @@ export function Sidebar(props: {
 										onMouseEnter={() =>
 											void queryClient.prefetchQuery(sessionsQuery(workspace.cwd))
 										}
-										onClick={() => selectWorkspace(workspace.cwd)}
+										onClick={() => openWorkspace(workspace.cwd)}
 									>
 										<span class="workspace-name">{workspaceName(workspace.cwd)}</span>
 										<span class="workspace-meta">
@@ -187,6 +211,15 @@ export function Sidebar(props: {
 												`${workspace.sessionCount}`
 											)}
 										</span>
+									</button>
+									<button
+										type="button"
+										class="workspace-remove"
+										title="Hide workspace (threads are kept)"
+										disabled={remove.isPending}
+										onClick={() => hideWorkspace(workspace)}
+									>
+										×
 									</button>
 								</div>
 								<Show when={open()}>
@@ -235,8 +268,10 @@ export function Sidebar(props: {
 						);
 					}}
 				</For>
-				<Show when={cwd()}>
-					<p class="workspace-hint">{workspacePath({ cwd: cwd(), sessionCount: 0, lastActivity: "" })}</p>
+				<Show when={newChatTarget()}>
+					<p class="workspace-hint" title="Workspace new chats start in">
+						{displayPath(newChatTarget())}
+					</p>
 				</Show>
 				<Show
 					when={addOpen()}

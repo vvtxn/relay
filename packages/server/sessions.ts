@@ -1,7 +1,7 @@
 import { Effect } from "effect";
 import type { HttpServerRequest, HttpServerResponse } from "effect/http";
 import { resolve } from "node:path";
-import { stat } from "node:fs/promises";
+import { realpath, stat } from "node:fs/promises";
 import { getGitBranch, validateWorkspacePath } from "@vvtxn/relay/core/workspace.ts";
 import { attempt, type StoreError } from "@vvtxn/relay/core/effect.ts";
 import { homeDir } from "@vvtxn/relay/core/paths.ts";
@@ -39,10 +39,18 @@ export function openSessionHandle(
 	);
 }
 
-/** Resolve the workspace cwd from the query param or fall back to the server default. */
-function resolveCwd(services: RequestServices, url: URL): string {
+/**
+ * Resolve the workspace cwd from the query param or fall back to the server
+ * default. Reads canonicalize like writes (symlinks resolved when the path
+ * exists), so a client that passes a symlinked directory still matches the
+ * stored workspace; a deleted directory keeps its resolved path so its
+ * sessions stay listable.
+ */
+function resolveCwd(services: RequestServices, url: URL): Effect.Effect<string> {
 	const raw = url.searchParams.get("cwd");
-	return raw ? resolve(raw) : services.config.defaultCwd;
+	if (!raw) return Effect.succeed(services.config.defaultCwd);
+	const abs = resolve(raw);
+	return attempt(() => realpath(abs)).pipe(Effect.catchCause(() => Effect.succeed(abs)));
 }
 
 /** True when `path` is an existing directory. */
@@ -83,7 +91,7 @@ export function handleListSessions(
 	request: HttpServerRequest.HttpServerRequest,
 ): Effect.Effect<HttpServerResponse.HttpServerResponse, StoreError> {
 	return Effect.gen(function* () {
-		const cwd = resolveCwd(services, requestUrl(request));
+		const cwd = yield* resolveCwd(services, requestUrl(request));
 		const sessions = yield* services.sessionStore.listSummaries({ ownerId: services.user.id, cwd });
 		return json({ sessions } satisfies SessionListResponse);
 	});
@@ -96,14 +104,21 @@ export function handleListWorkspaces(
 	return Effect.gen(function* () {
 		const summaries = yield* services.sessionStore.listWorkspaces(services.user.id);
 		const byCwd = new Map(summaries.map((summary) => [summary.cwd, summary]));
-		// Always surface the server's default workspace (the CLI's cwd) so a freshly
-		// launched project appears before its first session.
-		if (!byCwd.has(services.config.defaultCwd)) {
-			byCwd.set(services.config.defaultCwd, {
+		// Surface the server's default workspace only when nothing else is known,
+		// so a freshly launched project has an anchor and a stale daemon cwd does
+		// not linger in the picker. A hidden default stays hidden.
+		if (byCwd.size === 0) {
+			const hidden = yield* services.sessionStore.isWorkspaceHidden({
+				ownerId: services.user.id,
 				cwd: services.config.defaultCwd,
-				sessionCount: 0,
-				lastActivity: "",
 			});
+			if (!hidden) {
+				byCwd.set(services.config.defaultCwd, {
+					cwd: services.config.defaultCwd,
+					sessionCount: 0,
+					lastActivity: "",
+				});
+			}
 		}
 		// Mark directories that have since been deleted/renamed so clients can flag
 		// them instead of failing later.
@@ -132,7 +147,12 @@ export function handleCreateSession(
 		// Register eagerly so the workspace appears in the picker before the first
 		// append persists the session row.
 		yield* services.sessionStore.registerWorkspace(scope);
-		const handle = services.sessionStore.create(scope);
+		// Reuse an idle, never-used session instead of piling up blank ones: the
+		// session is not persisted until its first message, so this check is in
+		// memory. Repeated "New chat" clicks and `relay` launches land on the same
+		// blank thread until something is sent.
+		const empty = services.runs.findIdleEmpty(services.user.id, validation.path);
+		const handle = empty ?? services.sessionStore.create(scope);
 		services.runs.attachHandle(handle.getHeader().id, handle, services.user.id);
 		return json({ id: handle.getHeader().id, header: handle.getHeader() } satisfies CreateSessionResponse, 201);
 	});

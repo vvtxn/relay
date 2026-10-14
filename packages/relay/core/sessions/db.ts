@@ -43,6 +43,12 @@ CREATE TABLE IF NOT EXISTS workspaces (
 	created_at TEXT NOT NULL,
 	PRIMARY KEY (owner_id, cwd)
 );
+CREATE TABLE IF NOT EXISTS hidden_workspaces (
+	owner_id TEXT NOT NULL,
+	cwd TEXT NOT NULL,
+	hidden_at TEXT NOT NULL,
+	PRIMARY KEY (owner_id, cwd)
+);
 `;
 
 type QueryArgs = (string | number | null)[];
@@ -202,9 +208,10 @@ export class DatabaseSessionStore implements SessionStore {
 					WHERE owner_id = ?
 					GROUP BY cwd
 				)
+				WHERE cwd NOT IN (SELECT cwd FROM hidden_workspaces WHERE owner_id = ?)
 				GROUP BY cwd
 				ORDER BY last_activity DESC`,
-			args: [ownerId, ownerId],
+			args: [ownerId, ownerId, ownerId],
 		});
 		return result.rows.map((row) => ({
 			cwd: stringValue(row, "cwd"),
@@ -214,8 +221,26 @@ export class DatabaseSessionStore implements SessionStore {
 	}
 
 	/**
+	 * True when the workspace has been hidden (removed) for this owner. Hidden
+	 * workspaces stay out of the picker until re-registered or a new session is
+	 * created in them, even though their sessions remain reachable.
+	 */
+	isWorkspaceHidden(scope: SessionScope): Effect.Effect<boolean, StoreError> {
+		return storeEffect(() => this.isWorkspaceHiddenPromise(scope));
+	}
+
+	private async isWorkspaceHiddenPromise(scope: SessionScope): Promise<boolean> {
+		const result = await this.execute({
+			sql: "SELECT 1 FROM hidden_workspaces WHERE owner_id = ? AND cwd = ? LIMIT 1",
+			args: [scope.ownerId, scope.cwd],
+		});
+		return result.rows.length > 0;
+	}
+
+	/**
 	 * Records a workspace so it appears in the picker before its first session.
-	 * Idempotent — re-registering an existing workspace is a no-op.
+	 * Idempotent — re-registering an existing workspace is a no-op. Also clears
+	 * any hidden marker, so adding a workspace back restores it.
 	 */
 	registerWorkspace(scope: SessionScope): Effect.Effect<void, StoreError> {
 		return storeEffect(() => this.registerWorkspacePromise(scope));
@@ -223,23 +248,45 @@ export class DatabaseSessionStore implements SessionStore {
 
 	private async registerWorkspacePromise(scope: SessionScope): Promise<void> {
 		await this.schemaReady;
-		await this.client.execute({
-			sql: "INSERT OR IGNORE INTO workspaces (owner_id, cwd, created_at) VALUES (?, ?, ?)",
-			args: [scope.ownerId, scope.cwd, new Date().toISOString()],
-		});
+		await this.client.batch(
+			[
+				{
+					sql: "INSERT OR IGNORE INTO workspaces (owner_id, cwd, created_at) VALUES (?, ?, ?)",
+					args: [scope.ownerId, scope.cwd, new Date().toISOString()],
+				},
+				{
+					sql: "DELETE FROM hidden_workspaces WHERE owner_id = ? AND cwd = ?",
+					args: [scope.ownerId, scope.cwd],
+				},
+			],
+			"write",
+		);
 	}
 
-	/** Removes a workspace registration. Sessions for that cwd are left intact. */
+	/**
+	 * Hides a workspace registration. Sessions for that cwd are left intact and
+	 * stay reachable by URL; the workspace reappears once it is re-registered or
+	 * a new session is created in it.
+	 */
 	unregisterWorkspace(scope: SessionScope): Effect.Effect<void, StoreError> {
 		return storeEffect(() => this.unregisterWorkspacePromise(scope));
 	}
 
 	private async unregisterWorkspacePromise(scope: SessionScope): Promise<void> {
 		await this.schemaReady;
-		await this.client.execute({
-			sql: "DELETE FROM workspaces WHERE owner_id = ? AND cwd = ?",
-			args: [scope.ownerId, scope.cwd],
-		});
+		await this.client.batch(
+			[
+				{
+					sql: "DELETE FROM workspaces WHERE owner_id = ? AND cwd = ?",
+					args: [scope.ownerId, scope.cwd],
+				},
+				{
+					sql: "INSERT OR REPLACE INTO hidden_workspaces (owner_id, cwd, hidden_at) VALUES (?, ?, ?)",
+					args: [scope.ownerId, scope.cwd, new Date().toISOString()],
+				},
+			],
+			"write",
+		);
 	}
 
 	/** @internal Persistence primitive used by the session handle. */

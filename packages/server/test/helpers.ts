@@ -100,12 +100,15 @@ export class MemorySessionHandle implements SessionHandle {
 
 export class MemorySessionStore implements SessionStore {
 	readonly handles = new Map<string, MemorySessionHandle>();
+	private readonly scopes = new Map<string, SessionScope>();
 	private readonly workspaces = new Map<string, Set<string>>();
+	private readonly hidden = new Map<string, Set<string>>();
 
 	create(scope: SessionScope): SessionHandle {
 		const id = crypto.randomUUID().slice(0, 8);
 		const handle = new MemorySessionHandle(id, scope.cwd);
 		this.handles.set(id, handle);
+		this.scopes.set(id, { ownerId: scope.ownerId, cwd: scope.cwd });
 		return handle;
 	}
 
@@ -121,18 +124,46 @@ export class MemorySessionStore implements SessionStore {
 		});
 	}
 
-	listSummaries(_scope: SessionScope): Effect.Effect<SessionSummary[]> {
-		return Effect.succeed([]);
+	listSummaries(scope: SessionScope): Effect.Effect<SessionSummary[]> {
+		return Effect.sync(() =>
+			[...this.handles.entries()]
+				.filter(([id]) => {
+					const stored = this.scopes.get(id);
+					return stored?.ownerId === scope.ownerId && stored.cwd === scope.cwd;
+				})
+				.map(([id, handle]) => {
+					const firstUser = handle
+						.getEntries()
+						.find((entry) => entry.type === "message" && entry.role === "user");
+					return {
+						id,
+						reference: id,
+						timestamp: handle.getHeader().timestamp,
+						firstUserMessage:
+							firstUser && firstUser.type === "message" && typeof firstUser.content === "string"
+								? firstUser.content
+								: null,
+					};
+				}),
+		);
 	}
 
 	listWorkspaces(ownerId: string): Effect.Effect<WorkspaceSummary[]> {
-		return Effect.sync(() =>
-			[...(this.workspaces.get(ownerId) ?? [])].map((cwd) => ({
-				cwd,
-				sessionCount: 0,
-				lastActivity: "",
-			})),
-		);
+		return Effect.sync(() => {
+			const cwds = new Set<string>(this.workspaces.get(ownerId) ?? []);
+			for (const scope of this.scopes.values()) {
+				if (scope.ownerId === ownerId) cwds.add(scope.cwd);
+			}
+			return [...cwds]
+				.filter((cwd) => !this.hidden.get(ownerId)?.has(cwd))
+				.map((cwd) => ({
+					cwd,
+					sessionCount: [...this.scopes.values()].filter(
+						(scope) => scope.ownerId === ownerId && scope.cwd === cwd,
+					).length,
+					lastActivity: "",
+				}));
+		});
 	}
 
 	registerWorkspace(scope: SessionScope): Effect.Effect<void> {
@@ -143,7 +174,24 @@ export class MemorySessionStore implements SessionStore {
 				this.workspaces.set(scope.ownerId, set);
 			}
 			set.add(scope.cwd);
+			this.hidden.get(scope.ownerId)?.delete(scope.cwd);
 		});
+	}
+
+	unregisterWorkspace(scope: SessionScope): Effect.Effect<void> {
+		return Effect.sync(() => {
+			this.workspaces.get(scope.ownerId)?.delete(scope.cwd);
+			let set = this.hidden.get(scope.ownerId);
+			if (!set) {
+				set = new Set();
+				this.hidden.set(scope.ownerId, set);
+			}
+			set.add(scope.cwd);
+		});
+	}
+
+	isWorkspaceHidden(scope: SessionScope): Effect.Effect<boolean> {
+		return Effect.succeed(this.hidden.get(scope.ownerId)?.has(scope.cwd) ?? false);
 	}
 }
 

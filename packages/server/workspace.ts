@@ -1,6 +1,7 @@
 import { Effect } from "effect";
 import type { HttpServerRequest, HttpServerResponse } from "effect/http";
 import { isAbsolute, resolve } from "node:path";
+import { realpath } from "node:fs/promises";
 import { validateWorkspacePath } from "@vvtxn/relay/core/workspace.ts";
 import { attempt } from "@vvtxn/relay/core/effect.ts";
 import type {
@@ -64,8 +65,10 @@ export function handleRegisterWorkspace(
 }
 
 /**
- * Removes a workspace registration. The directory need not still exist, so the
- * stored key is normalized but not stat'd. Sessions for the cwd are untouched.
+ * Hides a workspace registration. The directory need not still exist, so the
+ * stored key is normalized but not stat'd. Sessions for the cwd are untouched
+ * and stay reachable; the workspace reappears in the picker once it is
+ * re-registered or a new session is created in it.
  */
 export function handleUnregisterWorkspace(
 	services: RequestServices,
@@ -75,7 +78,12 @@ export function handleUnregisterWorkspace(
 		const raw = requestUrl(request).searchParams.get("cwd")?.trim();
 		if (!raw || !isAbsolute(raw))
 			return yield* Effect.fail(new BadRequestError("An absolute cwd query parameter is required"));
-		yield* services.sessionStore.unregisterWorkspace({ ownerId: services.user.id, cwd: resolve(raw) });
+		// Canonicalize like reads and writes so a symlinked path hides the same
+		// workspace the sessions were stored under; a deleted directory falls
+		// back to its resolved path.
+		const abs = resolve(raw);
+		const cwd = yield* attempt(() => realpath(abs)).pipe(Effect.catchCause(() => Effect.succeed(abs)));
+		yield* services.sessionStore.unregisterWorkspace({ ownerId: services.user.id, cwd });
 		return json({ status: "ok" } satisfies StatusResponse);
 	});
 }

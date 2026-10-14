@@ -20,7 +20,7 @@ function usage(): void {
 			"Usage:",
 			"  relay workspace add [path]   Register a directory (default: current directory)",
 			"  relay workspace list         List registered workspaces",
-			"  relay workspace remove <path>  Unregister a workspace (sessions are kept)",
+			"  relay workspace remove <path>  Hide a workspace (sessions are kept)",
 		].join("\n"),
 	);
 }
@@ -88,7 +88,7 @@ async function remove(args: string[]): Promise<void> {
 	const target = absolute(args[0]);
 	await withClient(async (client) => {
 		await client.unregisterWorkspace(target);
-		console.log(`Removed workspace ${display(target)}`);
+		console.log(`Hidden workspace ${display(target)} (threads are kept; re-add or start a chat there to restore)`);
 	});
 }
 

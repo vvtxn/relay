@@ -27,6 +27,7 @@ import { type CommandPaletteItem, useCommandPalette } from "#/tui/render/hooks/c
 import { inputManager } from "#/tui/core/input.ts";
 import { useProjectFiles } from "./hooks/project-files.ts";
 import { getClient, serverUrl } from "./client.ts";
+import { resumeRequested, workspaceCwd } from "./config.ts";
 import { openBrowser } from "./open.ts";
 import { theme } from "#/tui/theme.ts";
 import { VERSION } from "../version.ts";
@@ -340,7 +341,7 @@ function App({ onQuit, user, initialSessionId, info }: AppProps) {
 	const startNewChat = async () => {
 		dropPendingAsk(true);
 		try {
-			const response = await getClient().createSession(process.cwd());
+			const response = await getClient().createSession(workspaceCwd());
 			sessionId.value = response.id;
 			sync.value.pending = resetSessionStreamState();
 			syncStream(true);
@@ -406,7 +407,7 @@ function App({ onQuit, user, initialSessionId, info }: AppProps) {
 				void startNewChat();
 			} else if (item.id === "threads") {
 				void getClient()
-					.listSessions(process.cwd())
+					.listSessions(workspaceCwd())
 					.then((response) => {
 						threadItems.value = response.sessions.map((s) => {
 							const date = new Date(s.timestamp);
@@ -552,11 +553,25 @@ async function bootstrap(): Promise<void> {
 			throw new Error(`Cannot reach the Relay server at ${serverUrl()}. Start one with 'relay serve'.`);
 		}
 		const [user, info] = await Promise.all([getClient().me(), getClient().getConfig()]);
-		const response = await getClient().createSession(process.cwd());
-		boot.value = { kind: "ready", user, sessionId: response.id, info };
+		const sessionId = await initialSession(workspaceCwd());
+		boot.value = { kind: "ready", user, sessionId, info };
 	} catch (error) {
 		boot.value = { kind: "error", message: error instanceof Error ? error.message : String(error) };
 	}
+}
+
+/**
+ * `-c`/`--continue` resumes the most recent thread for the workspace; without
+ * it the server creates a session, reusing an idle empty one when it can.
+ */
+async function initialSession(cwd: string): Promise<string> {
+	if (resumeRequested()) {
+		const { sessions } = await getClient().listSessions(cwd);
+		const recent = sessions[0];
+		if (recent) return recent.reference;
+	}
+	const created = await getClient().createSession(cwd);
+	return created.id;
 }
 
 // ---------------------------------------------------------------------------

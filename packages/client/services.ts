@@ -66,6 +66,7 @@ export interface ApiShape {
 	listWorkspaces(): Effect.Effect<WorkspacesResponse, RelayError>;
 	validateWorkspace(cwd: string): Effect.Effect<WorkspaceValidateResponse, RelayError>;
 	registerWorkspace(cwd: string): Effect.Effect<RegisterWorkspaceResponse, RelayError>;
+	unregisterWorkspace(cwd: string): Effect.Effect<StatusResponse, RelayError>;
 	createSession(cwd: string): Effect.Effect<CreateSessionResponse, RelayError>;
 	openSession(id: string): Effect.Effect<OpenSessionResponse, RelayError>;
 	listFiles(sessionId: string): Effect.Effect<FileListResponse, RelayError>;
@@ -95,6 +96,7 @@ export const ApiLive = (client: RelayClient): Layer.Layer<Api> =>
 		listWorkspaces: () => tryRelay(() => client.listWorkspaces()),
 		validateWorkspace: (cwd) => tryRelay(() => client.validateWorkspace(cwd)),
 		registerWorkspace: (cwd) => tryRelay(() => client.registerWorkspace(cwd)),
+		unregisterWorkspace: (cwd) => tryRelay(() => client.unregisterWorkspace(cwd)),
 		createSession: (cwd) => tryRelay(() => client.createSession(cwd)),
 		openSession: (id) => tryRelay(() => client.openSession(id)),
 		listFiles: (sessionId) => tryRelay(() => client.listFiles(sessionId)),

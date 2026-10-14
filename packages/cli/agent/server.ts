@@ -24,6 +24,8 @@ import { spawnDetached } from "@vvtxn/relay/core/command.ts";
 import type { SettingsResponse } from "@vvtxn/client/protocol.ts";
 import { readStoredSession } from "@vvtxn/relay/core/auth/session-file.ts";
 import { relayDir } from "@vvtxn/relay/core/paths.ts";
+import { encodeWorkspaceToken } from "@vvtxn/relay/core/workspace-token.ts";
+import { resolveWorkspacePath } from "./config.ts";
 import { openBrowser } from "./open.ts";
 
 const DEFAULT_PORT = 7433;
@@ -521,9 +523,24 @@ async function isReachable(url: string): Promise<boolean> {
 	}
 }
 
-/** `relay web`: ensure a server, open the browser, then return (or stay watching). */
+/** `relay web`: ensure a server, open the browser at the workspace, then return (or stay watching). */
 export async function runWeb(args: string[]): Promise<void> {
-	const foreground = args.includes("--foreground");
+	let foreground = false;
+	let workspaceArg: string | null = null;
+	for (let index = 0; index < args.length; index++) {
+		const arg = args[index];
+		if (arg === "--foreground") {
+			foreground = true;
+		} else if (arg === "--workspace") {
+			const value = args[index + 1];
+			if (!value) throw new Error("--workspace requires a directory path");
+			workspaceArg = value;
+			index += 1;
+		} else if (arg?.startsWith("-")) {
+			throw new Error(`Unknown option: ${arg}`);
+		}
+	}
+
 	const state = await ensureServer({ cwd: process.cwd() });
 	let webUrl = state.webUrl || state.url;
 
@@ -534,8 +551,12 @@ export async function runWeb(args: string[]): Promise<void> {
 		webUrl = state.url;
 	}
 
-	openBrowser(webUrl);
-	console.log(`Relay is running at ${webUrl}`);
+	// Deep-link into the workspace pane; an unregistered directory shows the
+	// "add workspace" flow rather than failing.
+	const cwd = workspaceArg ? resolveWorkspacePath(workspaceArg) : process.cwd();
+	const target = `${webUrl}/w/${encodeWorkspaceToken(cwd)}`;
+	openBrowser(target);
+	console.log(`Relay is running at ${target}`);
 
 	if (!foreground) return;
 	console.log("Watching in the foreground; press Ctrl-C to detach (the server keeps running).");
