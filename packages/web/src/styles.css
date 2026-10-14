@@ -758,8 +758,6 @@ body {
 	flex-direction: column;
 	gap: 0.35rem;
 	min-width: 0;
-	border-left: 2px solid var(--relay-border, #303030);
-	padding-left: 0.55rem;
 }
 
 /* The header is a button (rows expand on click) but reads as a line of text. */
@@ -793,39 +791,35 @@ body {
 	background: var(--relay-surface-elevated, #181818);
 }
 
-/* Per-tool accents — a colored left border per action, graphite chrome. */
-.tool-call[data-tool="read_file"] {
-	border-left-color: var(--relay-tool-read, #9fb6c4);
-}
-
-.tool-call[data-tool="write_file"] {
-	border-left-color: var(--relay-tool-write, #a7c4a7);
-}
-
-.tool-call[data-tool="edit_file"] {
-	border-left-color: var(--relay-tool-edit, #c4b394);
-}
-
-.tool-call[data-tool="grep"] {
-	border-left-color: var(--relay-tool-grep, #b4a7c4);
-}
-
-.tool-call[data-tool="bash"] {
-	border-left-color: var(--relay-tool-run, #c4a7a7);
-}
-
-.tool-call[data-error] {
-	border-left-color: var(--relay-error, #b0a0a0);
-}
-
-.tool-call[data-error] .tool-call-name {
-	color: var(--relay-error, #b0a0a0);
-}
-
 .tool-call-name {
 	font-weight: 700;
 	letter-spacing: 0.06em;
 	color: var(--relay-text-muted, #c0c0c0);
+}
+
+/* Per-tool accents — colored tool name per action, graphite chrome. */
+.tool-call[data-tool="read_file"] .tool-call-name {
+	color: var(--relay-tool-read, #9fb6c4);
+}
+
+.tool-call[data-tool="write_file"] .tool-call-name {
+	color: var(--relay-tool-write, #a7c4a7);
+}
+
+.tool-call[data-tool="edit_file"] .tool-call-name {
+	color: var(--relay-tool-edit, #c4b394);
+}
+
+.tool-call[data-tool="grep"] .tool-call-name {
+	color: var(--relay-tool-grep, #b4a7c4);
+}
+
+.tool-call[data-tool="bash"] .tool-call-name {
+	color: var(--relay-tool-run, #c4a7a7);
+}
+
+.tool-call[data-error] .tool-call-name {
+	color: var(--relay-error, #b0a0a0);
 }
 
 .tool-call-arg {
