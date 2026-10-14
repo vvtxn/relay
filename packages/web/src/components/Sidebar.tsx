@@ -1,4 +1,4 @@
-import { createEffect, createMemo, createSignal, For, Show } from "solid-js";
+import { createMemo, createSignal, For, Show } from "solid-js";
 import { Link } from "@tanstack/solid-router";
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/solid-query";
 import { abbreviateHome } from "@vvtxn/relay/core/display.ts";
@@ -56,12 +56,6 @@ export function Sidebar(props: {
 		return list;
 	});
 
-	// The active workspace is always expanded; others toggle on demand.
-	createEffect(() => {
-		const active = cwd();
-		if (active) setExpanded((prev) => (prev.has(active) ? prev : new Set(prev).add(active)));
-	});
-
 	// Only fetch sessions for workspaces the user has opened.
 	const expandedCwds = createMemo(() =>
 		items()
@@ -79,6 +73,8 @@ export function Sidebar(props: {
 	const create = useMutation(() => ({
 		mutationFn: () => createSession(cwd()),
 		onSuccess: (response) => {
+			const active = cwd();
+			if (active) setExpanded((prev) => (prev.has(active) ? prev : new Set(prev).add(active)));
 			// Seed the empty session and open it immediately; the sidebar lists
 			// refresh in the background instead of delaying navigation.
 			queryClient.setQueryData<OpenSessionResponse>(queryKeys.session(response.id), {
@@ -108,7 +104,7 @@ export function Sidebar(props: {
 	}
 
 	function selectWorkspace(next: string): void {
-		setExpanded((prev) => (prev.has(next) ? prev : new Set(prev).add(next)));
+		toggleWorkspace(next);
 		if (next !== cwd()) setCwd(next);
 	}
 
@@ -127,9 +123,11 @@ export function Sidebar(props: {
 				setAddError(validation.message ?? "That workspace cannot be used.");
 				return;
 			}
-			await registerWorkspace(validation.path);
+			const validPath = validation.path;
+			await registerWorkspace(validPath);
 			await queryClient.invalidateQueries({ queryKey: queryKeys.workspaces });
-			setCwd(validation.path);
+			setCwd(validPath);
+			setExpanded((prev) => (prev.has(validPath) ? prev : new Set(prev).add(validPath)));
 			setDraftCwd("");
 			setAddOpen(false);
 		} catch (error) {
@@ -165,6 +163,7 @@ export function Sidebar(props: {
 									<button
 										type="button"
 										class="workspace-toggle"
+										aria-expanded={open()}
 										title={open() ? "Collapse" : "Expand"}
 										onClick={() => toggleWorkspace(workspace.cwd)}
 									>
@@ -173,6 +172,7 @@ export function Sidebar(props: {
 									<button
 										type="button"
 										class="workspace-name-btn"
+										aria-expanded={open()}
 										title={workspace.cwd}
 										onMouseEnter={() =>
 											void queryClient.prefetchQuery(sessionsQuery(workspace.cwd))

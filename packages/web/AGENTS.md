@@ -122,7 +122,7 @@ same font via `relay fonts install` — see `packages/relay/assets/fonts/README.
 key is per-user, stored in the server database, and the only place a key is entered; `GET /api/settings` returns just
 `{ set, hint }` and the page never echoes the key back.
 
-In-app entry points (sidebar chip, status bar) open the **nested overlay** `/s/:sessionId/settings`: the chat stays
+In-app entry point (the sidebar user chip) opens the **nested overlay** `/s/:sessionId/settings`: the chat stays
 mounted and its stream connected behind it, so opening/closing settings is instant and nothing is lost. The standalone
 `/settings` route serves CLI deep links (the CLI blocks until a key is set) and returns to the last opened session
 (`relay.sessionId` in localStorage) or the boot flow.
@@ -143,9 +143,9 @@ languages stay plain text.
 Turn rendering is a web-native take on the terminal client: user turns carry an `info` left border, agent turns
 `brand`, turns are separated by the chat gap, and tool activity is the only element on a background (`surface`) panel.
 Turns that run tools drop the `brand` stripe and its padding, so only their per-tool accents show.
-Each tool call is a single collapsed row — per-tool accent border (from the shared theme's `toolRead`, `toolWrite`, …
-tokens), display name, argument, and a short result stat (`3 matches in 2 files`, `+4 −3`, `40 lines`, `error`, or a
-pulsing `running…`). Clicking a row expands the full result: edit/write diffs render through `@pierre/diffs` (see
+Each tool call is a single collapsed row — per-tool colored display name (from the shared theme's `toolRead`, `toolWrite`,
+… tokens), argument, and a short result stat (`3 matches in 2 files`, `+4 −3`, `40 lines`, `error`, or a pulsing
+`running…`). Clicking a row expands the full result: edit/write diffs render through `@pierre/diffs` (see
 `DiffBlock.tsx`; falls back to `parseDiffLines` coloring when a patch cannot be parsed), grep output is split into
 colored file/line/text, and other results show as preformatted text. Collapsed by default is deliberate — long outputs
 stay one line unless the reader asks for them. Edit and write calls that produced a diff also get a **View diff**
@@ -164,11 +164,12 @@ into `<attached_context>` blocks before the run.
 A workspace is a project directory. `GET /api/workspaces` returns the distinct session `cwd`s plus explicitly registered
 workspaces (and the server default) for the user. The sidebar renders them as an expandable **tree**: each workspace is
 a row with a chevron, session count, and a `missing` flag when its directory is gone; its sessions nest underneath. Only
-expanded workspaces are fetched (`useQueries` over `sessionsQuery(cwd)` per open cwd), and the active workspace is
-always expanded. Selecting a workspace scopes the "New chat" target (`cwd` in `state/workspace.ts`, persisted) and
-drives the session queries. "Add workspace" accepts an absolute path, calls `GET /api/workspaces/validate` (inline error
-when missing/outside roots), stores the returned canonical path, and registers it via `POST /api/workspaces`. Bootstrap
-re-validates the persisted cwd and falls back to the server default.
+expanded workspaces are fetched (`useQueries` over `sessionsQuery(cwd)` per open cwd); the active workspace starts
+expanded and any workspace can be collapsed or expanded by clicking its row. Selecting a workspace scopes the "New chat"
+target (`cwd` in `state/workspace.ts`, persisted) and drives the session queries. "Add workspace" accepts an absolute
+path, calls `GET /api/workspaces/validate` (inline error when missing/outside roots), stores the returned canonical
+path, and registers it via `POST /api/workspaces`. Bootstrap re-validates the persisted cwd and falls back to the server
+default.
 
 ## Building & Running
 

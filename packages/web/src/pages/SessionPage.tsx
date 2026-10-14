@@ -95,7 +95,6 @@ export function SessionPage() {
 							avatarUrl={me.data!.avatarUrl}
 							contextWindow={config.data!.contextTokens}
 							onSignOut={() => void signOut()}
-							onOpenSettings={goToSettings}
 						/>
 						<ChatView model={config.data!.model} version={VERSION} />
 						<Composer sessionId={sessionId()} />
