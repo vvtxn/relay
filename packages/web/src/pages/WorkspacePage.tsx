@@ -1,4 +1,4 @@
-import { createEffect, createMemo, createSignal, For, Show } from "solid-js";
+import { createEffect, createMemo, createSignal, For, on, Show } from "solid-js";
 import { Link, useNavigate, useParams } from "@tanstack/solid-router";
 import { useMutation, useQuery } from "@tanstack/solid-query";
 import { decodeWorkspaceToken, encodeWorkspaceToken } from "@vvtxn/relay/core/workspace-token.ts";
@@ -66,6 +66,23 @@ export function WorkspacePage() {
 
 	const entry = createMemo(() => (workspaces.data ?? []).find((workspace) => workspace.cwd === cwd()));
 
+	// The pane owns the full thread list; the sidebar only shows the latest few.
+	const [query, setQuery] = createSignal("");
+	createEffect(
+		on(
+			() => params().token,
+			() => setQuery(""),
+			{ defer: true },
+		),
+	);
+	const filtered = createMemo(() => {
+		const list = sessions.data ?? [];
+		const needle = query().trim().toLowerCase();
+		if (!needle) return list;
+		return list.filter((session) => (session.firstUserMessage ?? "").toLowerCase().includes(needle));
+	});
+	const totalThreads = () => sessions.data?.length ?? 0;
+
 	const [createError, setCreateError] = createSignal("");
 	const create = useMutation(() => ({
 		mutationFn: () => startChat(cwd() ?? ""),
@@ -131,6 +148,24 @@ export function WorkspacePage() {
 							</div>
 						</Show>
 
+						<Show when={entry() && !sessions.isError && totalThreads() > 0}>
+							<div class="pane-toolbar">
+								<input
+									class="input pane-search"
+									type="search"
+									placeholder="Search threads…"
+									aria-label="Search threads"
+									value={query()}
+									onInput={(event) => setQuery(event.currentTarget.value)}
+								/>
+								<Show when={query().trim()}>
+									<span class="pane-search-count">
+										{filtered().length} of {totalThreads()}
+									</span>
+								</Show>
+							</div>
+						</Show>
+
 						<div class="pane-body">
 							<Show when={createError()}>
 								<p class="workspace-error">{createError()}</p>
@@ -181,22 +216,29 @@ export function WorkspacePage() {
 											when={list().length > 0}
 											fallback={<p class="pane-empty">No threads here yet.</p>}
 										>
-											<div class="thread-list">
-												<For each={list()}>
-													{(session) => (
-														<Link
-															to="/s/$sessionId"
-															params={{ sessionId: session.reference }}
-															class="thread-item"
-														>
-															<span class="thread-preview">{preview(session)}</span>
-															<span class="thread-time">
-																{formatTimestamp(session.timestamp)}
-															</span>
-														</Link>
-													)}
-												</For>
-											</div>
+											<Show
+												when={filtered().length > 0}
+												fallback={
+													<p class="pane-empty">No threads match “{query().trim()}”.</p>
+												}
+											>
+												<div class="thread-list">
+													<For each={filtered()}>
+														{(session) => (
+															<Link
+																to="/s/$sessionId"
+																params={{ sessionId: session.reference }}
+																class="thread-item"
+															>
+																<span class="thread-preview">{preview(session)}</span>
+																<span class="thread-time">
+																	{formatTimestamp(session.timestamp)}
+																</span>
+															</Link>
+														)}
+													</For>
+												</div>
+											</Show>
 										</Show>
 									)}
 								</Show>

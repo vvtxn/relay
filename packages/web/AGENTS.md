@@ -172,7 +172,8 @@ session header. `<token>` is `base64url` of the canonical cwd via `encodeWorkspa
 (`@vvtxn/relay/core/workspace-token.ts`), a single path segment shared with the CLI's `relay web` deep links.
 
 The sidebar renders workspaces as an expandable **tree**: each row has a chevron, session count, a `missing` flag when
-its directory is gone, and a hide button; its sessions nest underneath. Only expanded workspaces are fetched
+its directory is gone, and a hide button; its sessions nest underneath, capped at the latest three with a `+N more…`
+link to the pane (the pane owns the full list and its search box). Only expanded workspaces are fetched
 (`useQueries` over `sessionsQuery(cwd)` per open cwd); the active workspace starts expanded (and re-expands when it
 becomes active), while the chevron collapses any workspace — including the active one. "New chat" targets the active
 workspace, falling back to the last visited one

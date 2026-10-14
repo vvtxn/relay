@@ -22,6 +22,9 @@ function preview(session: SessionSummary): string {
 		: session.firstUserMessage;
 }
 
+/** Latest threads shown per workspace in the sidebar tree; the pane lists them all. */
+const SIDEBAR_THREAD_LIMIT = 3;
+
 export function Sidebar(props: {
 	userName?: string | undefined;
 	avatarUrl?: string | undefined;
@@ -241,7 +244,7 @@ export function Sidebar(props: {
 													when={list().length}
 													fallback={<div class="session-empty">No sessions yet</div>}
 												>
-													<For each={list()}>
+													<For each={list().slice(0, SIDEBAR_THREAD_LIMIT)}>
 														{(session) => (
 															<Link
 																to="/s/$sessionId"
@@ -259,6 +262,15 @@ export function Sidebar(props: {
 															</Link>
 														)}
 													</For>
+													<Show when={list().length > SIDEBAR_THREAD_LIMIT}>
+														<Link
+															to="/w/$token"
+															params={{ token: encodeWorkspaceToken(workspace.cwd) }}
+															class="session-more"
+														>
+															+{list().length - SIDEBAR_THREAD_LIMIT} more…
+														</Link>
+													</Show>
 												</Show>
 											)}
 										</Show>

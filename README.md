@@ -347,13 +347,14 @@ A SolidJS single-page app served by the server (bundled `packages/web/dist`, or 
 - Chat with live drafts and tool cards (rendered diffs), `@`-mention picker, approval dialog, token/cost status bar, and
   cancel
 - **Workspaces** — `/` is the root overview (workspace cards plus a "continue last chat" shortcut), `/w/<token>` is a
-  workspace pane listing its threads, and chats stay at `/s/:id`; the sidebar renders workspaces as a collapsible tree
-  and navigates to the pane. New chats go to the active workspace, falling back to the last visited one (the server
-  reuses an idle empty session). "Add workspace" accepts an absolute path, validates it against the server (with an
-  inline error when the directory is missing or outside the allowed roots), and registers it immediately. "Hide"
-  tombstones a workspace — its threads stay reachable and re-adding it or starting a chat there restores it. Workspaces
-  whose directory has since been deleted are flagged as `missing`. Projects can also be added from the terminal with
-  `relay workspace add [path]`, which attaches to the running server without opening the TUI.
+  workspace pane listing every thread for that directory with a search box, and chats stay at `/s/:id`. The sidebar
+  renders workspaces as a collapsible tree showing the latest three threads each (with a `+N more…` link to the pane).
+  New chats go to the active workspace, falling back to the last visited one (the server reuses an idle empty session).
+  "Add workspace" accepts an absolute path, validates it against the server (with an inline error when the directory is
+  missing or outside the allowed roots), and registers it immediately. "Hide" tombstones a workspace — its threads stay
+  reachable and re-adding it or starting a chat there restores it. Workspaces whose directory has since been deleted
+  are flagged as `missing`. Projects can also be added from the terminal with `relay workspace add [path]`, which
+  attaches to the running server without opening the TUI.
 - Shares the Graphite/Silver theme tokens with the terminal client (applied as CSS variables)
 - Auth uses GitHub App OAuth: credentialed fetches, 401 handling, and a login redirect
 
