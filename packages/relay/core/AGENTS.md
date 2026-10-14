@@ -7,14 +7,15 @@ Core agent logic: agent loop, runner, tool execution, context management, sessio
 ```
 core/
 ├── index.ts              # Internal barrel re-exports (see packages/relay/mod.ts for public API)
-├── agent.ts              # Agent loop (async generator yielding AgentEvents)
-├── runner.ts             # runAgentLoop() convenience wrapper with callbacks
+├── agent.ts              # Agent loop (Stream of AgentEvents)
+├── runner.ts             # runAgentLoop(): callback adapter over the event stream
 ├── display.ts            # Display utilities: UIMessage, UIToolCall, parseDiffLines, tool-call summaries
 ├── theme.ts              # Graphite/Silver design tokens (incl. per-tool accents) shared by terminal + web clients
 ├── fonts.ts              # Shared font identity: web faces, CSS stack, terminal install files
 ├── assets/fonts/         # Bundled font files + license (see its README for the swap procedure)
 ├── paths.ts              # relayDir(), homeDir() helpers
 ├── context.ts            # Context trimming (token estimation, turn-based truncation)
+├── effect.ts             # Shared Effect helpers: attempt, causeMessage, StoreError, storeEffect
 ├── database.ts           # Shared Turso client factory + env credentials (used by session and user stores)
 ├── auth/                 # Identity + sessions
 │   ├── types.ts          # AuthIdentity, AuthenticatedUser, AuthProvider, UserStore, UserDirectory
@@ -28,8 +29,8 @@ core/
 ├── workspace.ts          # Workspace-rooted fs helpers: expandMentions, listProjectFiles, git metadata
 ├── tools/                # Tool system
 │   ├── index.ts          # Tool exports, defaultTools registry, createWorkspaceTools
-│   ├── types.ts          # Tool, ToolRegistry, ToolResult types; defineTool helper
-│   ├── approval.ts       # withApproval wrapper (gate tool execution on user decision)
+│   ├── types.ts          # Tool, ToolRegistry, ToolResult, ToolError types; defineTool helper
+│   ├── approval.ts       # withApproval wrapper (gate tool execution on an Effect decision)
 │   ├── bash.ts           # Shell command execution (createBashTool factory, optional cwd)
 │   ├── read.ts           # File reading
 │   ├── write.ts          # File writing
@@ -40,29 +41,34 @@ core/
     ├── index.ts          # Public exports
     ├── manager.ts        # Session CRUD (create, list, load, save, delete)
     ├── paths.ts          # Session storage paths (~/.relay/sessions/)
-    └── types.ts          # Session types
+    └── types.ts          # Session types + Effect-based handle/store contracts
 ```
 
 ## Key Concepts
 
 ### Agent Loop (`agent.ts`)
 
-The `run()` async generator:
+`run(messages, config)` returns a `Stream<AgentEvent>`:
 
 1. Receive user input as messages
 2. Build context (system prompt + history + tools)
-3. Stream LLM response via `provider.stream()`
+3. Stream the LLM response via `provider.stream()` (an Effect `Stream`)
 4. Parse response for tool calls
-5. Execute tools: read-only tools in parallel, side-effect tools sequentially
-6. Yield `AgentEvent`s for the UI to consume
-7. Repeat until assistant responds without tool calls
+5. Execute tools: read-only tools in parallel (`Effect.forEach`, unbounded), side-effect tools sequentially
+6. Emit `AgentEvent`s for the UI to consume
+7. Repeat until the assistant responds without tool calls
 
-Features: self-reflection every 12 rounds, loop detection (repeated tool calls), automatic retries with exponential
-backoff.
+The stream never fails: provider errors are retried (`Effect.retry` with `Schedule.exponential`, 1s/2s, gated on
+`ProviderError.retryable`), a stalled stream fails after 60s of silence (`Stream.timeoutOrElse`, also retryable), and
+once the budget is exhausted — or any other failure surfaces — an `error` event is emitted and the stream completes.
+Consumers render errors in-band. Features: self-reflection every 12 rounds and repeated-call loop detection.
 
 ### Agent Runner (`runner.ts`)
 
-The `runAgentLoop()` function wraps `run()` with a callback interface, accumulating tool call args across deltas:
+`runAgentLoop()` is a compatibility adapter for callback-based consumers, implemented over the `run()` stream: it
+awaits each callback so async work (e.g. session writes) completes in order, and reports a throwing callback through
+`onError` instead of breaking the loop. Effect-native consumers should use `run()` directly (see
+`packages/server/run.ts`).
 
 ```typescript
 await runAgentLoop(messages, config, {
@@ -75,12 +81,6 @@ await runAgentLoop(messages, config, {
 });
 ```
 
-All callbacks return `void | Promise<void>` and the runner awaits each one, ensuring async work (e.g. session writes)
-completes in order.
-
-Optional callbacks `onToolCallStart(id, name)` and `onToolCallArgsDelta(id, args)` stream tool call progress as it
-arrives (e.g. for progressive UI indicators); without them, only `onToolCallEnd` fires with the accumulated args.
-
 ### AgentEvent Types
 
 ```typescript
@@ -88,7 +88,7 @@ type AgentEvent =
 	| { type: "text_delta"; content: string }
 	| { type: "tool_call_start"; id: string; name: string }
 	| { type: "tool_call_args_delta"; id: string; args: string }
-	| { type: "tool_call_end"; id: string }
+	| { type: "tool_call_end"; id: string; name: string; args: string }
 	| { type: "tool_result"; id: string; result: ToolResult }
 	| { type: "message_complete"; usage?: Usage; generationId?: string }
 	| { type: "turn_complete"; assistantMessage: Message; toolResults: Message[] }
@@ -97,7 +97,8 @@ type AgentEvent =
 
 ### Display Utilities (`display.ts`)
 
-Shared across all clients (TUI, web). Deliberately dependency-free so browser bundles can import it:
+Shared across all clients (TUI, web). Deliberately dependency-free so browser bundles can import it — this file (like
+`theme.ts` and `fonts.ts`) must never gain an Effect or `node:` dependency:
 
 - `UIToolCall` — Display-ready tool call with summarized args, formatted output, optional `diff`, and `isError` flag
 - `UIMessage` — Client-agnostic chat message (`user` or `agent` with tool calls)
@@ -119,20 +120,22 @@ Tools are defined using `defineTool()`:
 interface Tool {
 	definition: ToolDefinition;
 	readonly?: boolean;
-	execute(input: unknown): Promise<ToolResult>;
+	execute(input: unknown): Effect.Effect<ToolResult, ToolError>;
 }
 ```
 
-Built-in tools (`defaultTools`): `bash` (Run), `read_file` (Read), `write_file` (Write), `edit_file` (Edit), `grep`
-(Grep)
+`defineTool` keeps authoring promise-based (`execute: (input) => Promise<ToolResult>`) and lifts the body into the
+Effect-based interface: an unexpected throw becomes a typed `ToolError`. Built-in tools (`defaultTools`): `bash` (Run),
+`read_file` (Read), `write_file` (Write), `edit_file` (Edit), `grep` (Grep).
 
 `createWorkspaceTools(root)` returns the built-in tools rooted at a workspace directory: file tools resolve their `path`
 argument against `root` via `resolveWithinRoot` (escapes are rejected with an error result), and bash runs with `root`
 as its cwd. Note bash is not truly confined — shell commands can still use absolute paths.
 
-`withApproval(tools, handler)` wraps each tool's `execute` so calls are gated on an approval decision. Readonly tools
-skip approval by default (`skipReadonly: false` to change). Denials return an `isError` ToolResult, so the agent loop
-needs no changes and the model can react. Handlers waiting on user input should race against the run's AbortSignal.
+`withApproval(tools, handler)` wraps each tool's `execute` so calls are gated on an `Effect<boolean>` decision.
+Readonly tools skip approval by default (`skipReadonly: false` to change). Denials return an `isError` ToolResult, so
+the agent loop needs no changes and the model can react. Handlers waiting on user input should await a `Deferred` (see
+`packages/server/run.ts`) so cancelling the run interrupts the wait.
 
 ### Context Management
 
@@ -144,11 +147,14 @@ needs no changes and the model can react. Handlers waiting on user input should 
 
 ### Session Management
 
-`sessions/` provides storage-neutral conversation contracts and adapters:
+`sessions/` provides Effect-native storage contracts and adapters:
 
-- `DatabaseSessionStore` stores shared sessions and ordered messages in the database
-- `FileSessionStore` preserves the JSONL implementation for fallback tooling
+- `DatabaseSessionStore` stores shared sessions and ordered messages in the database; `SessionHandle` operations
+  (`append`, `flush`) are Effects that fail with `StoreError`, while synchronous in-memory reads stay synchronous
+- `FileSessionStore` preserves the JSONL implementation for fallback tooling (also Effect-facing)
 - Session ownership and workspace are explicit in `SessionScope`
+- `authenticate()` and the auth store interfaces (`UserStore`, `UserDirectory`, `AuthSessionStore`) follow the same
+  contract; `ready` is an Effect on every store
 
 ### Workspace Helpers (`workspace.ts`)
 
@@ -162,9 +168,17 @@ per-session workspace:
 - `listProjectFiles(root)` — project file listing (`git ls-files`, directory walk fallback) for file pickers
 - `isGitRepo(root)` / `getGitBranch(root)` — repository metadata
 
+These remain promise-based IO helpers (wrapped with `attempt` at Effect call sites); they are not store contracts.
+
 ## Dependencies
 
-- `@/api` - Internal: LLM provider types and calls (within same `packages/relay` package)
+- `effect` (v4) — the agent runtime (streams, retries, tool execution, store contracts)
+- `@tursodatabase/serverless` — database client for the stores
+
+## Testing
+
+`pnpm exec vp test` runs the suites under `test/`. The agent-loop tests drive `TestClock` for virtual backoff/timeout
+proving and use a scripted `Stream` provider.
 
 ## Task Completion Checklist
 
@@ -172,18 +186,17 @@ After concluding that a task is complete, always run these commands from the rep
 
 1. `pnpm exec vp fmt` — auto-format all code
 2. `pnpm check` — format, lint, and type-check (Oxfmt, Oxlint, tsgo via Vite+)
-
-If any command fails, fix the issues and re-run until all pass cleanly.
+3. `pnpm exec vp test` — run the test suites
 
 ## Code Patterns
 
-- Tools use `defineTool()` helper for consistent structure
+- Tools use `defineTool()` helper for consistent structure (async bodies, Effect interface)
 - Tools have a `readonly` flag for parallel execution optimization
-- Use `ToolResult` with `isError` flag for error reporting
+- Use `ToolResult` with `isError` flag for error reporting; unexpected throws become `ToolError`
 - `ToolResult.meta.diff` carries unified diff output from `write_file` and `edit_file` for UI rendering; the server persists it on `tool_result` entries (`ToolResultEntry.diff`) so reloaded transcripts keep the diff
 - `diff.ts` generates unified diffs with a pure Myers algorithm and emits git-style headers (`diff --git` + file name) so UIs can render them with path-aware diff viewers
-- Agent loop is an async generator for streaming updates
-- `runAgentLoop()` is the recommended entry point for all clients; `run()` for custom event handling
+- `run()` is the primary entry point (a `Stream<AgentEvent>`); `runAgentLoop()` adapts it for callback consumers
 - Context trimming uses heuristic token estimation (~4 chars/token)
 - Workspace helpers take an explicit root directory — never rely on the process cwd
 - Gate side-effecting tools with `withApproval()`; keep `defaultTools` ungated only where approvals don't apply
+- Keep `display.ts`/`theme.ts`/`fonts.ts` free of Effect and `node:` imports (browser bundles import them)

@@ -1,16 +1,16 @@
 # Effect Migration Plan — server, core, client, CLI
 
-Status: proposal · Target: Effect 4.0.4 across the monorepo
+Status: completed — phases 0–5 shipped as a stacked PR set (merge bottom-up); phase 6 deferred by choice (the CLI's
+signal store needs its own design pass, which is not an Effect concern); phase 7 (cleanup) completes the migration.
 
-Effect currently runs only in `packages/web`. This plan makes it the standard runtime for async work, concurrency,
-lifecycle, and error handling in **all four remaining packages** — `server`, `relay` core, `client`, and `cli` — without
-touching the wire protocol or the browser-pure modules that web imports.
+Effect ran only in `packages/web` before this effort. The plan made it the standard runtime for async work, concurrency,
+lifecycle, and error handling in `server`, `relay` core, and `client` — without touching the wire protocol or the
+browser-pure modules that web imports.
 
-The migration is deliberately sequenced so that every phase is independently shippable and revertable. Phases 5–6
-(client, CLI) sit behind a decision gate: they proceed only if the server/core work proves the pattern out in
-production use.
+The migration was deliberately sequenced so that every phase is independently shippable and revertable. Phases 5–6
+(client, CLI) sat behind a decision gate; phase 5 landed, phase 6 was consciously postponed.
 
-## Current state
+## Current state (pre-migration snapshot)
 
 | Package    | Effect today                                                    | Role                                           |
 | ---------- | --------------------------------------------------------------- | ---------------------------------------------- |
@@ -44,7 +44,7 @@ Pain points that motivate the refactor, in order of value:
 - **Exit-code contract**: EADDRINUSE ⇒ exit code 75, relied on by the CLI supervisor. Phase 4 must preserve it
   explicitly (inspect `ServeError.cause`).
 
-## Target architecture
+## Target architecture (as shipped)
 
 - **One `ManagedRuntime` per long-lived process.** Web already has one. Server gets one; CLI gets one in phase 6.
   `relay` core and `client` are libraries: they *expose* Effects/Streams/Layers but never own or run a runtime.
@@ -62,27 +62,22 @@ Pain points that motivate the refactor, in order of value:
 - **Error handling**: tagged errors at every boundary (`Data.TaggedError`), mapped once per interface — router →
   HTTP status, runner → `run_finished` reason, CLI → inline error.
 
-## Testing strategy — temporary scaffolding
+## Testing strategy
 
-The repo deliberately carries no tests. This migration reintroduces tests as **scaffolding**, not permanent coverage:
+The migration produced a small, behavior-first suite that is now **permanent coverage** (the retention review is
+recorded in the decisions log). The policy going forward:
 
-- **TDD order per module**: characterization tests first (they must pass against the *current* implementation), then
-  the refactor. New behavior gets red→green tests first.
-- **Temporary by default**: every test file starts with `// TEMP(effect-migration): remove after phase N` and lives in
-  `packages/<pkg>/test/` so a phase's scaffolding can be deleted as one directory. A phase may nominate individual
-  tests for retention only with a one-line justification in its PR ("guards non-obvious lifecycle semantics"). Do not
-  keep tests that restate implementation details, snapshots of display formatting, or pure helper unit tests — that was
-  the noise that got removed before.
-- **Behavior over structure**: black-box HTTP tests via `handleRequest` (this signature can be preserved even after the
-  platform migration is internal, via a web-handler adapter) and layer-level tests for `RunManager`/agent semantics.
-  Later phases can use `NodeHttpServer.layerTest` (ephemeral port + Fetch client) for end-to-end tests.
-- **Fakes over mocks**: scripted fake provider (`stream()` yields canned chunks), in-memory session store, `TestClock`
-  so retry/backoff tests run instantly. `@effect/vitest@4.0.4` provides `it.effect`/`it.layer`.
-- **Small surface**: a phase keeps at most a handful of test files. Coverage targets: run conflict/cancel, approval
-  allow/always/deny/deny-on-end, retry classification, stream timeout, loop detection, auth gate, SPA fallback vs API
-  404, EADDRINUSE exit.
-- **Phase exit smoke**: because the suite is intentionally thin, each phase ends with a manual smoke of `pnpm relay`
-  (TUI send/approve/cancel), `pnpm relay web` (stream reconnect), and `pnpm relay stop/status`.
+- **Behavior over structure**: black-box HTTP tests via the `handleRequest` adapter, layer-level tests for
+  `RunManager`/agent semantics, and pin tests for the shared client service layer. No snapshot tests, no tests that
+  restate implementation details or pure helpers — that was the noise that was removed in this repo's history.
+- **Fakes over mocks**: scripted `Stream` providers, in-memory session stores, `TestClock` so backoff and the stream
+  timeout are proven on virtual time.
+- **Small surface**: 32 tests across five files under `packages/*/test/`, covering run conflict/cancel, approvals
+  (allow/always/deny/deny-on-cancel), run snapshots and late subscribers, retry classification, stream timeout, loop
+  detection, store DDL order, the auth gate, CSRF, SPA precedence, SSE streaming, and client error mapping.
+- **CI**: `.github/workflows/ci.yml` runs `pnpm check`, `pnpm exec vp test`, and `pnpm build`.
+- **Manual smoke** after risky changes: `pnpm relay` (TUI send/approve/cancel), `pnpm relay web`, and
+  `pnpm relay stop/status`.
 
 ## Phases at a glance
 
@@ -95,7 +90,7 @@ The repo deliberately carries no tests. This migration reintroduces tests as **s
 | 3.5 | Effect-native store interfaces   | relay + server | `SessionStore`/auth stores speak `Effect`, promise bridges deleted | no promise facades in server paths                        |
 | 4 | HTTP → effect/http + platform-node | server         | `HttpRouter`, SSE as stream, `HttpStaticServer` (spa), state file | route/status parity, exit 75 preserved, adapter deleted   |
 | 5 | Client Effect layer                | client + web   | move web's `Api`/`SessionStream` into client, dedupe web          | web unchanged visually, CLI can adopt services            |
-| 6 | CLI runtime                        | cli            | `ManagedRuntime` for data layer, fibers for SSE/approvals         | TUI behavior unchanged, bundle builds                     |
+| 6 | CLI runtime (deferred)             | cli            | `ManagedRuntime` for data layer, fibers for SSE/approvals         | TUI behavior unchanged, bundle builds                     |
 | 7 | Cleanup & standardize              | all            | prune scaffolding, AGENTS.md boundaries, delete dead docs         | `pnpm build`, `pnpm check`, smoke flows green             |
 
 ---
@@ -240,7 +235,11 @@ serving, JSON API 404s, the state file, and the exit-75 bind conflict.
 Exit (met): web type-checks and builds with behavior unchanged (same client, same layer semantics); the shared layer is
 exercised under Node in the suite.
 
-### Phase 6 — CLI on Effect
+### Phase 6 — CLI on Effect (deferred by choice)
+
+> **Deferred:** the CLI's state is signal-based and predates this migration; reworking it is its own design effort, not
+> an Effect one. The shared `@vvtxn/client/services.ts` layer is ready for adoption whenever that work happens. The
+> bullets below are the intake sketch, kept for reference.
 
 - One `ManagedRuntime` for the CLI's async layer: REST calls, SSE consumption via fibers (interruption replaces manual
   abort handling), approval round-trips via `Deferred`.
@@ -250,27 +249,25 @@ exercised under Node in the suite.
   UX and churn flat.
 - Watch the bundled size (`vp pack`); verify tree-shaking and startup latency after adding Effect.
 
-Exit: `pnpm relay` smoke matches current behavior; bundle size delta reviewed.
+### Phase 7 — Cleanup & standardize — as shipped
 
-### Phase 7 — Cleanup & standardize
-
-- Prune scaffolding per the testing policy (delete phases' `test/` folders unless individually justified).
-- Update `AGENTS.md` in each package with the Effect boundary rules:
-  - Effect is the runtime for asynchronous/concurrent/lifecycle code in server, core (node-side), client's Effect
-    layer, and CLI's async layer.
-  - Protocol types, the raw transport, `display.ts`/`theme.ts`/`fonts.ts`, and the CLI renderer stay Effect-free.
-  - One `ManagedRuntime` per process; libraries expose Effects, hosts run them.
-- Retire stale comments ("Effect-ready boundary", promise-based approval notes) and delete the migration branches'
-  leftovers.
+- Pruned the scaffolding framing: the behavioral core of the suite survives as permanent coverage (decision log item
+  3). TEMP markers and delete-at-phase-exit wording are gone, CI naming is neutral, and a review of all 32 tests found
+  none that qualify as noise — each pins a behavioral seam.
+- AGENTS.md boundary rules landed in the root file (**Effect Runtime Boundaries**) and per package: server
+  (effect/http + fibers concepts), relay core and api (stream-based loop, Effect tool/store contracts, `ProviderError`
+  classification), client (service layer + tests), web (shared-layer references).
+- Retired stale comments: "phase N" markers in `services.ts`/`run.ts`, references to the deleted node:http adapter and
+  `static.ts`, and the old "Effect-ready boundary" phrasing.
 
 ## Risks & mitigations
 
 | Risk                                                   | Mitigation                                                                                                                 |
 | ------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------- |
 | `effect/http` + platform are marked `@stability unstable` | Pin exact 4.0.4 versions; keep platform usage behind thin internal wrappers (`http/app.ts`) so API churn is localized      |
-| Thin test suite (temporary by policy)                  | High-leverage tests only + manual smoke per phase; atomic phases; each phase is one revertable PR                          |
+| Thin test suite (by design)                            | Behavior-first tests at the seams + CI + manual smoke; atomic phases; each phase is one revertable PR                     |
 | Browser purity regression (Effect leaks into web)      | Keep the boundary rule in AGENTS.md; optionally add a check script that walks imports of the three browser-pure entrypoints |
-| CLI bundle growth / startup latency                    | Measured in phase 6 before accepting; keep Effect out of the render path                                                   |
+| CLI bundle growth / startup latency                    | Measured when phase 6 is taken up; keep Effect out of the render path                                                      |
 | EADDRINUSE/exit-75 semantics lost in platform move     | Explicit test in phase 4; CLI supervisor behavior documented as an exit criterion                                          |
 | Scope creep (effect/ai, effect/cli, effect/rpc, …)     | Non-goals below; revisit only after phase 7                                                                                |
 
@@ -287,9 +284,12 @@ Exit: `pnpm relay` smoke matches current behavior; bundle size delta reviewed.
 1. **`SessionStore` becomes Effect-native all the way down** (decided; shipped in phase 3.5): the DB leaf is wrapped
    once with `Effect.tryPromise` at the adapter, and every interface above it speaks `Effect`. No mixed Promise/Effect
    store contracts.
-2. **CLI timing** (decided): phase 6 starts only after the client (phase 5) and the server have soaked in real use.
-3. **Test retention** (open): default delete-at-phase-exit; revisit at phase 7 whether any RunManager lifecycle
-   behaviors deserve permanent guards.
+2. **CLI timing** (decided, revised): phase 6 is deferred beyond this migration. The CLI's TUI state is signal-based;
+   reworking that store is a separate design effort, not an Effect concern. The shared client service layer is ready
+   when it happens.
+3. **Test retention** (decided at phase 7): the behavioral core stays as permanent coverage — all 32 tests across the
+   five suites, reviewed individually; none restate implementation details. Scaffolding framing and TEMP markers are
+   removed. New tests follow the same behavior-first, no-noise bar.
 
 ## Conventions for each phase
 
@@ -311,6 +311,9 @@ merge lands. Merge bottom-up:
 | 3.5     | `refactor/effect-phase-3.5-stores`    | #75  |
 | 4       | `refactor/effect-phase-4-http`        | #76  |
 | 5       | `refactor/effect-phase-5-client-layer`| #77  |
+| 7       | `chore/effect-phase-7-cleanup`        | #79  |
+
+(Phase 6 is deferred; see the decisions log.)
 
 Validation per merge: `pnpm install && pnpm check && pnpm exec vp test`, plus the phase's manual smoke (each PR lists
 one). CI runs for a PR once it targets `main`, so each stacked PR gets the full check/test/build job as it retargets

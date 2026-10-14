@@ -1,6 +1,5 @@
-// TEMP(effect-migration): shared fakes for the phase-0 characterization tests.
-// Kept in a dedicated `test/` folder so the suite deletes as one directory —
-// see docs/effect-migration.md ("Testing strategy").
+// Shared fakes for the server suites: in-memory stores and a scripted Stream
+// provider.
 
 import { Effect, Stream } from "effect";
 import type { CompletionRequest, CompletionResponse, LLMProvider, StreamChunk, Usage } from "@vvtxn/relay/api/types.ts";

@@ -1,5 +1,5 @@
-// TEMP(effect-migration): layer composition test for phase 1 (server
-// services as Layers). Remove after phase 2/4 — see docs/effect-migration.md.
+// Guards the server composition layer: sequential store acquisition and the
+// users-before-auth_sessions DDL order.
 
 import { describe, expect, it } from "vite-plus/test";
 import { Effect, Layer } from "effect";

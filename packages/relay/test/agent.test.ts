@@ -1,6 +1,5 @@
-// TEMP(effect-migration): behavior tests for the agent-loop rewrite (phase 3,
-// Stream + Schedule + TestClock). Kept while the core runtime settles — see
-// docs/effect-migration.md ("Testing strategy").
+// Behavior tests for the agent loop: retry/backoff and the stream timeout run on
+// virtual time; tool ordering runs on the live clock.
 //
 // `TestEnv` mirrors what @effect/vitest's `it.effect` provides (a TestClock
 // layer); @effect/vitest itself cannot be used here because `vp test` runs a

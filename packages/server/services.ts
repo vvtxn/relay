@@ -55,8 +55,7 @@ const configLayer = (config: ServerConfig) => Layer.succeed(Config, config);
 
 /**
  * The shared database client. The Turso client's surface is only `execute` /
- * `batch` (no close), so this layer is unscoped; scope-owned resources arrive
- * with the HTTP server in phase 4.
+ * `batch` (no close), so this layer is unscoped.
  */
 const databaseLayer = Layer.effect(
 	Database,
@@ -136,9 +135,8 @@ export const serverLayer = (config: ServerConfig) => {
 };
 
 /**
- * Materializes the {@link ServerServices} bundle for the current
- * (promise-based) handlers. Phase 2+ consumes the tags directly; phase 4
- * replaces this facade with a process runtime owned by `main.ts`.
+ * Materializes the {@link ServerServices} bundle once for the process;
+ * `main.ts` composes it into the HTTP application.
  */
 export async function createServices(config: ServerConfig): Promise<ServerServices> {
 	return await Effect.runPromise(

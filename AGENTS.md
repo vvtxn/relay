@@ -9,7 +9,7 @@ Terminal-based coding agent with custom TUI framework.
 │   ├── relay/              # Core agent library (@vvtxn/relay)
 │   │   ├── api/            # LLM provider types and CompletionsProvider
 │   │   └── core/           # Agent loop, runner, tools, sessions, context, display
-│   ├── client/             # Wire protocol + RelayClient (@vvtxn/client)
+│   ├── client/             # Wire protocol + RelayClient + Effect service layer (@vvtxn/client)
 │   ├── server/             # HTTP + SSE server hosting the runtime (@vvtxn/server)
 │   ├── cli/                # TUI client + serve subcommand (@vvtxn/cli)
 │   │   ├── agent/          # App entry point, config, components, hooks
@@ -38,6 +38,25 @@ All clients (CLI, web) talk to the server over the shared protocol in `packages/
 in the server. `packages/relay` powers the server and provides display + theme utilities to clients. Both clients fold
 `ServerEvent`s with the same reducer (`packages/client/session-state.ts`).
 
+## Effect Runtime Boundaries
+
+Effect (v4) is the runtime for asynchronous, concurrent, and resourceful code. The wire protocol and browser-pure
+modules stay Effect-free on purpose.
+
+- **One runtime per long-lived process**: the web app owns a `ManagedRuntime`
+  (`packages/web/src/api/runtime.ts`); the server composes its Layers in `main.ts` (`HttpRouter.serve` +
+  `Layer.launch`). Libraries (`@vvtxn/relay`, `@vvtxn/client`) expose Effects, Layers, and Streams — they never run
+  them.
+- **Where Effect lives**: `packages/server` (routing, handlers, RunManager, stores), node-side `packages/relay` (agent
+  loop, tools, store contracts), `packages/web`, and `packages/client/services.ts` (the Effect layer over the promise
+  transport).
+- **Where it must not**: `@vvtxn/client/protocol.ts`, the `RelayClient`/SSE transport, the `session-state.ts` reducer,
+  and the browser-pure relay modules (`core/display.ts`, `core/theme.ts`, `core/fonts.ts`). The web bundle imports
+  those directly, so they must never gain an `effect` or `node:` dependency.
+- The CLI's async layer is still being designed; its TUI signal store is independent of Effect.
+- Prefer `Effect.gen`, `Ref`, `Deferred`, `Queue`, `Stream`, and `Schedule` over hand-rolled promise/callback
+  bookkeeping in server-side code.
+
 ## Build/Run Commands
 
 - **Format code**: `pnpm fmt`
@@ -61,8 +80,9 @@ After concluding that a task is complete, always run these commands in order:
 
 1. `pnpm exec vp fmt` — auto-format all code
 2. `pnpm check` — format, lint, and type-check (Oxfmt, Oxlint, tsgo via Vite+)
+3. `pnpm exec vp test` — run the test suites (`packages/*/test`)
 
-If any command fails, fix the issues and re-run until both pass. Do not report the task as done until they pass
+If any command fails, fix the issues and re-run until they pass cleanly. Do not report the task as done until they pass
 cleanly.
 
 ### Type Checking

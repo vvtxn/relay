@@ -47,7 +47,7 @@ interface SessionRecord {
 /**
  * Owns the active agent runs: one per session at a time.
  *
- * Structured concurrency (phase 2 of the Effect migration):
+ * Structured concurrency:
  * - One fiber per run; `cancel` interrupts it and the finish reason comes from
  *   the run's `Exit` (`completed` / `error` / `cancelled`)
  * - Draft state lives in a `Ref` owned by the run
@@ -56,8 +56,8 @@ interface SessionRecord {
  * - SSE fan-out goes through per-subscriber `Queue`s, registered synchronously
  *   so no event can slip between a subscriber's snapshot and its subscription
  *
- * The agent loop itself is the `run()` stream (phase 3); the run fiber consumes
- * it and mirrors each event onto the draft state and subscribers.
+ * The agent loop itself is the `run()` stream; the run fiber consumes it and
+ * mirrors each event onto the draft state and subscribers.
  */
 export class RunManager {
 	private readonly config: ServerConfig;

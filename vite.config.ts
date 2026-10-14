@@ -8,8 +8,7 @@ import { defineConfig } from "vite-plus";
  *   double quotes, semicolons.
  */
 export default defineConfig({
-	// TEMP(effect-migration): characterization tests for the Effect migration
-	// (phase 0). Removed/refined as phases complete — see docs/effect-migration.md.
+	// Vitest runs through the Vite+ toolchain; suites live in packages/*/test.
 	test: {
 		include: ["packages/*/test/**/*.test.ts"],
 		environment: "node",
