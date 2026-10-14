@@ -2,12 +2,14 @@
 // (phase 4, effect/http + @effect/platform-node). Remove after phase 4 — see
 // docs/effect-migration.md ("Testing strategy").
 
-import { mkdtemp } from "node:fs/promises";
+import { Effect } from "effect";
+import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vite-plus/test";
 import type { AuthenticatedUser } from "@vvtxn/relay/core/index.ts";
 import type { LLMProvider } from "@vvtxn/relay/api/types.ts";
+import type { ServerConfig } from "../config.ts";
 import { handleRequest } from "../router.ts";
 import { RunManager } from "../run.ts";
 import type { ServerServices } from "../services.ts";
@@ -26,19 +28,19 @@ const USER_ID = "user-1";
 const TEST_TOKEN = "test-session-token";
 const BASE_URL = "http://127.0.0.1:7433";
 
-async function makeServices(provider: LLMProvider) {
+async function makeServices(provider: LLMProvider, overrides: Partial<ServerConfig> = {}) {
 	const cwd = await mkdtemp(join(tmpdir(), "relay-router-test-"));
-	const config = makeConfig(cwd);
+	const config = makeConfig(cwd, overrides);
 	const store = new MemorySessionStore();
-	const runs = new RunManager({ config, sessionStore: store, providerFor: async () => provider });
+	const runs = new RunManager({ config, providerFor: () => Effect.succeed(provider) });
 	const user: AuthenticatedUser = { id: USER_ID, name: "Test User", provider: "github" };
 
 	const services = {
 		config,
 		db: {},
-		userStore: { getById: async (id: string) => (id === USER_ID ? user : null) },
-		userSettings: { getApiKey: async () => "fake-key" },
-		authSessions: { resolve: async (token: string) => (token === TEST_TOKEN ? { userId: USER_ID } : null) },
+		userStore: { getById: (id: string) => Effect.succeed(id === USER_ID ? user : null) },
+		userSettings: { getApiKey: () => Effect.succeed("fake-key") },
+		authSessions: { resolve: (token: string) => Effect.succeed(token === TEST_TOKEN ? { userId: USER_ID } : null) },
 		sessionStore: store,
 		runs,
 	} as unknown as ServerServices;
@@ -49,11 +51,12 @@ async function makeServices(provider: LLMProvider) {
 function apiRequest(
 	method: string,
 	path: string,
-	options: { token?: string; origin?: string; body?: unknown } = {},
+	options: { token?: string; origin?: string; body?: unknown; accept?: string } = {},
 ): Request {
 	const headers: Record<string, string> = {};
 	if (options.token) headers.authorization = `Bearer ${options.token}`;
 	if (options.origin) headers.origin = options.origin;
+	if (options.accept) headers.accept = options.accept;
 	let body: string | undefined;
 	if (options.body !== undefined) {
 		headers["content-type"] = "application/json";
@@ -174,5 +177,61 @@ describe("handleRequest", () => {
 
 		runs.cancel(id);
 		await waitFor(() => !runs.isRunning(id));
+	});
+
+	it("streams SSE frames with a catch-up run_state snapshot", async () => {
+		const provider = new ScriptedProvider([hangUntilAborted()]);
+		const { services, runs } = await makeServices(provider);
+
+		const created = await handleRequest(
+			services,
+			apiRequest("POST", "/api/sessions", { token: TEST_TOKEN, body: {} }),
+		);
+		const { id } = (await created.json()) as { id: string };
+		await handleRequest(services, apiRequest("GET", `/api/sessions/${id}`, { token: TEST_TOKEN }));
+		runs.startMessage(id, "hold the run open");
+		await waitFor(() => runs.isRunning(id));
+
+		const response = await handleRequest(
+			services,
+			apiRequest("GET", `/api/sessions/${id}/events`, { token: TEST_TOKEN }),
+		);
+		expect(response.status).toBe(200);
+		expect(response.headers.get("content-type")).toContain("text/event-stream");
+
+		const reader = response.body?.getReader();
+		expect(reader).toBeDefined();
+		const decoder = new TextDecoder();
+		let text = "";
+		const deadline = Date.now() + 3000;
+		while (!text.includes('"type":"run_state"') && Date.now() < deadline) {
+			const { value, done } = await reader!.read();
+			if (done) break;
+			text += decoder.decode(value, { stream: true });
+		}
+		await reader!.cancel();
+
+		expect(text).toContain(": connected");
+		expect(text).toContain('"type":"run_state"');
+
+		runs.cancel(id);
+		await waitFor(() => !runs.isRunning(id));
+	});
+
+	it("serves the SPA for non-API GETs and keeps API 404s as JSON", async () => {
+		const staticDir = await mkdtemp(join(tmpdir(), "relay-static-test-"));
+		await writeFile(join(staticDir, "index.html"), "<html>spa shell</html>");
+		const { services } = await makeServices(new ScriptedProvider([]), { staticDir });
+
+		const spa = await handleRequest(services, apiRequest("GET", "/some/client/route", { accept: "text/html" }));
+		expect(spa.status).toBe(200);
+		expect(await spa.text()).toContain("spa shell");
+
+		const apiMissing = await handleRequest(services, apiRequest("GET", "/api/nope", { token: TEST_TOKEN }));
+		expect(apiMissing.status).toBe(404);
+		expect(await apiMissing.json()).toEqual({ error: "Not found" });
+
+		const wrongMethod = await handleRequest(services, apiRequest("POST", "/some/client/route"));
+		expect(wrongMethod.status).toBe(404);
 	});
 });

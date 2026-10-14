@@ -1,15 +1,11 @@
-import { Cause, Deferred, Effect, Exit, Fiber, Option, Queue, Ref, Result, Stream } from "effect";
-import type { LLMProvider, Message, Usage } from "@vvtxn/relay/api/types.ts";
+import { Cause, Deferred, Effect, Exit, Fiber, Queue, Ref, Stream } from "effect";
+import type { LLMProvider } from "@vvtxn/relay/api/types.ts";
 import { createToolRegistry, createWorkspaceTools, withApproval } from "@vvtxn/relay/core/tools/index.ts";
 import { summarizeToolArgs } from "@vvtxn/relay/core/display.ts";
 import { expandMentions, validateWorkspacePath } from "@vvtxn/relay/core/workspace.ts";
-import {
-	entriesToMessages,
-	type SessionHandle,
-	type SessionStore,
-	stripAttachedContext,
-} from "@vvtxn/relay/core/sessions/index.ts";
-import { type RunnerCallbacks, runAgentLoop } from "@vvtxn/relay/core/runner.ts";
+import { entriesToMessages, type SessionHandle, stripAttachedContext } from "@vvtxn/relay/core/sessions/index.ts";
+import { type AgentEvent, run } from "@vvtxn/relay/core/agent.ts";
+import { attempt, causeMessage, type StoreError } from "@vvtxn/relay/core/effect.ts";
 import { SYSTEM_PROMPT } from "@vvtxn/relay/core/system-prompt.ts";
 import type { ApprovalDecision, PendingApprovalInfo, RunStateEvent, ServerEvent } from "@vvtxn/client/protocol.ts";
 import type { ServerConfig } from "./config.ts";
@@ -48,27 +44,6 @@ interface SessionRecord {
 	run: ActiveRun | null;
 }
 
-/** Wraps a promise as an Effect, normalizing thrown values to `Error`. */
-function attempt<A>(f: () => Promise<A>): Effect.Effect<A, Error> {
-	return Effect.tryPromise({
-		try: f,
-		catch: (error) => (error instanceof Error ? error : new Error(String(error))),
-	});
-}
-
-/** Best-effort human-readable message for a failed run. */
-function causeMessage(cause: Cause.Cause<unknown>): string {
-	const failure = Cause.findErrorOption(cause);
-	if (Option.isSome(failure)) {
-		return failure.value instanceof Error ? failure.value.message : String(failure.value);
-	}
-	const defect = Cause.findDefect(cause);
-	if (Result.isSuccess(defect)) {
-		return defect.success instanceof Error ? defect.success.message : String(defect.success);
-	}
-	return Cause.pretty(cause);
-}
-
 /**
  * Owns the active agent runs: one per session at a time.
  *
@@ -81,23 +56,20 @@ function causeMessage(cause: Cause.Cause<unknown>): string {
  * - SSE fan-out goes through per-subscriber `Queue`s, registered synchronously
  *   so no event can slip between a subscriber's snapshot and its subscription
  *
- * Everything the run executes is a `runAgentLoop` promise for now (phase 3
- * converts the loop itself to a `Stream`); the fiber only supervises it.
+ * The agent loop itself is the `run()` stream (phase 3); the run fiber consumes
+ * it and mirrors each event onto the draft state and subscribers.
  */
 export class RunManager {
 	private readonly config: ServerConfig;
-	private readonly sessionStore: SessionStore;
-	private readonly providerFor: (ownerId: string) => Promise<LLMProvider | null>;
+	private readonly providerFor: (ownerId: string) => Effect.Effect<LLMProvider | null, StoreError>;
 
 	private readonly sessions = new Map<string, SessionRecord>();
 
 	constructor(options: {
 		config: ServerConfig;
-		sessionStore: SessionStore;
-		providerFor: (ownerId: string) => Promise<LLMProvider | null>;
+		providerFor: (ownerId: string) => Effect.Effect<LLMProvider | null, StoreError>;
 	}) {
 		this.config = options.config;
-		this.sessionStore = options.sessionStore;
 		this.providerFor = options.providerFor;
 	}
 
@@ -128,6 +100,24 @@ export class RunManager {
 			void Effect.runPromise(Fiber.interrupt(fiber)).catch(() => {});
 			this.releaseIfIdle(sessionId);
 		};
+	}
+
+	/**
+	 * Subscribes as a `Stream` of events, for Effect-native consumers (the SSE
+	 * response). The queue is registered synchronously; the subscription is
+	 * released when the stream ends or is interrupted.
+	 */
+	subscribeStream(sessionId: string): Stream.Stream<ServerEvent> {
+		const session = this.ensureSession(sessionId);
+		const queue = Effect.runSync(Queue.unbounded<ServerEvent>());
+		session.subscribers.add(queue);
+		return Stream.fromQueue(queue).pipe(
+			Stream.ensuring(
+				Effect.sync(() => {
+					if (session.subscribers.delete(queue)) this.releaseIfIdle(sessionId);
+				}),
+			),
+		);
 	}
 
 	/** Drop the session record once it is idle and unwatched. */
@@ -247,95 +237,10 @@ export class RunManager {
 		const providerFor = this.providerFor;
 		const getSession = () => this.sessions.get(sessionId);
 		const publish = (event: ServerEvent): void => this.publish(sessionId, event);
-		const updateRun = (f: (state: RunState) => RunState): void => {
-			Effect.runSync(Ref.update(runRef, f));
-		};
 		const requestApproval = (tool: { definition: { function: { name: string } } }, input: unknown) =>
 			this.requestApproval(sessionId, runRef, tool, input);
-
-		const callbacks: RunnerCallbacks = {
-			onTextDelta: (delta) => {
-				updateRun((state) => ({ ...state, draftText: state.draftText + delta }));
-				publish({ type: "text_delta", content: delta });
-			},
-			onToolCallStart: (id, name) => {
-				publish({ type: "tool_call_start", id, name });
-			},
-			onToolCallArgsDelta: (id, args) => {
-				publish({ type: "tool_call_args_delta", id, args });
-			},
-			onToolCallEnd: (id, name, args) => {
-				updateRun((state) => {
-					const draftIndex = new Map(state.draftIndex);
-					draftIndex.set(id, state.draftToolCalls.length);
-					return { ...state, draftToolCalls: [...state.draftToolCalls, { id, name, args }], draftIndex };
-				});
-				publish({ type: "tool_call_end", id, name, args });
-			},
-			onToolResult: (id, result) => {
-				updateRun((state) => {
-					const at = state.draftIndex.get(id);
-					if (at === undefined || at >= state.draftToolCalls.length) return state;
-					const draftToolCalls = [...state.draftToolCalls];
-					const existing = draftToolCalls[at];
-					if (existing) draftToolCalls[at] = { ...existing, result };
-					return { ...state, draftToolCalls };
-				});
-				publish({ type: "tool_result", id, result });
-			},
-			onMessageComplete: (usage?: Usage) => {
-				const session = getSession();
-				if (usage && session) {
-					// `tokens` is the current context-window usage (this call's
-					// prompt + completion), not a running total: clients render it
-					// against the model's context limit. `cost` does accumulate.
-					session.tokens = usage.prompt_tokens + usage.completion_tokens;
-					if (usage.cost) session.cost += usage.cost;
-					session.handle?.setTokens(session.tokens);
-					session.handle?.setCost(session.cost);
-				}
-				publish({
-					type: "message_complete",
-					...(usage ? { usage } : {}),
-					tokens: session?.tokens ?? 0,
-					cost: session?.cost ?? 0,
-				});
-			},
-			onTurnComplete: async (assistantMessage: Message, toolResults: Message[]) => {
-				const handle = getSession()?.handle;
-				if (!handle) return;
-				await handle.append({
-					type: "message",
-					role: "assistant",
-					content: assistantMessage.content,
-					...(assistantMessage.tool_calls?.length && { toolCalls: assistantMessage.tool_calls }),
-				});
-				// Draft tool calls carry the full results (including isError and the diff),
-				// which the LLM-facing tool messages don't preserve.
-				const results = Ref.getUnsafe(runRef).draftToolCalls;
-				const resultById = new Map(results.map((tc) => [tc.id, tc.result]));
-				for (const tr of toolResults) {
-					const toolCallId = tr.tool_call_id;
-					const toolName = tr.name;
-					if (!toolCallId || !toolName) continue;
-					const result = resultById.get(toolCallId);
-					await handle.append({
-						type: "tool_result",
-						toolCallId,
-						toolName,
-						content: tr.content ?? "",
-						...(result?.isError ? { isError: true } : {}),
-						...(result?.meta?.diff ? { diff: result.meta.diff } : {}),
-					});
-				}
-				publish({ type: "turn_complete" });
-			},
-			onError: (error) => {
-				if (abort.signal.aborted) return;
-				updateRun((state) => ({ ...state, hadError: true }));
-				publish({ type: "error", message: error.message });
-			},
-		};
+		const handleEvent = (event: AgentEvent): Effect.Effect<void, Error> =>
+			this.handleAgentEvent(sessionId, runRef, abort, event);
 
 		const runLoop = Effect.gen(function* () {
 			const session = getSession();
@@ -346,7 +251,7 @@ export class RunManager {
 
 			// Build the provider from the owner's stored key. Per-user keys live in
 			// the database, so a run without one is a configuration error.
-			const provider = yield* attempt(() => providerFor(session.ownerId ?? ""));
+			const provider = yield* providerFor(session.ownerId ?? "");
 			if (!provider) {
 				return yield* Effect.fail(new Error("No API key configured. Add one in Settings."));
 			}
@@ -362,9 +267,7 @@ export class RunManager {
 
 			// Expand @mentions against the session workspace, persist the stripped version
 			const expanded = yield* attempt(() => expandMentions(content, cwd));
-			yield* attempt(() =>
-				handle.append({ type: "message", role: "user", content: stripAttachedContext(expanded) }),
-			);
+			yield* handle.append({ type: "message", role: "user", content: stripAttachedContext(expanded) });
 			const messages = entriesToMessages(handle.getEntries());
 
 			// The LLM sees the expanded content for the latest user message
@@ -380,24 +283,23 @@ export class RunManager {
 				withApproval(createWorkspaceTools(cwd), (tool, input) => requestApproval(tool, input)),
 			);
 
-			yield* attempt(() =>
-				runAgentLoop(
-					messages,
-					{
-						provider,
-						tools,
-						model: config.model,
-						systemPrompt: SYSTEM_PROMPT,
-						temperature: config.temperature,
-						contextLimit: {
-							maxTokens: config.maxTokens,
-							preserveRecentTurns: config.preserveRecentTurns,
-						},
-						maxTokens: config.maxCompletionTokens,
-						signal: abort.signal,
+			// The agent loop is a Stream of events; the run fiber consumes it and
+			// mirrors each event onto the session draft state + SSE subscribers.
+			yield* Stream.runForEach(
+				run(messages, {
+					provider,
+					tools,
+					model: config.model,
+					systemPrompt: SYSTEM_PROMPT,
+					temperature: config.temperature,
+					contextLimit: {
+						maxTokens: config.maxTokens,
+						preserveRecentTurns: config.preserveRecentTurns,
 					},
-					callbacks,
-				),
+					maxTokens: config.maxCompletionTokens,
+					signal: abort.signal,
+				}),
+				handleEvent,
 			);
 
 			if (abort.signal.aborted) return "cancelled";
@@ -426,6 +328,123 @@ export class RunManager {
 		);
 	}
 
+	/** Mirrors one agent event onto the session draft state and SSE subscribers. */
+	private handleAgentEvent(
+		sessionId: string,
+		runRef: Ref.Ref<RunState>,
+		abort: AbortController,
+		event: AgentEvent,
+	): Effect.Effect<void, Error> {
+		const getSession = () => this.sessions.get(sessionId);
+		const publish = (serverEvent: ServerEvent): void => this.publish(sessionId, serverEvent);
+		const updateRun = (f: (state: RunState) => RunState): void => {
+			Effect.runSync(Ref.update(runRef, f));
+		};
+		return Effect.gen(function* () {
+			switch (event.type) {
+				case "text_delta": {
+					updateRun((state) => ({ ...state, draftText: state.draftText + event.content }));
+					publish({ type: "text_delta", content: event.content });
+					return;
+				}
+				case "tool_call_start": {
+					publish({ type: "tool_call_start", id: event.id, name: event.name });
+					return;
+				}
+				case "tool_call_args_delta": {
+					publish({ type: "tool_call_args_delta", id: event.id, args: event.args });
+					return;
+				}
+				case "tool_call_end": {
+					updateRun((state) => {
+						const draftIndex = new Map(state.draftIndex);
+						draftIndex.set(event.id, state.draftToolCalls.length);
+						return {
+							...state,
+							draftToolCalls: [
+								...state.draftToolCalls,
+								{ id: event.id, name: event.name, args: event.args },
+							],
+							draftIndex,
+						};
+					});
+					publish({ type: "tool_call_end", id: event.id, name: event.name, args: event.args });
+					return;
+				}
+				case "tool_result": {
+					updateRun((state) => {
+						const at = state.draftIndex.get(event.id);
+						if (at === undefined || at >= state.draftToolCalls.length) return state;
+						const draftToolCalls = [...state.draftToolCalls];
+						const existing = draftToolCalls[at];
+						if (existing) draftToolCalls[at] = { ...existing, result: event.result };
+						return { ...state, draftToolCalls };
+					});
+					publish({ type: "tool_result", id: event.id, result: event.result });
+					return;
+				}
+				case "message_complete": {
+					const session = getSession();
+					if (event.usage && session) {
+						// `tokens` is the current context-window usage (this call's
+						// prompt + completion), not a running total: clients render it
+						// against the model's context limit. `cost` does accumulate.
+						session.tokens = event.usage.prompt_tokens + event.usage.completion_tokens;
+						if (event.usage.cost) session.cost += event.usage.cost;
+						session.handle?.setTokens(session.tokens);
+						session.handle?.setCost(session.cost);
+					}
+					publish({
+						type: "message_complete",
+						...(event.usage ? { usage: event.usage } : {}),
+						tokens: session?.tokens ?? 0,
+						cost: session?.cost ?? 0,
+					});
+					return;
+				}
+				case "turn_complete": {
+					const handle = getSession()?.handle;
+					if (handle) {
+						yield* handle.append({
+							type: "message",
+							role: "assistant",
+							content: event.assistantMessage.content,
+							...(event.assistantMessage.tool_calls?.length && {
+								toolCalls: event.assistantMessage.tool_calls,
+							}),
+						});
+						// Draft tool calls carry the full results (including isError and the diff),
+						// which the LLM-facing tool messages don't preserve.
+						const results = Ref.getUnsafe(runRef).draftToolCalls;
+						const resultById = new Map(results.map((tc) => [tc.id, tc.result]));
+						for (const tr of event.toolResults) {
+							const toolCallId = tr.tool_call_id;
+							const toolName = tr.name;
+							if (!toolCallId || !toolName) continue;
+							const result = resultById.get(toolCallId);
+							yield* handle.append({
+								type: "tool_result",
+								toolCallId,
+								toolName,
+								content: tr.content ?? "",
+								...(result?.isError ? { isError: true } : {}),
+								...(result?.meta?.diff ? { diff: result.meta.diff } : {}),
+							});
+						}
+					}
+					publish({ type: "turn_complete" });
+					return;
+				}
+				case "error": {
+					if (abort.signal.aborted) return;
+					updateRun((state) => ({ ...state, hadError: true }));
+					publish({ type: "error", message: event.error.message });
+					return;
+				}
+			}
+		});
+	}
+
 	/**
 	 * Run teardown, guaranteed to execute on completion, failure, and
 	 * interruption: abort any in-flight provider call, deny still-pending
@@ -450,7 +469,7 @@ export class RunManager {
 			}
 			const handle = session.handle;
 			if (handle) {
-				yield* Effect.tryPromise(() => handle.flush()).pipe(Effect.catchCause(() => Effect.void));
+				yield* handle.flush().pipe(Effect.catchCause(() => Effect.void));
 			}
 			publish({ type: "run_finished", reason });
 			release();
@@ -484,22 +503,23 @@ export class RunManager {
 	}
 
 	/**
-	 * Ask the user for permission to run a side-effecting tool. The caller
-	 * (`withApproval`) still awaits a promise; it is fulfilled by a `Deferred`
-	 * that `resolveApproval` completes and that {@link finalizeRun} denies if
-	 * the run ends first.
+	 * Ask the user for permission to run a side-effecting tool. The wait is a
+	 * `Deferred` that `resolveApproval` completes and that {@link finalizeRun}
+	 * denies if the run ends first; because the wait sits inside the run fiber,
+	 * interruption cancels it automatically.
 	 */
 	private requestApproval(
 		sessionId: string,
 		runRef: Ref.Ref<RunState>,
 		tool: { definition: { function: { name: string } } },
 		input: unknown,
-	): Promise<boolean> {
+	): Effect.Effect<boolean> {
 		const name = tool.definition.function.name;
 		const session = this.sessions.get(sessionId);
-		if (session?.alwaysApproved.has(name)) return Promise.resolve(true);
-		if (session?.run?.abort.signal.aborted) return Promise.resolve(false);
+		if (session?.alwaysApproved.has(name)) return Effect.succeed(true);
+		if (session?.run?.abort.signal.aborted) return Effect.succeed(false);
 
+		const publish = (event: ServerEvent): void => this.publish(sessionId, event);
 		const deferred = Deferred.makeUnsafe<ApprovalDecision>();
 		const toolCallId = crypto.randomUUID();
 		const info: PendingApprovalInfo = {
@@ -508,16 +528,15 @@ export class RunManager {
 			summary: summarizeToolArgs(name, JSON.stringify(input)),
 		};
 
-		Effect.runSync(
-			Ref.update(runRef, (state) => {
+		return Effect.gen(function* () {
+			yield* Ref.update(runRef, (state) => {
 				const pendingApprovals = new Map(state.pendingApprovals);
 				pendingApprovals.set(toolCallId, { deferred, info });
 				return { ...state, pendingApprovals };
-			}),
-		);
-		this.publish(sessionId, { type: "approval_required", approval: info });
+			});
+			publish({ type: "approval_required", approval: info });
 
-		return Effect.runPromise(Deferred.await(deferred)).then((decision) => {
+			const decision = yield* Deferred.await(deferred);
 			if (decision === "always") session?.alwaysApproved.add(name);
 			return decision !== "deny";
 		});

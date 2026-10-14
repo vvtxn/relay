@@ -1,14 +1,15 @@
-export { createToolRegistry, defineTool, getDefinitions } from "./types.ts";
+export { createToolRegistry, defineTool, getDefinitions, ToolError } from "./types.ts";
 export type { Tool, ToolRegistry, ToolResult } from "./types.ts";
 export { type ApprovalHandler, type ApprovalOptions, withApproval } from "./approval.ts";
 
+import { Effect } from "effect";
 import { resolveRealWithinRoot } from "../workspace.ts";
 import { bashTool, createBashTool } from "./bash.ts";
 import { editFileTool } from "./edit.ts";
 import { grepTool } from "./grep.ts";
 import { readFileTool } from "./read.ts";
 import { writeFileTool } from "./write.ts";
-import type { Tool } from "./types.ts";
+import { toToolError, type Tool } from "./types.ts";
 
 /** All built-in tools. */
 export const defaultTools: Tool[] = [bashTool, readFileTool, writeFileTool, editFileTool, grepTool];
@@ -21,18 +22,22 @@ export const defaultTools: Tool[] = [bashTool, readFileTool, writeFileTool, edit
 function confinePathArg(tool: Tool, root: string): Tool {
 	return {
 		...tool,
-		execute: async (input) => {
-			const obj = (input ?? {}) as Record<string, unknown>;
-			const rel = typeof obj.path === "string" ? obj.path : ".";
-			const abs = await resolveRealWithinRoot(root, rel);
-			if (!abs) {
-				return {
-					content: `Path "${rel}" is outside the workspace. Use a path inside the workspace directory.`,
-					isError: true,
-				};
-			}
-			return await tool.execute({ ...obj, path: abs });
-		},
+		execute: (input) =>
+			Effect.gen(function* () {
+				const obj = (input ?? {}) as Record<string, unknown>;
+				const rel = typeof obj.path === "string" ? obj.path : ".";
+				const abs = yield* Effect.tryPromise({
+					try: () => resolveRealWithinRoot(root, rel),
+					catch: toToolError,
+				});
+				if (!abs) {
+					return {
+						content: `Path "${rel}" is outside the workspace. Use a path inside the workspace directory.`,
+						isError: true,
+					};
+				}
+				return yield* tool.execute({ ...obj, path: abs });
+			}),
 	};
 }
 

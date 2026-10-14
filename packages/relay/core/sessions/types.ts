@@ -1,4 +1,6 @@
+import type { Effect } from "effect";
 import type { ToolCall } from "#/api/types.ts";
+import type { StoreError } from "../effect.ts";
 
 // ---------------------------------------------------------------------------
 // Session header — first line of every .jsonl file
@@ -77,24 +79,27 @@ export interface SessionScope {
 	cwd: string;
 }
 
-/** Storage-backed session handle shared by filesystem and database stores. */
+/**
+ * Storage-backed session handle shared by filesystem and database stores.
+ * Async operations are Effects; reads of in-memory state stay synchronous.
+ */
 export interface SessionHandle {
-	append(entry: NewEntry): Promise<string>;
+	append(entry: NewEntry): Effect.Effect<string, StoreError>;
 	getEntries(): Entry[];
 	getHeader(): SessionHeader;
 	getTokens(): number;
 	setTokens(tokens: number): void;
 	getCost(): number;
 	setCost(cost: number): void;
-	flush(): Promise<void>;
+	flush(): Effect.Effect<void, StoreError>;
 }
 
 /** Minimal store contract required by frontends to manage sessions. */
 export interface SessionStore {
 	create(scope: SessionScope): SessionHandle;
-	continueRecent(scope: SessionScope): Promise<SessionHandle | null>;
-	open(reference: string, ownerId: string): Promise<SessionHandle>;
-	listSummaries(scope: SessionScope): Promise<SessionSummary[]>;
+	continueRecent(scope: SessionScope): Effect.Effect<SessionHandle | null, StoreError>;
+	open(reference: string, ownerId: string): Effect.Effect<SessionHandle, StoreError>;
+	listSummaries(scope: SessionScope): Effect.Effect<SessionSummary[], StoreError>;
 }
 
 export const CURRENT_VERSION = 1;

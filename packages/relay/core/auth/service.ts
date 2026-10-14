@@ -1,3 +1,5 @@
+import { Effect } from "effect";
+import { attempt, type StoreError } from "../effect.ts";
 import type { AuthenticatedUser, AuthProvider, UserStore } from "./types.ts";
 
 /**
@@ -11,19 +13,21 @@ import type { AuthenticatedUser, AuthProvider, UserStore } from "./types.ts";
  *
  * Empty strings are treated as missing so callers never render a blank name.
  */
-export async function authenticate<Input>(
+export function authenticate<Input>(
 	provider: AuthProvider<Input>,
 	input: Input,
 	users: UserStore,
-): Promise<AuthenticatedUser> {
-	const identity = await provider.authenticate(input);
-	const user = await users.resolve(identity);
-	const avatarUrl = user.avatarUrl || identity.avatarUrl;
-	const name = user.name || identity.name || identity.email || identity.subject;
-	return {
-		...user,
-		...(name ? { name } : {}),
-		provider: identity.provider,
-		...(avatarUrl ? { avatarUrl } : {}),
-	};
+): Effect.Effect<AuthenticatedUser, Error | StoreError> {
+	return Effect.gen(function* () {
+		const identity = yield* attempt(() => provider.authenticate(input));
+		const user = yield* users.resolve(identity);
+		const avatarUrl = user.avatarUrl || identity.avatarUrl;
+		const name = user.name || identity.name || identity.email || identity.subject;
+		return {
+			...user,
+			...(name ? { name } : {}),
+			provider: identity.provider,
+			...(avatarUrl ? { avatarUrl } : {}),
+		};
+	});
 }

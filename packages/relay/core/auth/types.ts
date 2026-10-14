@@ -1,3 +1,6 @@
+import type { Effect } from "effect";
+import type { StoreError } from "../effect.ts";
+
 /** A stable identity supplied by an authentication provider. */
 export interface AuthIdentity {
 	provider: string;
@@ -27,10 +30,10 @@ export interface AuthProvider<Input = void> {
 
 /** Resolves an external identity to an application user. */
 export interface UserStore {
-	resolve(identity: AuthIdentity): Promise<AuthenticatedUser>;
+	resolve(identity: AuthIdentity): Effect.Effect<AuthenticatedUser, StoreError>;
 }
 
 /** Looks up an application user by internal id (used to restore sessions). */
 export interface UserDirectory {
-	getById(id: string): Promise<AuthenticatedUser | null>;
+	getById(id: string): Effect.Effect<AuthenticatedUser | null, StoreError>;
 }

@@ -1,3 +1,5 @@
+import type { Effect } from "effect";
+import { storeEffect, type StoreError } from "../effect.ts";
 import { SessionManager } from "./manager.ts";
 import type { SessionHandle, SessionScope, SessionStore, SessionSummary } from "./types.ts";
 
@@ -13,15 +15,15 @@ export class FileSessionStore implements SessionStore {
 		return SessionManager.create(scope.cwd, scope.ownerId);
 	}
 
-	async continueRecent(scope: SessionScope): Promise<SessionHandle | null> {
-		return await SessionManager.continueRecent(scope.cwd, scope.ownerId);
+	continueRecent(scope: SessionScope): Effect.Effect<SessionHandle | null, StoreError> {
+		return storeEffect(() => SessionManager.continueRecent(scope.cwd, scope.ownerId));
 	}
 
-	async open(reference: string, _ownerId: string): Promise<SessionHandle> {
-		return await SessionManager.open(reference);
+	open(reference: string, _ownerId: string): Effect.Effect<SessionHandle, StoreError> {
+		return storeEffect(() => SessionManager.open(reference));
 	}
 
-	async listSummaries(scope: SessionScope): Promise<SessionSummary[]> {
-		return await SessionManager.listSummaries(scope.cwd, scope.ownerId);
+	listSummaries(scope: SessionScope): Effect.Effect<SessionSummary[], StoreError> {
+		return storeEffect(() => SessionManager.listSummaries(scope.cwd, scope.ownerId));
 	}
 }

@@ -1,5 +1,8 @@
+import { Effect } from "effect";
+import type { HttpServerRequest, HttpServerResponse } from "effect/http";
 import { isAbsolute, resolve } from "node:path";
 import { validateWorkspacePath } from "@vvtxn/relay/core/workspace.ts";
+import { attempt } from "@vvtxn/relay/core/effect.ts";
 import type {
 	RegisterWorkspaceRequest,
 	RegisterWorkspaceResponse,
@@ -8,11 +11,11 @@ import type {
 	WorkspaceValidateResponse,
 } from "@vvtxn/client/protocol.ts";
 import type { RequestServices } from "./services.ts";
-import { BadRequestError, ForbiddenError, json, readJsonBody } from "./http.ts";
+import { BadRequestError, ForbiddenError, json, readJsonBody, requestUrl } from "./http.ts";
 
 /** Returns the server's default workspace directory. */
-export function handleWorkspace(services: RequestServices): Response {
-	return json({ cwd: services.config.defaultCwd } satisfies WorkspaceResponse);
+export function handleWorkspace(services: RequestServices): Effect.Effect<HttpServerResponse.HttpServerResponse> {
+	return Effect.succeed(json({ cwd: services.config.defaultCwd } satisfies WorkspaceResponse));
 }
 
 /**
@@ -20,39 +23,59 @@ export function handleWorkspace(services: RequestServices): Response {
  * anything. Always 200 — `ok` carries the outcome so clients can render
  * `message` verbatim.
  */
-export async function handleValidateWorkspace(services: RequestServices, url: URL): Promise<Response> {
-	const result = await validateWorkspacePath(url.searchParams.get("cwd"), services.config.workspaceRoots);
-	return json({
-		ok: result.ok,
-		...(result.ok ? { path: result.path } : { reason: result.reason, message: result.message }),
-		roots: services.config.workspaceRoots,
-	} satisfies WorkspaceValidateResponse);
+export function handleValidateWorkspace(
+	services: RequestServices,
+	request: HttpServerRequest.HttpServerRequest,
+): Effect.Effect<HttpServerResponse.HttpServerResponse, Error> {
+	return Effect.gen(function* () {
+		const result = yield* attempt(() =>
+			validateWorkspacePath(requestUrl(request).searchParams.get("cwd"), services.config.workspaceRoots),
+		);
+		return json({
+			ok: result.ok,
+			...(result.ok ? { path: result.path } : { reason: result.reason, message: result.message }),
+			roots: services.config.workspaceRoots,
+		} satisfies WorkspaceValidateResponse);
+	});
 }
 
 /** Registers an existing, allowed workspace directory so it appears in the picker. */
-export async function handleRegisterWorkspace(services: RequestServices, request: Request): Promise<Response> {
-	const body = await readJsonBody<RegisterWorkspaceRequest>(request);
-	const validation = await validateWorkspacePath(body.cwd, services.config.workspaceRoots);
-	if (!validation.ok) {
-		if (validation.reason === "outside-roots") throw new ForbiddenError(validation.message);
-		throw new BadRequestError(validation.message);
-	}
-	await services.sessionStore.registerWorkspace({ ownerId: services.user.id, cwd: validation.path });
-	return json(
-		{
-			workspace: { cwd: validation.path, sessionCount: 0, lastActivity: "", exists: true },
-		} satisfies RegisterWorkspaceResponse,
-		201,
-	);
+export function handleRegisterWorkspace(
+	services: RequestServices,
+	request: HttpServerRequest.HttpServerRequest,
+): Effect.Effect<HttpServerResponse.HttpServerResponse, BadRequestError | ForbiddenError> {
+	return Effect.gen(function* () {
+		const body = yield* readJsonBody<RegisterWorkspaceRequest>(request);
+		const validation = yield* attempt(() => validateWorkspacePath(body.cwd, services.config.workspaceRoots));
+		if (!validation.ok) {
+			if (validation.reason === "outside-roots") {
+				return yield* Effect.fail(new ForbiddenError(validation.message));
+			}
+			return yield* Effect.fail(new BadRequestError(validation.message));
+		}
+		yield* services.sessionStore.registerWorkspace({ ownerId: services.user.id, cwd: validation.path });
+		return json(
+			{
+				workspace: { cwd: validation.path, sessionCount: 0, lastActivity: "", exists: true },
+			} satisfies RegisterWorkspaceResponse,
+			201,
+		);
+	});
 }
 
 /**
  * Removes a workspace registration. The directory need not still exist, so the
  * stored key is normalized but not stat'd. Sessions for the cwd are untouched.
  */
-export async function handleUnregisterWorkspace(services: RequestServices, url: URL): Promise<Response> {
-	const raw = url.searchParams.get("cwd")?.trim();
-	if (!raw || !isAbsolute(raw)) throw new BadRequestError("An absolute cwd query parameter is required");
-	await services.sessionStore.unregisterWorkspace({ ownerId: services.user.id, cwd: resolve(raw) });
-	return json({ status: "ok" } satisfies StatusResponse);
+export function handleUnregisterWorkspace(
+	services: RequestServices,
+	request: HttpServerRequest.HttpServerRequest,
+): Effect.Effect<HttpServerResponse.HttpServerResponse, BadRequestError> {
+	return Effect.gen(function* () {
+		const raw = requestUrl(request).searchParams.get("cwd")?.trim();
+		if (!raw || !isAbsolute(raw))
+			return yield* Effect.fail(new BadRequestError("An absolute cwd query parameter is required"));
+		yield* services.sessionStore.unregisterWorkspace({ ownerId: services.user.id, cwd: resolve(raw) });
+		return json({ status: "ok" } satisfies StatusResponse);
+	});
 }

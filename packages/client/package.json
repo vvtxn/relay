@@ -10,7 +10,8 @@
 		"./*": "./*"
 	},
 	"dependencies": {
-		"@vvtxn/relay": "workspace:*"
+		"@vvtxn/relay": "workspace:*",
+		"effect": "^4.0.4"
 	},
 	"devDependencies": {
 		"@types/node": "^26.6.5"

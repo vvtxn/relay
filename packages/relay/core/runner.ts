@@ -1,6 +1,8 @@
+import { Effect, Stream } from "effect";
 import type { Message, Usage } from "#/api/types.ts";
 import { type AgentConfig, run } from "./agent.ts";
 import type { ToolResult } from "#/core/tools/types.ts";
+import { causeMessage } from "./effect.ts";
 
 /**
  * Callbacks for the agent runner — implemented by each client (TUI, HTTP, etc.).
@@ -28,24 +30,18 @@ export interface RunnerCallbacks {
 /**
  * Runs the agent loop and invokes callbacks as events are received.
  *
- * This is a thin wrapper around core/agent.ts's `run()` async generator that:
- * - Accumulates tool call args across deltas
- * - Tracks tool call names from start events
- * - Checks for abort signals
+ * Compatibility adapter over the `run()` stream for callback-based consumers:
  * - Awaits each callback so async work (e.g. session writes) completes in order
+ * - A throwing callback is reported through `onError` instead of breaking the loop
  *
- * Consumers (TUI, HTTP SSE, WebSocket, etc.) implement {@link RunnerCallbacks}
- * to handle state updates in their own medium.
+ * New consumers should prefer `run()` directly; see `packages/server/run.ts`
+ * for an Effect-native consumer.
  */
 export async function runAgentLoop(
 	messages: Message[],
 	config: AgentConfig,
 	callbacks: RunnerCallbacks,
 ): Promise<void> {
-	const events = run(messages, config);
-	const toolCallArgs = new Map<string, string>();
-	const toolCallNames = new Map<string, string>();
-
 	const reportError = async (error: unknown) => {
 		try {
 			await callbacks.onError(error instanceof Error ? error : new Error(String(error)));
@@ -53,59 +49,54 @@ export async function runAgentLoop(
 			// There is no callback available to report an onError failure to.
 		}
 	};
-	const invoke = async (callback: () => void | Promise<void>) => {
-		try {
-			await callback();
-		} catch (error) {
-			await reportError(error);
-		}
-	};
 
-	for await (const event of events) {
-		switch (event.type) {
-			case "text_delta":
-				await invoke(() => callbacks.onTextDelta(event.content));
-				break;
+	const invoke = (callback: () => void | Promise<void>): Effect.Effect<void> =>
+		Effect.tryPromise({
+			try: async () => {
+				await callback();
+			},
+			catch: (error) => error,
+		}).pipe(Effect.catchCause((cause) => Effect.promise(() => reportError(causeMessage(cause)))));
 
-			case "tool_call_start":
-				toolCallNames.set(event.id, event.name);
-				toolCallArgs.set(event.id, "");
-				await invoke(() => callbacks.onToolCallStart?.(event.id, event.name));
-				break;
+	await Effect.runPromise(
+		Stream.runForEachWhile(run(messages, config), (event) =>
+			Effect.gen(function* () {
+				switch (event.type) {
+					case "text_delta":
+						yield* invoke(() => callbacks.onTextDelta(event.content));
+						break;
 
-			case "tool_call_args_delta": {
-				const current = toolCallArgs.get(event.id) ?? "";
-				toolCallArgs.set(event.id, current + event.args);
-				await invoke(() => callbacks.onToolCallArgsDelta?.(event.id, event.args));
-				break;
-			}
+					case "tool_call_start":
+						yield* invoke(() => callbacks.onToolCallStart?.(event.id, event.name));
+						break;
 
-			case "tool_call_end": {
-				const name = toolCallNames.get(event.id) ?? "unknown";
-				const args = toolCallArgs.get(event.id) ?? "";
-				toolCallNames.delete(event.id);
-				toolCallArgs.delete(event.id);
-				await invoke(() => callbacks.onToolCallEnd(event.id, name, args));
-				break;
-			}
+					case "tool_call_args_delta":
+						yield* invoke(() => callbacks.onToolCallArgsDelta?.(event.id, event.args));
+						break;
 
-			case "tool_result":
-				await invoke(() => callbacks.onToolResult(event.id, event.result));
-				break;
+					case "tool_call_end":
+						yield* invoke(() => callbacks.onToolCallEnd(event.id, event.name, event.args));
+						break;
 
-			case "message_complete":
-				await invoke(() => callbacks.onMessageComplete(event.usage, event.generationId));
-				break;
+					case "tool_result":
+						yield* invoke(() => callbacks.onToolResult(event.id, event.result));
+						break;
 
-			case "turn_complete":
-				await invoke(() => callbacks.onTurnComplete(event.assistantMessage, event.toolResults));
-				break;
+					case "message_complete":
+						yield* invoke(() => callbacks.onMessageComplete(event.usage, event.generationId));
+						break;
 
-			case "error":
-				await reportError(event.error);
-				break;
-		}
+					case "turn_complete":
+						yield* invoke(() => callbacks.onTurnComplete(event.assistantMessage, event.toolResults));
+						break;
 
-		if (config.signal?.aborted) break;
-	}
+					case "error":
+						yield* invoke(() => callbacks.onError(event.error));
+						break;
+				}
+
+				return !config.signal?.aborted;
+			}),
+		),
+	);
 }

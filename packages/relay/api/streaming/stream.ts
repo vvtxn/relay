@@ -1,4 +1,5 @@
 import type { StreamChunk } from "#/api/types.ts";
+import { ProviderError } from "../errors.ts";
 
 /**
  * Parses an SSE stream from a fetch Response into an async iterable of StreamChunks.
@@ -6,11 +7,14 @@ import type { StreamChunk } from "#/api/types.ts";
  * Handles the standard OpenAI-compatible SSE format:
  *   data: {json}\n\n
  *   data: [DONE]\n\n
+ *
+ * Transport failures propagate as thrown values; the provider maps them into
+ * `ProviderError`s (see `providers/completions.ts`).
  */
 export async function* parseSSEStream(response: Response): AsyncIterable<StreamChunk> {
 	const reader = response.body?.getReader();
 	if (!reader) {
-		throw new Error("Response body is not readable");
+		throw new ProviderError({ message: "Response body is not readable", retryable: false });
 	}
 
 	const decoder = new TextDecoder();

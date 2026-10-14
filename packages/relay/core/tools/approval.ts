@@ -1,3 +1,4 @@
+import { Effect } from "effect";
 import type { Tool } from "./types.ts";
 
 /**
@@ -5,10 +6,10 @@ import type { Tool } from "./types.ts";
  * deny. Denials surface to the model as a regular tool error, so it can
  * react (ask the user, try a different approach).
  *
- * Handlers that wait on user input should also race against the run's
- * AbortSignal so cancelling a run doesn't hang on an unanswered prompt.
+ * Handlers that wait on user input should be interruptible (e.g. await a
+ * `Deferred`) so cancelling a run doesn't hang on an unanswered prompt.
  */
-export type ApprovalHandler = (tool: Tool, input: unknown) => Promise<boolean>;
+export type ApprovalHandler = (tool: Tool, input: unknown) => Effect.Effect<boolean>;
 
 export interface ApprovalOptions {
 	/** Skip approval for tools marked `readonly`. Defaults to true. */
@@ -26,17 +27,18 @@ export function withApproval(tools: Tool[], handler: ApprovalHandler, options: A
 		if (skipReadonly && tool.readonly) return tool;
 		return {
 			...tool,
-			execute: async (input) => {
-				const approved = await handler(tool, input);
-				if (!approved) {
-					return {
-						content:
-							"The user denied this tool call. Do not retry it unchanged — ask how to proceed, or try a different approach.",
-						isError: true,
-					};
-				}
-				return await tool.execute(input);
-			},
+			execute: (input) =>
+				Effect.gen(function* () {
+					const approved = yield* handler(tool, input);
+					if (!approved) {
+						return {
+							content:
+								"The user denied this tool call. Do not retry it unchanged — ask how to proceed, or try a different approach.",
+							isError: true,
+						};
+					}
+					return yield* tool.execute(input);
+				}),
 		};
 	});
 }

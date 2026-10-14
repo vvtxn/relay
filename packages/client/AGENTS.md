@@ -11,6 +11,7 @@ client/
 ├── protocol.ts         # REST payloads + ServerEvent union (plain JSON types only)
 ├── sse.ts              # readSSEStream (fetch-based parser), encodeSSEFrame (server side)
 ├── client.ts           # RelayClient + RelayApiError
+├── services.ts         # Effect layer over RelayClient (Api + SessionStream, RelayError)
 └── session-state.ts    # Pure ServerEvent fold reducer shared by all clients
 ```
 
@@ -37,6 +38,13 @@ Pure fetch. Methods map 1:1 to endpoints. `subscribe(sessionId, { signal, onOpen
 fires when the stream response is established (clients use it to know events can flow). Non-2xx responses throw
 `RelayApiError` with the server's `error` message and status.
 
+### Effect service layer (`services.ts`)
+
+`ApiLive(client)` wraps a configured `RelayClient` in the `Api` service (REST as `Effect<A, RelayError>`);
+`SessionStreamLive` adds the SSE subscription as `Stream<ServerEvent, RelayError>`. `appLayer(client)` provides both,
+and `RelayError`/`isUnauthorized` are the shared failure vocabulary. The transport below it stays Promise-based on
+purpose: environments without an Effect runtime (the TUI bundle) use `RelayClient` directly.
+
 ### Session state (`session-state.ts`)
 
 The shared event fold: `applyServerEvent(state, event)` is a pure reducer over `ServerEvent` producing display-ready
@@ -47,7 +55,7 @@ their own reactive primitive, so their run rendering can never drift.
 ## Dependencies
 
 - `@vvtxn/relay` — protocol types (type-only) and `display.ts` runtime helpers used by the fold reducer
-- No npm/jsr runtime dependencies
+- `effect` (v4) — only in `services.ts`; the protocol, transport, and reducer stay Effect-free
 
 ## Task Completion Checklist
 

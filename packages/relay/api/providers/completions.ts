@@ -1,4 +1,6 @@
+import { Effect, Stream } from "effect";
 import { parseSSEStream } from "../streaming/stream.ts";
+import { isRetryableStatus, ProviderError, toProviderError } from "../errors.ts";
 import type { CompletionRequest, CompletionResponse, LLMProvider, ProviderConfig, StreamChunk } from "#/api/types.ts";
 
 export interface GenerationStats {
@@ -25,10 +27,14 @@ export class CompletionsProvider implements LLMProvider {
 		return (await response.json()) as CompletionResponse;
 	}
 
-	async *stream(request: CompletionRequest): AsyncIterable<StreamChunk> {
+	stream(request: CompletionRequest): Stream.Stream<StreamChunk, ProviderError> {
 		const body = this.buildBody(request, true);
-		const response = await this.fetch(body, request.signal);
-		yield* parseSSEStream(response);
+		return Stream.unwrap(
+			Effect.tryPromise({
+				try: () => this.fetch(body, request.signal),
+				catch: toProviderError,
+			}).pipe(Effect.map((response) => Stream.fromAsyncIterable(parseSSEStream(response), toProviderError))),
+		);
 	}
 
 	private buildBody(request: CompletionRequest, stream: boolean): Record<string, unknown> {
@@ -110,12 +116,16 @@ export class CompletionsProvider implements LLMProvider {
 				// Deliberately omits the request URL: it leaks server internals when
 				// errors are forwarded to clients (e.g. over HTTP/WebSocket), and the
 				// caller already knows the configured baseURL.
-				throw new Error(
-					`API error ${response.status}: ${text || response.statusText} (model: ${String(body.model)})`,
-				);
+				throw new ProviderError({
+					message: `API error ${response.status}: ${text || response.statusText} (model: ${String(body.model)})`,
+					status: response.status,
+					retryable: isRetryableStatus(response.status),
+				});
 			}
 
 			return response;
+		} catch (error) {
+			throw toProviderError(error);
 		} finally {
 			clearTimeout(timer!);
 		}

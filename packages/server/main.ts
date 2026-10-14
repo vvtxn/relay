@@ -1,9 +1,12 @@
 import { mkdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { createServer } from "node:http";
 import { dirname } from "node:path";
+import { Effect, Layer } from "effect";
+import { HttpRouter } from "effect/http";
+import * as NodeHttpServer from "@effect/platform-node/NodeHttpServer";
 import { type ServerConfig, serverConfigFromEnv } from "./config.ts";
 import { createServices } from "./services.ts";
-import { handleRequest } from "./router.ts";
-import { startHttpServer, type RunningServer } from "./http-server.ts";
+import { createAppLayer } from "./router.ts";
 
 /**
  * Exit code used when the configured port is taken (`EX_TEMPFAIL` from
@@ -13,8 +16,14 @@ import { startHttpServer, type RunningServer } from "./http-server.ts";
  */
 const EXIT_ADDR_IN_USE = 75;
 
-function isAddrInUse(error: unknown): error is NodeJS.ErrnoException {
-	return error instanceof Error && (error as NodeJS.ErrnoException).code === "EADDRINUSE";
+/** True when the error (or a wrapped cause) is a bind conflict. */
+function isAddrInUse(error: unknown): boolean {
+	let current: unknown = error;
+	for (let depth = 0; depth < 5 && current != null; depth++) {
+		if (current instanceof Error && (current as NodeJS.ErrnoException).code === "EADDRINUSE") return true;
+		current = current instanceof Error ? current.cause : undefined;
+	}
+	return false;
 }
 
 function bindFailure(config: ServerConfig, error: Error): string {
@@ -31,13 +40,13 @@ function bindFailure(config: ServerConfig, error: Error): string {
  * server. Only used when the launcher sets `RELAY_STATE_FILE` (the background
  * daemon); a plain `relay serve` leaves no state behind.
  */
-function writeServerState(config: ServerConfig, server: RunningServer): void {
+function writeServerState(config: ServerConfig): void {
 	const path = process.env.RELAY_STATE_FILE;
 	if (!path) return;
 	const host = config.hostname === "0.0.0.0" || config.hostname === "::" ? "127.0.0.1" : config.hostname;
 	const state = {
-		url: `http://${host}:${server.port}`,
-		port: server.port,
+		url: `http://${host}:${config.port}`,
+		port: config.port,
 		pid: process.pid,
 		startedAt: new Date().toISOString(),
 		cwd: config.defaultCwd,
@@ -76,21 +85,29 @@ export async function startServer(): Promise<void> {
 	console.log(`OAuth callback: ${config.publicUrl}/api/auth/callback (must match a GitHub App callback URL exactly)`);
 	if (config.staticDir) console.log(`Serving web app from ${config.staticDir}`);
 
-	let server: RunningServer;
+	const app = createAppLayer(services);
+	const server = NodeHttpServer.layer(() => createServer(), { host: config.hostname, port: config.port });
+	const serve = HttpRouter.serve(app).pipe(
+		Layer.provideMerge(server),
+		// Runs once the listener is bound: report the address and publish the
+		// state file the CLI supervisor reads.
+		Layer.tap(() =>
+			Effect.sync(() => {
+				console.log(`Relay server listening on http://${config.hostname}:${config.port}`);
+				writeServerState(config);
+			}),
+		),
+	);
+
 	try {
-		server = await startHttpServer({ port: config.port, hostname: config.hostname }, (request) =>
-			handleRequest(services, request),
-		);
+		await Effect.runPromise(Layer.launch(serve));
 	} catch (error) {
 		if (isAddrInUse(error)) {
-			console.error(bindFailure(config, error));
+			console.error(bindFailure(config, error instanceof Error ? error : new Error(String(error))));
 			process.exit(EXIT_ADDR_IN_USE);
 		}
 		throw error;
 	}
-
-	console.log(`Relay server listening on http://${config.hostname}:${server.port}`);
-	writeServerState(config, server);
 }
 
 // Run when executed directly (node packages/server/main.ts)

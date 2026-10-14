@@ -26,29 +26,32 @@
  * });
  * ```
  *
- * @example Raw async generator (when you need full control)
+ * @example Raw event stream (when you need full control)
  * ```ts
  * import { run } from "@vvtxn/relay";
+ * import { Effect, Stream } from "effect";
  *
- * for await (const event of run(messages, config)) {
- *     switch (event.type) {
- *         case "text_delta":
- *             // accumulate text
- *             break;
- *         case "tool_call_start":
- *             // track name and id
- *             break;
- *         case "tool_result":
- *             // update output, show diff
- *             break;
- *         case "turn_complete":
- *             // persist to session
- *             break;
- *         case "error":
- *             // handle
- *             break;
- *     }
- * }
+ * await Effect.runPromise(Stream.runForEach(run(messages, config), (event) =>
+ *     Effect.sync(() => {
+ *         switch (event.type) {
+ *             case "text_delta":
+ *                 // accumulate text
+ *                 break;
+ *             case "tool_call_start":
+ *                 // track name and id
+ *                 break;
+ *             case "tool_result":
+ *                 // update output, show diff
+ *                 break;
+ *             case "turn_complete":
+ *                 // persist to session
+ *                 break;
+ *             case "error":
+ *                 // handle
+ *                 break;
+ *         }
+ *     }),
+ * ));
  * ```
  *
  * @module
@@ -98,6 +101,7 @@ export {
 	getDefinitions,
 } from "./core/tools/index.ts";
 export type { Tool, ToolRegistry, ToolResult } from "./core/tools/index.ts";
+export { ToolError } from "./core/tools/index.ts";
 export { type ApprovalHandler, type ApprovalOptions, withApproval } from "./core/tools/approval.ts";
 
 // Sessions
@@ -178,4 +182,5 @@ export type {
 } from "./api/types.ts";
 
 // API providers
+export { isRetryableStatus, ProviderError, toProviderError } from "./api/errors.ts";
 export { CompletionsProvider } from "./api/providers/completions.ts";

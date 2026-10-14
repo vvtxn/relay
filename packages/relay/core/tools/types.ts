@@ -1,3 +1,4 @@
+import { Data, Effect } from "effect";
 import type { JsonSchema, ToolDefinition } from "#/api/types.ts";
 
 // ---------------------------------------------------------------------------
@@ -15,6 +16,20 @@ export interface ToolResult {
 	};
 }
 
+/** Typed failure from a tool; the agent loop enriches it into a `ToolResult`. */
+export class ToolError extends Data.TaggedError("ToolError")<{
+	readonly message: string;
+	readonly cause?: unknown;
+}> {}
+
+/** Normalizes a thrown value into a `ToolError`. */
+export function toToolError(error: unknown): ToolError {
+	return new ToolError({
+		message: error instanceof Error ? error.message : String(error),
+		cause: error,
+	});
+}
+
 // ---------------------------------------------------------------------------
 // Tool
 // ---------------------------------------------------------------------------
@@ -22,7 +37,7 @@ export interface ToolResult {
 export interface Tool {
 	definition: ToolDefinition;
 	readonly?: boolean;
-	execute(input: unknown): Promise<ToolResult>;
+	execute(input: unknown): Effect.Effect<ToolResult, ToolError>;
 }
 
 // ---------------------------------------------------------------------------
@@ -47,6 +62,11 @@ export function getDefinitions(registry: ToolRegistry): ToolDefinition[] {
 // Helper to define a tool with less boilerplate
 // ---------------------------------------------------------------------------
 
+/**
+ * Tools are authored as async functions (their bodies are promise-based IO:
+ * fs, child processes). `defineTool` lifts them into the Effect-based `Tool`
+ * interface; unexpected throws surface as a typed `ToolError`.
+ */
 export function defineTool(opts: {
 	name: string;
 	description: string;
@@ -64,6 +84,10 @@ export function defineTool(opts: {
 			},
 		},
 		...(opts.readonly !== undefined ? { readonly: opts.readonly } : {}),
-		execute: opts.execute,
+		execute: (input) =>
+			Effect.tryPromise({
+				try: () => opts.execute(input),
+				catch: toToolError,
+			}),
 	};
 }

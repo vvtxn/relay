@@ -4,7 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/solid-query";
 import { meQuery, settingsQuery } from "#/api/queries.ts";
 import { setApiKey } from "#/api/mutations.ts";
 import { readStoredSessionId } from "#/api/storage.ts";
-import { RelayError } from "#/api/services.ts";
+import { RelayError } from "@vvtxn/client/services.ts";
 import { queryKeys } from "#/api/query-client.ts";
 import { signOut } from "#/auth/auth.ts";
 import { BootScreen } from "#/components/BootScreen.tsx";

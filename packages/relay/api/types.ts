@@ -1,6 +1,9 @@
 // OpenAI-compatible types for /v1/chat/completions
 // Works with any provider exposing an OpenAI-compatible API (open-source models, KimiK2, etc.)
 
+import type { Stream } from "effect";
+import type { ProviderError } from "./errors.ts";
+
 // ---------------------------------------------------------------------------
 // Messages
 // ---------------------------------------------------------------------------
@@ -135,5 +138,5 @@ export interface ProviderConfig {
 
 export interface LLMProvider {
 	complete(request: CompletionRequest): Promise<CompletionResponse>;
-	stream(request: CompletionRequest): AsyncIterable<StreamChunk>;
+	stream(request: CompletionRequest): Stream.Stream<StreamChunk, ProviderError>;
 }

@@ -1,7 +1,7 @@
 import { Effect, Result } from "effect";
 import type { ConfigResponse, MeResponse } from "@vvtxn/client/protocol.ts";
 import type { SessionSummary, WorkspaceSummary } from "@vvtxn/relay/core/sessions/index.ts";
-import { Api, isUnauthorized, RelayError } from "./services.ts";
+import { Api, isUnauthorized, RelayError } from "@vvtxn/client/services.ts";
 import { readStoredCwd } from "./storage.ts";
 import { serverLabel } from "./client.ts";
 

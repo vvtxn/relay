@@ -1,8 +1,9 @@
 import { Effect, Fiber, ManagedRuntime } from "effect";
-import { Api, type ApiShape, AppLayer, type RelayError, type SessionStream } from "./services.ts";
+import { Api, appLayer, type ApiShape, type RelayError, type SessionStream } from "@vvtxn/client/services.ts";
+import { client } from "./client.ts";
 
 /** Long-lived runtime; the web app's single Effect environment. */
-export const runtime = ManagedRuntime.make(AppLayer);
+export const runtime = ManagedRuntime.make(appLayer(client));
 
 /** Run an effect that needs the Relay {@link Api} service. */
 export function runApi<A>(f: (api: ApiShape) => Effect.Effect<A, RelayError>): Promise<A> {

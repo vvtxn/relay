@@ -1,5 +1,14 @@
+/**
+ * Effect service layer over the plain promise-based {@link RelayClient}.
+ *
+ * The transport itself stays Effect-free (it also runs in environments without
+ * a runtime); this module is the composition seam for Effect-native clients:
+ * the web app and the CLI install their own configured `RelayClient` via
+ * {@link appLayer}.
+ */
+
 import { Context, Data, Effect, Layer, Stream } from "effect";
-import { RelayApiError, type SubscribeOptions } from "@vvtxn/client/client.ts";
+import { RelayApiError, type RelayClient, type SubscribeOptions } from "./client.ts";
 import type {
 	ApprovalDecision,
 	ConfigResponse,
@@ -17,8 +26,7 @@ import type {
 	WorkspaceResponse,
 	WorkspacesResponse,
 	WorkspaceValidateResponse,
-} from "@vvtxn/client/protocol.ts";
-import { client } from "./client.ts";
+} from "./protocol.ts";
 
 /** Tagged failure for every Relay transport operation. */
 export class RelayError extends Data.TaggedError("RelayError")<{
@@ -74,25 +82,27 @@ export interface ApiShape {
 
 export class Api extends Context.Service<Api, ApiShape>()("relay/Api") {}
 
-export const ApiLive = Layer.succeed(Api, {
-	health: () => tryRelay(() => client.health()),
-	me: () => tryRelay(() => client.me()),
-	workspace: () => tryRelay(() => client.workspace()),
-	getConfig: () => tryRelay(() => client.getConfig()),
-	getSettings: () => tryRelay(() => client.getSettings()),
-	setApiKey: (apiKey) => tryRelay(() => client.setApiKey(apiKey)),
-	listSessions: (cwd) => tryRelay(() => client.listSessions(cwd)),
-	listWorkspaces: () => tryRelay(() => client.listWorkspaces()),
-	validateWorkspace: (cwd) => tryRelay(() => client.validateWorkspace(cwd)),
-	registerWorkspace: (cwd) => tryRelay(() => client.registerWorkspace(cwd)),
-	createSession: (cwd) => tryRelay(() => client.createSession(cwd)),
-	openSession: (id) => tryRelay(() => client.openSession(id)),
-	listFiles: (sessionId) => tryRelay(() => client.listFiles(sessionId)),
-	sendMessage: (sessionId, content) => tryRelay(() => client.sendMessage(sessionId, content)),
-	approve: (sessionId, toolCallId, decision) => tryRelay(() => client.approve(sessionId, toolCallId, decision)),
-	cancel: (sessionId) => tryRelay(() => client.cancel(sessionId)),
-	subscribe: (sessionId, options) => client.subscribe(sessionId, options),
-});
+/** Wraps a configured client in the {@link Api} service. */
+export const ApiLive = (client: RelayClient): Layer.Layer<Api> =>
+	Layer.succeed(Api, {
+		health: () => tryRelay(() => client.health()),
+		me: () => tryRelay(() => client.me()),
+		workspace: () => tryRelay(() => client.workspace()),
+		getConfig: () => tryRelay(() => client.getConfig()),
+		getSettings: () => tryRelay(() => client.getSettings()),
+		setApiKey: (apiKey) => tryRelay(() => client.setApiKey(apiKey)),
+		listSessions: (cwd) => tryRelay(() => client.listSessions(cwd)),
+		listWorkspaces: () => tryRelay(() => client.listWorkspaces()),
+		validateWorkspace: (cwd) => tryRelay(() => client.validateWorkspace(cwd)),
+		registerWorkspace: (cwd) => tryRelay(() => client.registerWorkspace(cwd)),
+		createSession: (cwd) => tryRelay(() => client.createSession(cwd)),
+		openSession: (id) => tryRelay(() => client.openSession(id)),
+		listFiles: (sessionId) => tryRelay(() => client.listFiles(sessionId)),
+		sendMessage: (sessionId, content) => tryRelay(() => client.sendMessage(sessionId, content)),
+		approve: (sessionId, toolCallId, decision) => tryRelay(() => client.approve(sessionId, toolCallId, decision)),
+		cancel: (sessionId) => tryRelay(() => client.cancel(sessionId)),
+		subscribe: (sessionId, options) => client.subscribe(sessionId, options),
+	});
 
 /** SSE event stream for a session, as an Effect Stream. */
 export interface SessionStreamShape {
@@ -101,7 +111,7 @@ export interface SessionStreamShape {
 
 export class SessionStream extends Context.Service<SessionStream, SessionStreamShape>()("relay/SessionStream") {}
 
-export const SessionStreamLive = Layer.effect(
+export const SessionStreamLive: Layer.Layer<SessionStream, never, Api> = Layer.effect(
 	SessionStream,
 	Effect.map(Api, (api): SessionStreamShape => ({
 		events: (sessionId, signal) => Stream.fromAsyncIterable(api.subscribe(sessionId, { signal }), toRelayError),
@@ -109,4 +119,5 @@ export const SessionStreamLive = Layer.effect(
 );
 
 /** Full application layer: REST API + session stream, both available downstream. */
-export const AppLayer = SessionStreamLive.pipe(Layer.provideMerge(ApiLive));
+export const appLayer = (client: RelayClient): Layer.Layer<Api | SessionStream> =>
+	SessionStreamLive.pipe(Layer.provideMerge(ApiLive(client)));

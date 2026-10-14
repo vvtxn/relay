@@ -1,4 +1,6 @@
+import type { Effect } from "effect";
 import { createDatabaseClient, type DatabaseClient, databaseCredentialsFromEnv } from "../database.ts";
+import { storeEffect, type StoreError } from "../effect.ts";
 import type {
 	Entry,
 	NewEntry,
@@ -82,8 +84,8 @@ export class DatabaseSessionStore implements SessionStore {
 	}
 
 	/** Resolves once the store's schema has been initialized. */
-	get ready(): Promise<void> {
-		return this.schemaReady;
+	get ready(): Effect.Effect<void, StoreError> {
+		return storeEffect(() => this.schemaReady);
 	}
 
 	static fromEnv(
@@ -109,7 +111,11 @@ export class DatabaseSessionStore implements SessionStore {
 		);
 	}
 
-	async continueRecent(scope: SessionScope): Promise<SessionHandle | null> {
+	continueRecent(scope: SessionScope): Effect.Effect<SessionHandle | null, StoreError> {
+		return storeEffect(() => this.continueRecentPromise(scope));
+	}
+
+	private async continueRecentPromise(scope: SessionScope): Promise<SessionHandle | null> {
 		const result = await this.execute({
 			sql: `SELECT id FROM sessions
 				WHERE owner_id = ? AND cwd = ?
@@ -117,10 +123,14 @@ export class DatabaseSessionStore implements SessionStore {
 			args: [scope.ownerId, scope.cwd],
 		});
 		const row = result.rows[0];
-		return row ? await this.open(stringValue(row, "id"), scope.ownerId) : null;
+		return row ? await this.openPromise(stringValue(row, "id"), scope.ownerId) : null;
 	}
 
-	async open(reference: string, ownerId: string): Promise<SessionHandle> {
+	open(reference: string, ownerId: string): Effect.Effect<SessionHandle, StoreError> {
+		return storeEffect(() => this.openPromise(reference, ownerId));
+	}
+
+	private async openPromise(reference: string, ownerId: string): Promise<SessionHandle> {
 		const sessionResult = await this.execute({
 			sql: "SELECT * FROM sessions WHERE id = ? AND owner_id = ?",
 			args: [reference, ownerId],
@@ -152,7 +162,11 @@ export class DatabaseSessionStore implements SessionStore {
 		);
 	}
 
-	async listSummaries(scope: SessionScope): Promise<SessionSummary[]> {
+	listSummaries(scope: SessionScope): Effect.Effect<SessionSummary[], StoreError> {
+		return storeEffect(() => this.listSummariesPromise(scope));
+	}
+
+	private async listSummariesPromise(scope: SessionScope): Promise<SessionSummary[]> {
 		const result = await this.execute({
 			sql: `SELECT id, created_at, first_user_message
 				FROM sessions
@@ -169,7 +183,11 @@ export class DatabaseSessionStore implements SessionStore {
 	}
 
 	/** Distinct workspaces (registered + session cwds) for a user, most recently active first. */
-	async listWorkspaces(ownerId: string): Promise<WorkspaceSummary[]> {
+	listWorkspaces(ownerId: string): Effect.Effect<WorkspaceSummary[], StoreError> {
+		return storeEffect(() => this.listWorkspacesPromise(ownerId));
+	}
+
+	private async listWorkspacesPromise(ownerId: string): Promise<WorkspaceSummary[]> {
 		const result = await this.execute({
 			// Order by the selected alias: Turso's engine rejects ORDER BY MAX(...)
 			// here ("misuse of aggregate function MAX()").
@@ -199,7 +217,11 @@ export class DatabaseSessionStore implements SessionStore {
 	 * Records a workspace so it appears in the picker before its first session.
 	 * Idempotent — re-registering an existing workspace is a no-op.
 	 */
-	async registerWorkspace(scope: SessionScope): Promise<void> {
+	registerWorkspace(scope: SessionScope): Effect.Effect<void, StoreError> {
+		return storeEffect(() => this.registerWorkspacePromise(scope));
+	}
+
+	private async registerWorkspacePromise(scope: SessionScope): Promise<void> {
 		await this.schemaReady;
 		await this.client.execute({
 			sql: "INSERT OR IGNORE INTO workspaces (owner_id, cwd, created_at) VALUES (?, ?, ?)",
@@ -208,7 +230,11 @@ export class DatabaseSessionStore implements SessionStore {
 	}
 
 	/** Removes a workspace registration. Sessions for that cwd are left intact. */
-	async unregisterWorkspace(scope: SessionScope): Promise<void> {
+	unregisterWorkspace(scope: SessionScope): Effect.Effect<void, StoreError> {
+		return storeEffect(() => this.unregisterWorkspacePromise(scope));
+	}
+
+	private async unregisterWorkspacePromise(scope: SessionScope): Promise<void> {
 		await this.schemaReady;
 		await this.client.execute({
 			sql: "DELETE FROM workspaces WHERE owner_id = ? AND cwd = ?",
@@ -216,6 +242,7 @@ export class DatabaseSessionStore implements SessionStore {
 		});
 	}
 
+	/** @internal Persistence primitive used by the session handle. */
 	async append(
 		scope: SessionScope,
 		header: DatabaseSessionHeader,
@@ -266,6 +293,7 @@ export class DatabaseSessionStore implements SessionStore {
 		return { id, timestamp };
 	}
 
+	/** @internal Persistence primitive used by the session handle. */
 	async updateHeader(scope: SessionScope, header: DatabaseSessionHeader): Promise<void> {
 		await this.schemaReady;
 		await this.execute({
@@ -321,7 +349,11 @@ class DatabaseSessionHandle implements SessionHandle {
 		this.persisted = persisted;
 	}
 
-	async append(entry: NewEntry): Promise<string> {
+	append(entry: NewEntry): Effect.Effect<string, StoreError> {
+		return storeEffect(() => this.appendQueued(entry));
+	}
+
+	private async appendQueued(entry: NewEntry): Promise<string> {
 		let id = "";
 		const operation = this.appendQueue.then(async () => {
 			const result = await this.store.append(this.scope, this.header, this.entries, entry, !this.persisted);
@@ -361,7 +393,11 @@ class DatabaseSessionHandle implements SessionHandle {
 		this.headerDirty = true;
 	}
 
-	async flush(): Promise<void> {
+	flush(): Effect.Effect<void, StoreError> {
+		return storeEffect(() => this.flushQueued());
+	}
+
+	private async flushQueued(): Promise<void> {
 		await this.appendQueue;
 		if (!this.persisted || !this.headerDirty) return;
 		await this.store.updateHeader(this.scope, this.header);
