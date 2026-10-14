@@ -8,6 +8,8 @@
 		"relay:prod": "RELAY_ENV=production pnpm relay",
 		"relay:web": "pnpm relay web",
 		"relay:web:prod": "RELAY_ENV=production pnpm relay web",
+		"relay:install": "node scripts/install-dev-cli.ts",
+		"relay:uninstall": "node scripts/install-dev-cli.ts --uninstall",
 		"relay:stop": "pnpm relay stop",
 		"relay:status": "pnpm relay status",
 		"agent": "pnpm relay:dev",

@@ -115,6 +115,23 @@ pnpm web:dev             # Vite dev server with HMR
 `pnpm relay` builds the CLI bundle (`packages/cli/dist`) automatically and then runs the same commands as before:
 `relay`, `relay web`, `relay serve`, `relay stop`, `relay status`, `relay fonts`, `relay workspace`.
 
+### Run from any project directory
+
+`pnpm relay` builds and runs the CLI from the checkout, so it is normally started from the repo. To use `relay` from
+other projects like a global command, install the dev launcher once:
+
+```bash
+pnpm relay:install    # writes ~/.local/bin/relay (rebuilds the bundle on each launch)
+cd ~/Code/other-project
+relay                 # scoped to this directory, server reused or started as needed
+pnpm relay:uninstall  # remove the launcher
+```
+
+The launcher runs this checkout's CLI with the current directory as its workspace and loads the checkout's env files
+(`RELAY_ENV_ROOT`), so the background server gets the same credentials as `pnpm relay`. It is a development convenience
+— a true installable release would need the server packaged alongside the CLI, which the source-only release flow does
+not do yet.
+
 ## Authentication
 
 Relay is GitHub-OAuth-only. Callers authenticate by completing a GitHub App user-authorization flow and receiving an
@@ -323,17 +340,20 @@ A thin TUI client of the server:
 A SolidJS single-page app served by the server (bundled `packages/web/dist`, or `RELAY_STATIC_DIR`):
 
 - **TanStack Query** owns REST server state (identity, workspaces, sessions, files) and mutations
-- **TanStack Router** puts the active session in the URL (`/s/:sessionId`) for deep links and history
+- **TanStack Router** puts the root overview (`/`), a workspace pane (`/w/<token>`), and the active session
+  (`/s/:sessionId`) in the URL for deep links and history
 - **Effect** owns the live run: `Api` + `SessionStream` services, a reconnect loop with exponential backoff, and typed
   errors; events fold into Solid state via the shared `session-state.ts` reducer
 - Chat with live drafts and tool cards (rendered diffs), `@`-mention picker, approval dialog, token/cost status bar, and
   cancel
-- **Workspaces** — the sidebar lists the project directories the server knows about (registered ones plus the ones you
-  launched `relay` in); selecting one filters its sessions and targets new chats. "Add workspace" accepts an absolute
-  path, validates it against the server (with an inline error when the directory is missing or outside the allowed
-  roots), and registers it immediately. Workspaces whose directory has since been deleted are flagged as `missing`.
-  Projects can also be added from the terminal with `relay workspace add [path]`, which attaches to the running server
-  without opening the TUI.
+- **Workspaces** — `/` is the root overview (workspace cards plus a "continue last chat" shortcut), `/w/<token>` is a
+  workspace pane listing its threads, and chats stay at `/s/:id`; the sidebar renders workspaces as a collapsible tree
+  and navigates to the pane. New chats go to the active workspace, falling back to the last visited one (the server
+  reuses an idle empty session). "Add workspace" accepts an absolute path, validates it against the server (with an
+  inline error when the directory is missing or outside the allowed roots), and registers it immediately. "Hide"
+  tombstones a workspace — its threads stay reachable and re-adding it or starting a chat there restores it. Workspaces
+  whose directory has since been deleted are flagged as `missing`. Projects can also be added from the terminal with
+  `relay workspace add [path]`, which attaches to the running server without opening the TUI.
 - Shares the Graphite/Silver theme tokens with the terminal client (applied as CSS variables)
 - Auth uses GitHub App OAuth: credentialed fetches, 401 handling, and a login redirect
 
@@ -348,9 +368,11 @@ pnpm relay             # Build the CLI bundle, then start/reuse the server + ter
 pnpm relay web         # Open the web client (server starts in the background)
 pnpm relay stop        # Stop the background server
 pnpm relay status      # Show the background server
+pnpm relay:install     # Install a `relay` launcher usable from any project directory
+pnpm relay:uninstall   # Remove that launcher
 pnpm relay workspace list          # List registered workspaces
 pnpm relay workspace add <path>    # Register a project directory (default: cwd)
-pnpm relay workspace remove <path> # Unregister a workspace (sessions are kept)
+pnpm relay workspace remove <path> # Hide a workspace (sessions are kept; re-add restores it)
 pnpm relay fonts status  # Check whether the shared terminal font is installed
 pnpm serve:dev         # Run a foreground server with the development env
 pnpm serve:prod        # Run a foreground server with the production env

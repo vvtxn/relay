@@ -152,6 +152,8 @@ pnpm relay status    # show the background server
 pnpm relay workspace add ~/Code/foo  # register a workspace (no TUI)
 pnpm relay workspace list            # list registered workspaces
 pnpm relay fonts status  # check whether the shared font is installed
+pnpm relay:install       # install a `relay` launcher usable from any project directory
+pnpm relay:uninstall     # remove that launcher
 ```
 
 The CLI runs from the built bundle (`packages/cli/dist`, produced by `pnpm relay`), using the same commands as the

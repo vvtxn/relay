@@ -76,18 +76,21 @@ function gitOutput(cwd: string, args: string[]): string | null {
 }
 
 /**
- * Directories to read env files from, least to most specific: the main
+ * Directories to read env files from, least to most specific: an explicit
+ * checkout from `RELAY_ENV_ROOT` (the installed dev launcher points it at this
+ * repo so secrets load when the CLI runs from another project), the main
  * worktree, the current worktree root, then the working directory. Gitignored
  * env files are not copied into linked worktrees, so falling back to the main
  * checkout keeps tasks like `pnpm relay` working there.
  */
 export function envRoots(cwd: string): string[] {
+	const override = process.env.RELAY_ENV_ROOT?.trim();
 	const current = gitOutput(cwd, ["rev-parse", "--show-toplevel"])?.trim();
 	const mainLine = gitOutput(cwd, ["worktree", "list", "--porcelain"])
 		?.split("\n")
 		.find((line) => line.startsWith("worktree "));
 	const main = mainLine?.slice("worktree ".length).trim();
-	const roots = [main, current, cwd].filter((root): root is string => !!root);
+	const roots = [override, main, current, cwd].filter((root): root is string => !!root);
 	return [...new Set(roots)];
 }
 
