@@ -373,6 +373,9 @@ describe("RunManager", () => {
 		const finished = await run.finished();
 
 		expect(finished.reason).toBe("completed");
+		// The prompt is rendered from the run's registry, so the subagent tool is
+		// documented for the main agent.
+		expect(provider.requests[0]?.messages[0]?.content).toContain("**delegate**");
 		// The parent's follow-up request carries the subagent's report.
 		const parentFollowUp = provider.requests[2];
 		expect(

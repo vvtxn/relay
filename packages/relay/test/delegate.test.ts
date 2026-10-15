@@ -28,7 +28,6 @@ function delegate(
 	return createDelegateTool({
 		provider,
 		model: "fake-model",
-		systemPrompt: "You are a test agent.",
 		tools: createToolRegistry(tools),
 		...overrides,
 	});
@@ -45,12 +44,22 @@ describe("delegate tool", () => {
 		expect(result.isError).not.toBe(true);
 		expect(result.content).toBe("Found it");
 		expect(result.meta?.durationMs).toBeTypeOf("number");
-		// The subagent gets a fresh conversation: a system message with the
-		// delegation instructions plus the prompt, and none of the caller's history.
+		// The subagent gets a fresh conversation: a default subagent system
+		// prompt plus the task, and none of the caller's history.
 		const request = provider.requests[0];
 		expect(request?.messages[0]).toMatchObject({ role: "system" });
 		expect(request?.messages[0]?.content).toContain("subagent");
+		expect(request?.messages[0]?.content).toContain("## Report");
 		expect(request?.messages[1]).toMatchObject({ role: "user", content: "investigate the parser" });
+	});
+
+	it("uses an explicit system prompt override verbatim", async () => {
+		const provider = new ScriptedProvider([chunks(textChunk("ok"), doneChunk())]);
+		const tool = delegate(provider, [], { systemPrompt: "Custom subagent prompt." });
+
+		await Effect.runPromise(tool.execute({ prompt: "investigate" }));
+
+		expect(provider.requests[0]?.messages[0]?.content).toBe("Custom subagent prompt.");
 	});
 
 	it("uses the read-only tools it was given", async () => {

@@ -24,8 +24,8 @@ core/
 │   ├── sessions.ts       # DatabaseAuthSessionStore: opaque hashed session tokens
 │   ├── settings.ts       # DatabaseUserSettingsStore: per-user LLM API key (plaintext)
 │   └── service.ts        # authenticate(): provider + user store → AuthenticatedUser
-├── system-prompt.ts      # Re-exports the default system prompt (raw .md import)
-├── system-prompt.md      # Default system prompt for coding agents (shared across clients)
+├── prompts.ts            # buildSystemPrompt(): section composition + registry-aware tool guidance
+├── system-prompt.ts      # SYSTEM_PROMPT default (built from defaultTools); re-exports the builder
 ├── workspace.ts          # Workspace-rooted fs helpers: expandMentions, listProjectFiles, git metadata
 ├── tools/                # Tool system
 │   ├── index.ts          # Tool exports, defaultTools registry, createWorkspaceTools
@@ -123,6 +123,7 @@ Tools are defined using `defineTool()`:
 interface Tool {
 	definition: ToolDefinition;
 	readonly?: boolean;
+	usageHint?: string;
 	resourceKey?(input: unknown): string | undefined;
 	execute(input: unknown): Effect.Effect<ToolResult, ToolError>;
 }
@@ -130,7 +131,9 @@ interface Tool {
 
 `defineTool` keeps authoring promise-based (`execute: (input) => Promise<ToolResult>`) and lifts the body into the
 Effect-based interface: an unexpected throw becomes a typed `ToolError`. Built-in tools (`defaultTools`): `bash` (Run),
-`read_file` (Read), `write_file` (Write), `edit_file` (Edit), `grep` (Grep).
+`read_file` (Read), `write_file` (Write), `edit_file` (Edit), `grep` (Grep). Each tool carries an optional `usageHint`
+— the prompt-level policy for that tool (see "System Prompt Composition"); the schema `description` stays the
+model-facing mechanics.
 
 `createWorkspaceTools(root)` returns the built-in tools rooted at a workspace directory: file tools resolve their `path`
 argument against `root` via `resolveWithinRoot` (escapes are rejected with an error result), and bash runs with `root`
@@ -139,16 +142,34 @@ as its cwd. Note bash is not truly confined — shell commands can still use abs
 to different files overlap; bash stays exclusive (no key).
 
 `createDelegateTool(options)` builds the `delegate` tool: each call runs a fresh, isolated `run()` with the given
-(typically read-only) tool registry — no conversation history, an appended subagent section in the system prompt, its
-own round cap, and the parent abort signal. The final report returns as a `ToolResult`, and subagent cost is
-aggregated into `meta.cost` so the server can roll it into the session total. The tool is `readonly`, so calls skip
-approval and run in the parallel readonly phase; an internal semaphore caps concurrent subagent loops
-(`maxConcurrency`, default 3). The server wires one per run with `read_file` + `grep`.
+(typically read-only) tool registry — no conversation history, its own round cap, and the parent abort signal. The
+subagent's system prompt defaults to `buildSystemPrompt({ mode: "subagent", tools })` and can be overridden wholesale
+via `systemPrompt`. The final report returns as a `ToolResult`, and subagent cost is aggregated into `meta.cost` so
+the server can roll it into the session total. The tool is `readonly`, so calls skip approval and run in the parallel
+readonly phase; an internal semaphore caps concurrent subagent loops (`maxConcurrency`, default 3). The server wires
+one per run with `read_file` + `grep`.
 
 `withApproval(tools, handler)` wraps each tool's `execute` so calls are gated on an `Effect<boolean>` decision.
 Readonly tools skip approval by default (`skipReadonly: false` to change). Denials return an `isError` ToolResult, so
 the agent loop needs no changes and the model can react. Handlers waiting on user input should await a `Deferred` (see
 `packages/server/run.ts`) so cancelling the run interrupts the wait.
+
+### System Prompt Composition (`prompts.ts`)
+
+`buildSystemPrompt({ mode, tools, extraInstructions })` composes the prompt from named sections:
+
+- `mode: "main"` (default) renders identity, agency, tool usage, workflow, code quality, self-review, and
+  communication; `mode: "subagent"` renders a focused read-only investigator prompt (identity, parallel-lookup policy,
+  tool usage, report requirements).
+- The Tool Usage section is rendered from `tools` (a `ToolRegistry` or `Tool[]`): each tool contributes a bullet from
+  its `usageHint`, falling back to the first sentence of its schema description. The Agency section names the read-only
+  tools from the same source, and Self-Review only mentions `read_file` when it is present — the prompt can never drift
+  from the exposed tool set, and custom tools are covered automatically.
+- `extraInstructions` is appended verbatim at the end.
+
+`SYSTEM_PROMPT` in `system-prompt.ts` is the shared default:
+`buildSystemPrompt({ mode: "main", tools: defaultTools })`. The server builds its prompt per run from the registry it
+actually wires (workspace tools + `delegate`), and `createDelegateTool` defaults to the subagent mode for its registry.
 
 ### Context Management
 
@@ -207,6 +228,8 @@ After concluding that a task is complete, always run these commands from the rep
 - Tools have a `readonly` flag for parallel execution optimization, and an optional `resourceKey` so the agent loop can
   serialize side-effect calls that touch the same resource while running independent ones concurrently (`confinePathArg`
   attaches the resolved file path for the workspace file tools; tools without a key are exclusive)
+- Prompt guidance for a tool lives on the tool (`usageHint`) and is rendered by `buildSystemPrompt`; never hardcode
+  tool names or availability in prompt prose
 - Use `ToolResult` with `isError` flag for error reporting; unexpected throws become `ToolError`
 - `ToolResult.meta.diff` carries unified diff output from `write_file` and `edit_file` for UI rendering; the server persists it on `tool_result` entries (`ToolResultEntry.diff`) so reloaded transcripts keep the diff
 - `diff.ts` generates unified diffs with a pure Myers algorithm and emits git-style headers (`diff --git` + file name) so UIs can render them with path-aware diff viewers

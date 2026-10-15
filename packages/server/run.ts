@@ -11,7 +11,7 @@ import { expandMentions, validateWorkspacePath } from "@vvtxn/relay/core/workspa
 import { entriesToMessages, type SessionHandle, stripAttachedContext } from "@vvtxn/relay/core/sessions/index.ts";
 import { type AgentEvent, run } from "@vvtxn/relay/core/agent.ts";
 import { attempt, causeMessage, type StoreError } from "@vvtxn/relay/core/effect.ts";
-import { SYSTEM_PROMPT } from "@vvtxn/relay/core/system-prompt.ts";
+import { buildSystemPrompt } from "@vvtxn/relay/core/prompts.ts";
 import type { ApprovalDecision, PendingApprovalInfo, RunStateEvent, ServerEvent } from "@vvtxn/client/protocol.ts";
 import type { ServerConfig } from "./config.ts";
 
@@ -297,7 +297,6 @@ export class RunManager {
 			const delegate = createDelegateTool({
 				provider,
 				model: config.model,
-				systemPrompt: SYSTEM_PROMPT,
 				tools: createToolRegistry(workspaceTools.filter((tool) => tool.readonly)),
 				maxToolRounds: 10,
 				temperature: config.temperature,
@@ -311,6 +310,9 @@ export class RunManager {
 			const tools = createToolRegistry(
 				withApproval([...workspaceTools, delegate], (tool, input) => requestApproval(tool, input)),
 			);
+			// Rendered from the registry the run actually exposes, so the tool
+			// guidance can never drift from the available tools.
+			const systemPrompt = buildSystemPrompt({ mode: "main", tools });
 
 			// The agent loop is a Stream of events; the run fiber consumes it and
 			// mirrors each event onto the session draft state + SSE subscribers.
@@ -319,7 +321,7 @@ export class RunManager {
 					provider,
 					tools,
 					model: config.model,
-					systemPrompt: SYSTEM_PROMPT,
+					systemPrompt,
 					temperature: config.temperature,
 					contextLimit: {
 						maxTokens: config.maxTokens,

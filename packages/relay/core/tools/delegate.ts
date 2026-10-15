@@ -2,6 +2,7 @@ import { Effect, Semaphore, Stream } from "effect";
 import type { LLMProvider } from "#/api/types.ts";
 import { run, type AgentConfig } from "../agent.ts";
 import type { TrimOptions } from "../context.ts";
+import { buildSystemPrompt } from "../prompts.ts";
 import type { Tool, ToolRegistry, ToolResult } from "./types.ts";
 
 const DEFAULT_MAX_TOOL_ROUNDS = 10;
@@ -14,21 +15,18 @@ const DELEGATE_DESCRIPTION =
 	"to look, what the report should contain). Issue several delegate calls in one turn to run investigations in " +
 	"parallel, and prefer delegating broad exploration that would flood your own context.";
 
-const SUBAGENT_INSTRUCTIONS = `## Delegation
-
-You are a subagent: the main coding assistant delegated one focused investigation to you. You have read-only access
-to the workspace and cannot modify files. Work autonomously — nobody can answer questions mid-task. When the
-investigation is done, reply with a concise report for the caller: the relevant file paths and line references, what
-you concluded, and any open questions.`;
+const DELEGATE_USAGE_HINT =
+	"Delegate self-contained investigations to a read-only subagent; issue several in one turn to run them in " +
+	"parallel, and give each a complete, specific prompt.";
 
 /** Options for {@link createDelegateTool}. */
 export interface DelegateToolOptions {
 	provider: LLMProvider;
 	model: string;
-	/** Base system prompt; the delegation instructions are appended. */
-	systemPrompt: string;
 	/** Tools available to subagents. Should be readonly; `delegate` is not re-added. */
 	tools: ToolRegistry;
+	/** Full system prompt override; defaults to a subagent prompt built from `tools`. */
+	systemPrompt?: string;
 	maxToolRounds?: number;
 	/** Maximum subagents executing at the same time (extra calls queue). */
 	maxConcurrency?: number;
@@ -44,15 +42,15 @@ export interface DelegateToolOptions {
  *
  * Each call runs a fresh, fully isolated `run()` (no conversation history)
  * with the read-only tool registry it was given, and returns the subagent's
- * final report as a normal `ToolResult`. Subagent cost is aggregated into
- * `meta.cost` so the server can add it to the session total. The tool is
- * marked `readonly`: it never mutates the workspace, so calls skip approval
- * and run alongside other read-only work; `maxConcurrency` bounds how many
- * subagent loops execute at once.
+ * final report as a normal `ToolResult`. The subagent's system prompt defaults
+ * to {@link buildSystemPrompt} in `subagent` mode for that registry. Subagent
+ * cost is aggregated into `meta.cost` so the server can add it to the session
+ * total. The tool is marked `readonly`: it never mutates the workspace, so
+ * calls skip approval and run alongside other read-only work; `maxConcurrency`
+ * bounds how many subagent loops execute at once.
  */
 export function createDelegateTool(options: DelegateToolOptions): Tool {
 	const limit = Semaphore.makeUnsafe(options.maxConcurrency ?? DEFAULT_MAX_CONCURRENCY);
-	const systemPrompt = `${options.systemPrompt}\n\n${SUBAGENT_INSTRUCTIONS}`;
 
 	return {
 		definition: {
@@ -78,18 +76,19 @@ export function createDelegateTool(options: DelegateToolOptions): Tool {
 			},
 		},
 		readonly: true,
+		usageHint: DELEGATE_USAGE_HINT,
 		execute: (input) =>
 			Effect.gen(function* () {
 				const { prompt } = (input ?? {}) as { prompt?: unknown };
 				if (typeof prompt !== "string" || prompt.trim().length === 0) {
 					return { content: "Error [delegate]: a non-empty `prompt` is required.", isError: true };
 				}
-				return yield* Semaphore.withPermit(limit)(runSubagent(prompt, options, systemPrompt));
+				return yield* Semaphore.withPermit(limit)(runSubagent(prompt, options));
 			}),
 	};
 }
 
-function runSubagent(prompt: string, options: DelegateToolOptions, systemPrompt: string): Effect.Effect<ToolResult> {
+function runSubagent(prompt: string, options: DelegateToolOptions): Effect.Effect<ToolResult> {
 	const state: { report: string; cost: number; failed: Error | null } = {
 		report: "",
 		cost: 0,
@@ -99,7 +98,7 @@ function runSubagent(prompt: string, options: DelegateToolOptions, systemPrompt:
 	const config: AgentConfig = {
 		provider: options.provider,
 		model: options.model,
-		systemPrompt,
+		systemPrompt: options.systemPrompt ?? buildSystemPrompt({ mode: "subagent", tools: options.tools }),
 		tools: options.tools,
 		maxToolRounds: options.maxToolRounds ?? DEFAULT_MAX_TOOL_ROUNDS,
 		...(options.temperature !== undefined ? { temperature: options.temperature } : {}),

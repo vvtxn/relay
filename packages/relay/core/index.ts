@@ -64,7 +64,8 @@ export type { AuthenticatedUser, AuthIdentity, AuthProvider, UserDirectory, User
 
 export { homeDir, relayDir } from "./paths.ts";
 
-export { SYSTEM_PROMPT } from "./system-prompt.ts";
+export { buildSystemPrompt, SYSTEM_PROMPT } from "./system-prompt.ts";
+export type { BuildSystemPromptOptions, SystemPromptMode } from "./system-prompt.ts";
 
 export {
 	expandMentions,

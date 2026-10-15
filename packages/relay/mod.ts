@@ -7,7 +7,7 @@
  *
  * @example Recommended usage with {@link runAgentLoop}
  * ```ts
- * import { runAgentLoop, CompletionsProvider, createToolRegistry, defaultTools } from "@vvtxn/relay";
+ * import { runAgentLoop, CompletionsProvider, createToolRegistry, defaultTools, SYSTEM_PROMPT } from "@vvtxn/relay";
  *
  * const provider = new CompletionsProvider({ apiKey, baseURL: "https://openrouter.ai/api/v1" });
  * const tools = createToolRegistry(defaultTools);
@@ -15,7 +15,7 @@
  * await runAgentLoop(messages, {
  *     provider, tools,
  *     model: "moonshotai/kimi-k2.6",
- *     systemPrompt: "You are a coding assistant.",
+ *     systemPrompt: SYSTEM_PROMPT,
  *     signal: abortController.signal,
  * }, {
  *     onTextDelta(delta)         { socket.send(JSON.stringify({ type: "text", delta })); },
@@ -152,8 +152,9 @@ export type { DatabaseClient, DatabaseCredentials } from "./core/database.ts";
 // Paths
 export { homeDir, relayDir } from "./core/paths.ts";
 
-// Default system prompt
-export { SYSTEM_PROMPT } from "./core/system-prompt.ts";
+// System prompt (shared default + registry-aware builder)
+export { buildSystemPrompt, SYSTEM_PROMPT } from "./core/system-prompt.ts";
+export type { BuildSystemPromptOptions, SystemPromptMode } from "./core/system-prompt.ts";
 
 // Workspace helpers (filesystem operations rooted at an explicit directory)
 export {
