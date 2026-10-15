@@ -1,12 +1,17 @@
-import { Cause, Deferred, Effect, Exit, Fiber, Queue, Ref, Stream } from "effect";
+import { Cause, Deferred, Effect, Exit, Fiber, Queue, Ref, Semaphore, Stream } from "effect";
 import type { LLMProvider } from "@vvtxn/relay/api/types.ts";
-import { createToolRegistry, createWorkspaceTools, withApproval } from "@vvtxn/relay/core/tools/index.ts";
+import {
+	createDelegateTool,
+	createToolRegistry,
+	createWorkspaceTools,
+	withApproval,
+} from "@vvtxn/relay/core/tools/index.ts";
 import { summarizeToolArgs } from "@vvtxn/relay/core/display.ts";
 import { expandMentions, validateWorkspacePath } from "@vvtxn/relay/core/workspace.ts";
 import { entriesToMessages, type SessionHandle, stripAttachedContext } from "@vvtxn/relay/core/sessions/index.ts";
 import { type AgentEvent, run } from "@vvtxn/relay/core/agent.ts";
 import { attempt, causeMessage, type StoreError } from "@vvtxn/relay/core/effect.ts";
-import { SYSTEM_PROMPT } from "@vvtxn/relay/core/system-prompt.ts";
+import { buildSystemPrompt } from "@vvtxn/relay/core/prompts.ts";
 import type { ApprovalDecision, PendingApprovalInfo, RunStateEvent, ServerEvent } from "@vvtxn/client/protocol.ts";
 import type { ServerConfig } from "./config.ts";
 
@@ -39,6 +44,13 @@ interface SessionRecord {
 	ownerId: string | null;
 	readonly subscribers: Set<Queue.Queue<ServerEvent>>;
 	readonly alwaysApproved: Set<string>;
+	/**
+	 * Serializes approval prompts. Side-effect tools may execute in parallel
+	 * (the agent loop runs them concurrently across distinct resources), but
+	 * the protocol surfaces one pending approval at a time, so the prompt
+	 * section of `requestApproval` holds this permit.
+	 */
+	readonly approvalLock: Semaphore.Semaphore;
 	tokens: number;
 	cost: number;
 	run: ActiveRun | null;
@@ -296,9 +308,28 @@ export class RunManager {
 				}
 			}
 
+			const workspaceTools = createWorkspaceTools(cwd);
+			// Subagents get a fresh loop with read-only workspace tools and no
+			// access to this conversation; their cost rolls into the session below.
+			const delegate = createDelegateTool({
+				provider,
+				model: config.model,
+				tools: createToolRegistry(workspaceTools.filter((tool) => tool.readonly)),
+				maxToolRounds: 10,
+				temperature: config.temperature,
+				contextLimit: {
+					maxTokens: config.maxTokens,
+					preserveRecentTurns: config.preserveRecentTurns,
+				},
+				maxTokens: config.maxCompletionTokens,
+				signal: abort.signal,
+			});
 			const tools = createToolRegistry(
-				withApproval(createWorkspaceTools(cwd), (tool, input) => requestApproval(tool, input)),
+				withApproval([...workspaceTools, delegate], (tool, input) => requestApproval(tool, input)),
 			);
+			// Rendered from the registry the run actually exposes, so the tool
+			// guidance can never drift from the available tools.
+			const systemPrompt = buildSystemPrompt({ mode: "main", tools });
 
 			// The agent loop is a Stream of events; the run fiber consumes it and
 			// mirrors each event onto the session draft state + SSE subscribers.
@@ -307,7 +338,7 @@ export class RunManager {
 					provider,
 					tools,
 					model: config.model,
-					systemPrompt: SYSTEM_PROMPT,
+					systemPrompt,
 					temperature: config.temperature,
 					contextLimit: {
 						maxTokens: config.maxTokens,
@@ -398,6 +429,15 @@ export class RunManager {
 						return { ...state, draftToolCalls };
 					});
 					publish({ type: "tool_result", id: event.id, result: event.result });
+					// Subagent cost rolls into the session total; the next
+					// `message_complete` publishes the updated numbers.
+					if (event.result.meta?.cost) {
+						const session = getSession();
+						if (session) {
+							session.cost += event.result.meta.cost;
+							session.handle?.setCost(session.cost);
+						}
+					}
 					return;
 				}
 				case "message_complete": {
@@ -510,6 +550,7 @@ export class RunManager {
 				ownerId: null,
 				subscribers: new Set(),
 				alwaysApproved: new Set(),
+				approvalLock: Semaphore.makeUnsafe(1),
 				tokens: 0,
 				cost: 0,
 				run: null,
@@ -524,6 +565,12 @@ export class RunManager {
 	 * `Deferred` that `resolveApproval` completes and that {@link finalizeRun}
 	 * denies if the run ends first; because the wait sits inside the run fiber,
 	 * interruption cancels it automatically.
+	 *
+	 * Prompts are serialized per session: parallel side-effect tools may reach
+	 * this point together, while the protocol surfaces one pending approval at a
+	 * time. Queued calls re-check `alwaysApproved` and the abort signal, so an
+	 * "always" decision (or a cancellation) skips the prompt for everything
+	 * still waiting behind it.
 	 */
 	private requestApproval(
 		sessionId: string,
@@ -537,15 +584,20 @@ export class RunManager {
 		if (session?.run?.abort.signal.aborted) return Effect.succeed(false);
 
 		const publish = (event: ServerEvent): void => this.publish(sessionId, event);
-		const deferred = Deferred.makeUnsafe<ApprovalDecision>();
-		const toolCallId = crypto.randomUUID();
-		const info: PendingApprovalInfo = {
-			toolCallId,
-			toolName: name,
-			summary: summarizeToolArgs(name, JSON.stringify(input)),
-		};
+		const request = Effect.gen(function* () {
+			// Re-check after acquiring the lock: while this call was queued, an
+			// earlier prompt may have been answered "always" — or the run cancelled.
+			if (session?.alwaysApproved.has(name)) return true;
+			if (session?.run?.abort.signal.aborted) return false;
 
-		return Effect.gen(function* () {
+			const deferred = Deferred.makeUnsafe<ApprovalDecision>();
+			const toolCallId = crypto.randomUUID();
+			const info: PendingApprovalInfo = {
+				toolCallId,
+				toolName: name,
+				summary: summarizeToolArgs(name, JSON.stringify(input)),
+			};
+
 			yield* Ref.update(runRef, (state) => {
 				const pendingApprovals = new Map(state.pendingApprovals);
 				pendingApprovals.set(toolCallId, { deferred, info });
@@ -557,6 +609,7 @@ export class RunManager {
 			if (decision === "always") session?.alwaysApproved.add(name);
 			return decision !== "deny";
 		});
+		return session ? Semaphore.withPermit(session.approvalLock)(request) : request;
 	}
 }
 

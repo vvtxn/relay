@@ -15,6 +15,7 @@ export const editFileTool = defineTool({
 		"Edit a file by replacing an exact string match with new content. " +
 		"The old_str must match exactly one location in the file (unless replace_all is true). " +
 		"Returns a unified diff of the change. Always read the file first to get the exact text to replace.",
+	usageHint: "Edit files with find-and-replace. Always use this instead of `sed`/`awk`.",
 	parameters: {
 		type: "object",
 		properties: {

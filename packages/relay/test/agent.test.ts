@@ -68,6 +68,30 @@ function eventError(event: AgentEvent | undefined): Error {
 	return (event as { error: Error }).error;
 }
 
+/**
+ * Side-effect tool that records start/end markers around a real sleep. The
+ * resource key (when given) is what the scheduler uses to decide conflicts.
+ */
+function slowEditTool(
+	name: string,
+	key: string | undefined,
+	order: string[],
+	duration: Duration.Input = "40 millis",
+): Tool {
+	return fakeTool({
+		name,
+		readonly: false,
+		...(key !== undefined ? { resourceKey: () => key } : {}),
+		execute: () =>
+			Effect.gen(function* () {
+				order.push(`start:${name}`);
+				yield* Effect.sleep(duration);
+				order.push(`end:${name}`);
+				return { content: name };
+			}),
+	});
+}
+
 describe("agent loop", () => {
 	it("retries a retryable provider error with backoff, then succeeds", async () => {
 		const provider = new ScriptedProvider([
@@ -141,7 +165,7 @@ describe("agent loop", () => {
 		expect(noteSeen).toBe(true);
 	});
 
-	it("runs readonly tools in parallel and side-effect tools sequentially afterwards", async () => {
+	it("runs readonly tools in parallel before exclusive side-effect tools", async () => {
 		const order: string[] = [];
 		const readOne = fakeTool({
 			name: "read_one",
@@ -165,6 +189,7 @@ describe("agent loop", () => {
 					return { content: "two" };
 				}),
 		});
+		// No resourceKey: exclusive, so it runs alone after the readonly phase.
 		const write = fakeTool({
 			name: "write_one",
 			readonly: false,
@@ -199,6 +224,99 @@ describe("agent loop", () => {
 		// The side-effect tool only starts after both readonly tools ended.
 		expect(order.indexOf("end:read_one")).toBeLessThan(order.indexOf("start:write_one"));
 		expect(order.indexOf("end:read_two")).toBeLessThan(order.indexOf("start:write_one"));
+	});
+
+	it("runs side-effect tools for different resources in parallel", async () => {
+		const order: string[] = [];
+		const editA = slowEditTool("edit_a", "file:a", order);
+		const editB = slowEditTool("edit_b", "file:b", order);
+		const provider = new ScriptedProvider([
+			chunks(
+				toolCallsChunk([
+					{ id: "call-1", name: "edit_a", args: "{}" },
+					{ id: "call-2", name: "edit_b", args: "{}" },
+				]),
+				doneChunk(),
+			),
+			chunks(doneChunk()),
+		]);
+
+		const events = await Effect.runPromise(collect(run([USER_MESSAGE], config(provider, [editA, editB]))));
+
+		// Distinct keys: the second edit starts before the first one ends.
+		expect(order.indexOf("start:edit_b")).toBeLessThan(order.indexOf("end:edit_a"));
+		// Results are still emitted in call order.
+		const results = events.filter((event) => event.type === "tool_result");
+		expect(results.map((event) => event.id)).toEqual(["call-1", "call-2"]);
+	});
+
+	it("serializes side-effect tools that share a resource key", async () => {
+		const order: string[] = [];
+		const editA = slowEditTool("edit_a", "file:same", order, "20 millis");
+		const editB = slowEditTool("edit_b", "file:same", order, "20 millis");
+		const provider = new ScriptedProvider([
+			chunks(
+				toolCallsChunk([
+					{ id: "call-1", name: "edit_a", args: "{}" },
+					{ id: "call-2", name: "edit_b", args: "{}" },
+				]),
+				doneChunk(),
+			),
+			chunks(doneChunk()),
+		]);
+
+		await Effect.runPromise(collect(run([USER_MESSAGE], config(provider, [editA, editB]))));
+
+		expect(order).toEqual(["start:edit_a", "end:edit_a", "start:edit_b", "end:edit_b"]);
+	});
+
+	it("treats a tool without a resource key as an ordering barrier", async () => {
+		const order: string[] = [];
+		const editA = slowEditTool("edit_a", "file:a", order);
+		const shell = slowEditTool("shell", undefined, order);
+		const editB = slowEditTool("edit_b", "file:b", order);
+		const provider = new ScriptedProvider([
+			chunks(
+				toolCallsChunk([
+					{ id: "call-1", name: "edit_a", args: "{}" },
+					{ id: "call-2", name: "shell", args: "{}" },
+					{ id: "call-3", name: "edit_b", args: "{}" },
+				]),
+				doneChunk(),
+			),
+			chunks(doneChunk()),
+		]);
+
+		await Effect.runPromise(collect(run([USER_MESSAGE], config(provider, [editA, shell, editB]))));
+
+		// The exclusive call waits for everything before it and blocks everything after it.
+		expect(order.indexOf("end:edit_a")).toBeLessThan(order.indexOf("start:shell"));
+		expect(order.indexOf("end:shell")).toBeLessThan(order.indexOf("start:edit_b"));
+	});
+
+	it("overlaps independent edits that precede an exclusive tool", async () => {
+		const order: string[] = [];
+		const editA = slowEditTool("edit_a", "file:a", order);
+		const editC = slowEditTool("edit_c", "file:c", order);
+		const shell = slowEditTool("shell", undefined, order);
+		const provider = new ScriptedProvider([
+			chunks(
+				toolCallsChunk([
+					{ id: "call-1", name: "edit_a", args: "{}" },
+					{ id: "call-2", name: "edit_c", args: "{}" },
+					{ id: "call-3", name: "shell", args: "{}" },
+				]),
+				doneChunk(),
+			),
+			chunks(doneChunk()),
+		]);
+
+		await Effect.runPromise(collect(run([USER_MESSAGE], config(provider, [editA, editC, shell]))));
+
+		// The two edits overlap; the shell call runs after both.
+		expect(order.indexOf("start:edit_c")).toBeLessThan(order.indexOf("end:edit_a"));
+		expect(order.indexOf("end:edit_a")).toBeLessThan(order.indexOf("start:shell"));
+		expect(order.indexOf("end:edit_c")).toBeLessThan(order.indexOf("start:shell"));
 	});
 
 	it("stops with an error after exceeding the maximum tool rounds", async () => {

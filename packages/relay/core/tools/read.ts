@@ -8,6 +8,7 @@ export const readFileTool = defineTool({
 	description:
 		"Read the contents of a file. Returns the file content as text. For large files, only the first portion is returned.",
 	readonly: true,
+	usageHint: "Read the contents of a file. Always use this instead of `cat`/`head`/`tail`.",
 	parameters: {
 		type: "object",
 		properties: {

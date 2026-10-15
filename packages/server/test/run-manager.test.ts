@@ -78,6 +78,23 @@ async function waitForEvent<T extends ServerEvent["type"]>(
 	throw new Error(`event ${type} not received in time`);
 }
 
+async function waitForApprovalCount(
+	events: ServerEvent[],
+	count: number,
+	timeoutMs = 2000,
+): Promise<Extract<ServerEvent, { type: "approval_required" }>> {
+	const deadline = Date.now() + timeoutMs;
+	while (Date.now() < deadline) {
+		const approvals = events.filter(
+			(event): event is Extract<ServerEvent, { type: "approval_required" }> => event.type === "approval_required",
+		);
+		const latest = approvals[count - 1];
+		if (approvals.length >= count && latest) return latest;
+		await new Promise((resolve) => setTimeout(resolve, 5));
+	}
+	throw new Error(`fewer than ${count} approval_required events received in time`);
+}
+
 async function fileExists(path: string): Promise<boolean> {
 	try {
 		await readFile(path);
@@ -180,6 +197,64 @@ describe("RunManager", () => {
 		run.unsubscribe();
 	});
 
+	it("serializes approval prompts for parallel side-effect calls", async () => {
+		const provider = new ScriptedProvider([
+			chunks(
+				twoToolCallsChunk(
+					{ id: "call-1", name: "write_file", args: JSON.stringify({ path: "a.txt", content: "one" }) },
+					{ id: "call-2", name: "write_file", args: JSON.stringify({ path: "b.txt", content: "two" }) },
+				),
+				doneChunk(),
+			),
+			chunks(doneChunk()),
+		]);
+		const { cwd, runs, sessionId } = await setupRun(provider);
+		const run = collect(runs, sessionId);
+
+		runs.startMessage(sessionId, "write two files");
+
+		// Both calls execute in parallel, but the second prompt stays queued
+		// until the first one is answered.
+		const first = await waitForEvent(run.events, "approval_required");
+		expect(run.events.filter((event) => event.type === "approval_required")).toHaveLength(1);
+
+		expect(runs.resolveApproval(sessionId, first.approval.toolCallId, "allow")).toBe(true);
+		const second = await waitForApprovalCount(run.events, 2);
+		expect(second.approval.toolCallId).not.toBe(first.approval.toolCallId);
+		expect(runs.resolveApproval(sessionId, second.approval.toolCallId, "allow")).toBe(true);
+
+		const finished = await run.finished();
+		expect(finished.reason).toBe("completed");
+		expect(await readFile(join(cwd, "a.txt"), "utf8")).toBe("one");
+		expect(await readFile(join(cwd, "b.txt"), "utf8")).toBe("two");
+		run.unsubscribe();
+	});
+
+	it("cancels cleanly while another approval is still queued", async () => {
+		const provider = new ScriptedProvider([
+			chunks(
+				twoToolCallsChunk(
+					{ id: "call-1", name: "write_file", args: JSON.stringify({ path: "a.txt", content: "one" }) },
+					{ id: "call-2", name: "write_file", args: JSON.stringify({ path: "b.txt", content: "two" }) },
+				),
+				doneChunk(),
+			),
+		]);
+		const { cwd, runs, sessionId } = await setupRun(provider);
+		const run = collect(runs, sessionId);
+
+		runs.startMessage(sessionId, "write two files");
+		await waitForEvent(run.events, "approval_required");
+		runs.cancel(sessionId);
+		const finished = await run.finished();
+
+		expect(finished.reason).toBe("cancelled");
+		expect(await fileExists(join(cwd, "a.txt"))).toBe(false);
+		expect(await fileExists(join(cwd, "b.txt"))).toBe(false);
+		expect(runs.isRunning(sessionId)).toBe(false);
+		run.unsubscribe();
+	});
+
 	it("denies pending approvals when the run is cancelled", async () => {
 		const provider = new ScriptedProvider([
 			chunks(
@@ -272,6 +347,46 @@ describe("RunManager", () => {
 
 		expect(finished.reason).toBe("cancelled");
 		expect(runs.activeCount).toBe(0);
+		run.unsubscribe();
+	});
+
+	it("runs delegate calls and rolls subagent cost into the session", async () => {
+		const provider = new ScriptedProvider([
+			chunks(
+				toolCallChunk(
+					"call-1",
+					"delegate",
+					JSON.stringify({ prompt: "Find the answer", description: "investigate" }),
+				),
+				doneChunk(),
+			),
+			chunks(
+				textChunk("The answer is 42"),
+				usageChunk({ prompt_tokens: 100, completion_tokens: 20, total_tokens: 120, cost: 0.05 }),
+			),
+			chunks(textChunk("Thanks"), doneChunk()),
+		]);
+		const { runs, sessionId, handle } = await setupRun(provider);
+		const run = collect(runs, sessionId);
+
+		runs.startMessage(sessionId, "delegate this");
+		const finished = await run.finished();
+
+		expect(finished.reason).toBe("completed");
+		// The prompt is rendered from the run's registry, so the subagent tool is
+		// documented for the main agent.
+		expect(provider.requests[0]?.messages[0]?.content).toContain("**delegate**");
+		// The parent's follow-up request carries the subagent's report.
+		const parentFollowUp = provider.requests[2];
+		expect(
+			parentFollowUp?.messages.some(
+				(message) => message.role === "tool" && message.content?.includes("The answer is 42"),
+			),
+		).toBe(true);
+		// The subagent loop only sees the read-only workspace tools.
+		const subagentTools = provider.requests[1]?.tools?.map((tool) => tool.function.name).sort();
+		expect(subagentTools).toEqual(["grep", "read_file"]);
+		expect(handle.getCost()).toBe(0.05);
 		run.unsubscribe();
 	});
 

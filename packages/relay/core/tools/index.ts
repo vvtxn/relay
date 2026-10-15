@@ -1,9 +1,12 @@
 export { createToolRegistry, defineTool, getDefinitions, ToolError } from "./types.ts";
 export type { Tool, ToolRegistry, ToolResult } from "./types.ts";
 export { type ApprovalHandler, type ApprovalOptions, withApproval } from "./approval.ts";
+export { createDelegateTool, type DelegateToolOptions } from "./delegate.ts";
 
+import { basename, dirname, join } from "node:path";
+import { realpathSync } from "node:fs";
 import { Effect } from "effect";
-import { resolveRealWithinRoot } from "../workspace.ts";
+import { resolveRealWithinRoot, resolveWithinRoot } from "../workspace.ts";
 import { bashTool, createBashTool } from "./bash.ts";
 import { editFileTool } from "./edit.ts";
 import { grepTool } from "./grep.ts";
@@ -15,13 +18,40 @@ import { toToolError, type Tool } from "./types.ts";
 export const defaultTools: Tool[] = [bashTool, readFileTool, writeFileTool, editFileTool, grepTool];
 
 /**
+ * Synchronous lock key for a file tool's `path` argument: the canonical path
+ * inside the root (symlinks resolved when they can be, so aliases of the same
+ * file share one key). Escaping paths collapse into one key — they are rejected
+ * before touching the filesystem anyway.
+ */
+function fileResourceKey(root: string, input: unknown): string {
+	const obj = (input ?? {}) as Record<string, unknown>;
+	const rel = typeof obj.path === "string" ? obj.path : ".";
+	const abs = resolveWithinRoot(root, rel);
+	if (!abs) return "outside-root";
+	try {
+		return realpathSync(abs);
+	} catch {
+		// The file may not exist yet (e.g. write_file): canonicalize the parent.
+		try {
+			return join(realpathSync(dirname(abs)), basename(abs));
+		} catch {
+			return abs;
+		}
+	}
+}
+
+/**
  * Rewrites a tool's `path` argument to an absolute path inside `root`,
  * rejecting paths that escape it (including via symlinks). Tools without a
  * path argument (only grep, which defaults to ".") search the root itself.
+ *
+ * Also attaches the resolved path as the tool's `resourceKey`, so the agent
+ * loop serializes concurrent calls that touch the same file.
  */
 function confinePathArg(tool: Tool, root: string): Tool {
 	return {
 		...tool,
+		resourceKey: (input) => fileResourceKey(root, input),
 		execute: (input) =>
 			Effect.gen(function* () {
 				const obj = (input ?? {}) as Record<string, unknown>;

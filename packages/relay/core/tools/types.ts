@@ -13,6 +13,8 @@ export interface ToolResult {
 		durationMs?: number;
 		/** Unified diff output from file-editing tools */
 		diff?: string;
+		/** Cost accumulated by nested agent work (the `delegate` tool) */
+		cost?: number;
 	};
 }
 
@@ -37,6 +39,20 @@ export function toToolError(error: unknown): ToolError {
 export interface Tool {
 	definition: ToolDefinition;
 	readonly?: boolean;
+	/**
+	 * One-line guidance rendered into a system prompt's tool section by
+	 * `buildSystemPrompt`. Keep it to policy the schema description doesn't
+	 * carry ("prefer this over bash cat"); schemas own the mechanics. When
+	 * absent, the prompt falls back to the description's first sentence.
+	 */
+	usageHint?: string;
+	/**
+	 * Resource key for dependency-aware execution of side-effect tools: two
+	 * calls with the same key never run at the same time, and calls without a
+	 * key (e.g. bash) are exclusive — they never overlap any other side-effect
+	 * call. Ignored for readonly tools.
+	 */
+	resourceKey?: (input: unknown) => string | undefined;
 	execute(input: unknown): Effect.Effect<ToolResult, ToolError>;
 }
 
@@ -72,6 +88,8 @@ export function defineTool(opts: {
 	description: string;
 	parameters: JsonSchema;
 	readonly?: boolean;
+	usageHint?: string;
+	resourceKey?: (input: unknown) => string | undefined;
 	execute: (input: unknown) => Promise<ToolResult>;
 }): Tool {
 	return {
@@ -84,6 +102,8 @@ export function defineTool(opts: {
 			},
 		},
 		...(opts.readonly !== undefined ? { readonly: opts.readonly } : {}),
+		...(opts.usageHint !== undefined ? { usageHint: opts.usageHint } : {}),
+		...(opts.resourceKey !== undefined ? { resourceKey: opts.resourceKey } : {}),
 		execute: (input) =>
 			Effect.tryPromise({
 				try: () => opts.execute(input),

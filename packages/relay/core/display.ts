@@ -44,6 +44,7 @@ export const TOOL_DISPLAY_NAMES: Record<string, string> = {
 	edit_file: "edit",
 	grep: "grep",
 	bash: "run",
+	delegate: "delegate",
 };
 
 export function getToolDisplayName(name: string): string {
@@ -66,6 +67,18 @@ export function summarizeToolArgs(name: string, args: string): string {
 				return parsed.pattern ?? args;
 			case "bash":
 				return parsed.command ?? args;
+			case "delegate": {
+				const description =
+					typeof parsed.description === "string" && parsed.description.trim()
+						? parsed.description.trim()
+						: "";
+				const firstLine =
+					String(parsed.prompt ?? "")
+						.split("\n")[0]
+						?.trim() ?? "";
+				const label = description || firstLine || args;
+				return label.length > 80 ? `${label.slice(0, 80)}...` : label;
+			}
 			default:
 				return Object.entries(parsed as Record<string, unknown>)
 					.filter(([, v]) => typeof v === "string" && v.length < 100)
@@ -199,6 +212,8 @@ export function summarizeToolCalls(toolCalls: UIToolCall[]): string {
 				return `Edited ${formatCount(count, "file", "files")}`;
 			case "bash":
 				return `Ran ${formatCount(count, "command", "commands")}`;
+			case "delegate":
+				return `Delegated ${formatCount(count, "task", "tasks")}`;
 			default: {
 				const label = getToolDisplayName(name);
 				return `${label.charAt(0).toUpperCase()}${label.slice(1)} ${formatCount(count, "time", "times")}`;

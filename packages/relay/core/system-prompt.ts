@@ -1,11 +1,15 @@
-import { readFileSync } from "node:fs";
+import { buildSystemPrompt } from "./prompts.ts";
+import { defaultTools } from "./tools/index.ts";
 
 /**
- * Default system prompt for coding agents, shared across clients (TUI, web).
+ * Default system prompt for coding agents using `defaultTools`, shared across
+ * clients.
  *
- * Frontends may pass their own prompt via `AgentConfig.systemPrompt`; this is
- * just the shared default, read from the bundled markdown file at startup.
+ * Frontends may pass their own prompt via `AgentConfig.systemPrompt`, or build
+ * one tuned to their registry with {@link buildSystemPrompt}.
  */
-const SYSTEM_PROMPT = readFileSync(new URL("./system-prompt.md", import.meta.url), "utf8");
+const SYSTEM_PROMPT = buildSystemPrompt({ mode: "main", tools: defaultTools });
 
 export { SYSTEM_PROMPT };
+export { buildSystemPrompt } from "./prompts.ts";
+export type { BuildSystemPromptOptions, SystemPromptMode } from "./prompts.ts";

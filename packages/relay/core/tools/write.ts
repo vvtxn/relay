@@ -5,6 +5,7 @@ import { defineTool } from "./types.ts";
 export const writeFileTool = defineTool({
 	name: "write_file",
 	description: "Write content to a file. Creates the file if it does not exist, or overwrites it if it does.",
+	usageHint: "Write or create files. Always use this instead of echo/heredoc via bash.",
 	parameters: {
 		type: "object",
 		properties: {
