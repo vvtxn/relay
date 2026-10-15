@@ -77,8 +77,12 @@ bash is not (documented in relay core AGENTS.md).
 
 Workspace creation and registration run through `validateWorkspacePath` (core): the path must be an absolute, existing
 directory whose canonical (symlink-resolved) path sits within `config.workspaceRoots`. `handleCreateSession` stores the
-canonical path and registers it; `handleListWorkspaces` marks deleted directories with `exists: false`; `RunManager`
-re-validates the cwd before every run.
+canonical path and registers it; read paths (`?cwd=` on session lists) and unregistration canonicalize the same way, so
+a symlinked path matches the stored workspace. `handleListWorkspaces` marks deleted directories with `exists: false` and
+only injects the server default when nothing else is known; a removed workspace is tombstoned (`hidden_workspaces`) and
+comes back when it is re-registered or a new session is created in it. Because empty sessions are not persisted until
+their first message, `handleCreateSession` reuses an idle empty session from the RunManager instead of creating a new
+one. `RunManager` re-validates the cwd before every run.
 
 ### Auth
 
@@ -129,7 +133,7 @@ chooses a random port.
 | `/api/workspace`             | GET    | Server default cwd                                    |
 | `/api/workspaces`            | GET    | Distinct workspaces (cwds) with session counts        |
 | `/api/workspaces`            | POST   | Validate + register a workspace                       |
-| `/api/workspaces`            | DELETE | Unregister a workspace (sessions are kept)            |
+| `/api/workspaces`            | DELETE | Hide a workspace (sessions kept; re-add or a new session restores it) |
 | `/api/workspaces/validate`   | GET    | Validate a candidate cwd without registering it       |
 | `/api/sessions?cwd=`         | GET    | Session summaries for a workspace                     |
 | `/api/sessions`              | POST   | Create session                                        |

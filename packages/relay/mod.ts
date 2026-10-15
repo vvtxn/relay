@@ -166,6 +166,7 @@ export {
 	validateWorkspacePathSync,
 } from "./core/workspace.ts";
 export type { WorkspaceRejection, WorkspaceValidation } from "./core/workspace.ts";
+export { decodeWorkspaceToken, encodeWorkspaceToken } from "./core/workspace-token.ts";
 
 // API types
 export type {

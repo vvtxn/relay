@@ -70,3 +70,5 @@ export {
 	validateWorkspacePathSync,
 } from "./workspace.ts";
 export type { WorkspaceRejection, WorkspaceValidation } from "./workspace.ts";
+
+export { decodeWorkspaceToken, encodeWorkspaceToken } from "./workspace-token.ts";

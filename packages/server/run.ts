@@ -208,6 +208,23 @@ export class RunManager {
 		return session.handle;
 	}
 
+	/**
+	 * The idle, never-used session for this owner and workspace, when one is
+	 * still open. Empty sessions are not persisted until their first message,
+	 * so this is the only place "reuse the blank chat" can be enforced; it keeps
+	 * repeated `relay` launches and "New chat" clicks from piling up handles.
+	 */
+	findIdleEmpty(ownerId: string, cwd: string): SessionHandle | null {
+		for (const session of this.sessions.values()) {
+			const handle = session.handle;
+			if (!handle || session.ownerId !== ownerId || session.run) continue;
+			if (handle.getHeader().cwd !== cwd) continue;
+			if (handle.getEntries().length > 0) continue;
+			return handle;
+		}
+		return null;
+	}
+
 	/** Returns 202-style start; throws RunConflictError when a run is active. */
 	startMessage(sessionId: string, content: string): void {
 		const session = this.ensureSession(sessionId);

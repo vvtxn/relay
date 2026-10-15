@@ -1,17 +1,42 @@
 import { createRootRoute, createRoute, createRouter, Outlet, redirect } from "@tanstack/solid-router";
+import { decodeWorkspaceToken } from "@vvtxn/relay/core/workspace-token.ts";
 import { queryClient } from "#/api/query-client.ts";
-import { sessionQuery } from "#/api/queries.ts";
+import { sessionQuery, sessionsQuery, workspacesQuery } from "#/api/queries.ts";
 import { BootScreen } from "#/components/BootScreen.tsx";
-import { BootPage } from "#/pages/BootPage.tsx";
+import { OverviewPage } from "#/pages/OverviewPage.tsx";
 import { SessionPage } from "#/pages/SessionPage.tsx";
 import { SessionSettingsRoute, SettingsPage } from "#/pages/SettingsPage.tsx";
+import { WorkspacePage } from "#/pages/WorkspacePage.tsx";
 
 const rootRoute = createRootRoute({ component: () => <Outlet /> });
 
+/** Root view: every workspace, plus a way back into the last chat. */
 const indexRoute = createRoute({
 	getParentRoute: () => rootRoute,
 	path: "/",
-	component: BootPage,
+	component: OverviewPage,
+});
+
+const workspaceRoute = createRoute({
+	getParentRoute: () => rootRoute,
+	path: "/w/$token",
+	loader: {
+		handler: async ({ params }) => {
+			const cwd = decodeWorkspaceToken(params.token);
+			if (!cwd) throw redirect({ to: "/" });
+			// Warm the pane's data; `intent` preloading warms this on link hover,
+			// so a workspace opens without a loading flash. Failures settle into
+			// the page's own error states rather than the router's.
+			await Promise.allSettled([
+				queryClient.ensureQueryData(workspacesQuery),
+				queryClient.ensureQueryData(sessionsQuery(cwd)),
+			]);
+			return { cwd };
+		},
+		staleReloadMode: "blocking",
+		pendingMs: Infinity,
+	},
+	component: WorkspacePage,
 });
 
 const sessionRoute = createRoute({
@@ -53,7 +78,12 @@ const settingsRoute = createRoute({
 	component: SettingsPage,
 });
 
-const routeTree = rootRoute.addChildren([indexRoute, sessionRoute.addChildren([sessionSettingsRoute]), settingsRoute]);
+const routeTree = rootRoute.addChildren([
+	indexRoute,
+	workspaceRoute,
+	sessionRoute.addChildren([sessionSettingsRoute]),
+	settingsRoute,
+]);
 
 export const router = createRouter({
 	routeTree,

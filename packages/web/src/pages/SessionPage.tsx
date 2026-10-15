@@ -4,15 +4,15 @@ import { useQuery } from "@tanstack/solid-query";
 import { configQuery, meQuery, sessionQuery } from "#/api/queries.ts";
 import { RelayError } from "@vvtxn/client/services.ts";
 import { signOut } from "#/auth/auth.ts";
+import { AppShell } from "#/components/AppShell.tsx";
 import { ApprovalDialog } from "#/components/ApprovalDialog.tsx";
 import { BootError, BootScreen } from "#/components/BootScreen.tsx";
 import { ChatView } from "#/components/ChatView.tsx";
 import { Composer } from "#/components/Composer.tsx";
 import { DiffModal } from "#/components/DiffModal.tsx";
-import { Sidebar } from "#/components/Sidebar.tsx";
 import { StatusBar } from "#/components/StatusBar.tsx";
 import { ensureSession, startStream, stopStream } from "#/state/session.ts";
-import { setHomeDir } from "#/state/workspace.ts";
+import { rememberWorkspace, setHomeDir } from "#/state/workspace.ts";
 import { VERSION } from "#/version.ts";
 
 function errorMessage(error: unknown): string {
@@ -54,6 +54,12 @@ export function SessionPage() {
 		if (home) setHomeDir(home);
 	});
 
+	// The open session's workspace is where the sidebar targets "New chat".
+	createEffect(() => {
+		const cwd = session.data?.header.cwd;
+		if (cwd) rememberWorkspace(cwd);
+	});
+
 	// Seed persisted entries once per session, then keep the live stream as the
 	// source of truth. Refetches must never reset state or restart the stream.
 	createEffect(() => {
@@ -66,10 +72,6 @@ export function SessionPage() {
 
 	onCleanup(stopStream);
 
-	const goToSession = (id: string) => {
-		void navigate({ to: "/s/$sessionId", params: { sessionId: id } });
-	};
-
 	const goToSettings = () => {
 		void navigate({ to: "/s/$sessionId/settings", params: { sessionId: sessionId() } });
 	};
@@ -80,28 +82,26 @@ export function SessionPage() {
 			fallback={<BootError message={errorMessage(me.error ?? config.error)} />}
 		>
 			<Show when={me.data && config.data && session.data} fallback={<BootScreen />}>
-				<div class="app" inert={settingsOpen()}>
-					<Sidebar
+				<AppShell
+					userName={me.data!.name}
+					avatarUrl={me.data!.avatarUrl}
+					activeSessionId={sessionId()}
+					activeWorkspace={session.data!.header.cwd}
+					inert={settingsOpen()}
+					onOpenSettings={goToSettings}
+				>
+					<StatusBar
+						branch={session.data!.branch}
 						userName={me.data!.name}
 						avatarUrl={me.data!.avatarUrl}
-						activeSessionId={sessionId()}
-						onSelect={goToSession}
-						onOpenSettings={goToSettings}
+						contextWindow={config.data!.contextTokens}
+						onSignOut={() => void signOut()}
 					/>
-					<main class="main">
-						<StatusBar
-							branch={session.data!.branch}
-							userName={me.data!.name}
-							avatarUrl={me.data!.avatarUrl}
-							contextWindow={config.data!.contextTokens}
-							onSignOut={() => void signOut()}
-						/>
-						<ChatView model={config.data!.model} version={VERSION} />
-						<Composer sessionId={sessionId()} />
-						<ApprovalDialog sessionId={sessionId()} />
-						<DiffModal />
-					</main>
-				</div>
+					<ChatView model={config.data!.model} version={VERSION} />
+					<Composer sessionId={sessionId()} />
+					<ApprovalDialog sessionId={sessionId()} />
+					<DiffModal />
+				</AppShell>
 				<Outlet />
 			</Show>
 		</Show>
