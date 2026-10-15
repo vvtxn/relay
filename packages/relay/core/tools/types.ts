@@ -37,6 +37,13 @@ export function toToolError(error: unknown): ToolError {
 export interface Tool {
 	definition: ToolDefinition;
 	readonly?: boolean;
+	/**
+	 * Resource key for dependency-aware execution of side-effect tools: two
+	 * calls with the same key never run at the same time, and calls without a
+	 * key (e.g. bash) are exclusive — they never overlap any other side-effect
+	 * call. Ignored for readonly tools.
+	 */
+	resourceKey?: (input: unknown) => string | undefined;
 	execute(input: unknown): Effect.Effect<ToolResult, ToolError>;
 }
 
@@ -72,6 +79,7 @@ export function defineTool(opts: {
 	description: string;
 	parameters: JsonSchema;
 	readonly?: boolean;
+	resourceKey?: (input: unknown) => string | undefined;
 	execute: (input: unknown) => Promise<ToolResult>;
 }): Tool {
 	return {
@@ -84,6 +92,7 @@ export function defineTool(opts: {
 			},
 		},
 		...(opts.readonly !== undefined ? { readonly: opts.readonly } : {}),
+		...(opts.resourceKey !== undefined ? { resourceKey: opts.resourceKey } : {}),
 		execute: (input) =>
 			Effect.tryPromise({
 				try: () => opts.execute(input),

@@ -12,7 +12,8 @@ You take initiative when the user asks you to do something, but maintain balance
 2. Not surprising the user — if they ask how to approach something, answer first before acting
 
 When you know you need to run multiple tools, run them in parallel if they are independent operations. Read-only tools
-(read_file, grep) are always safe to run in parallel. Do not make multiple edits to the same file in parallel.
+(read_file, grep) are always safe to run in parallel, and edits to different files can be requested in the same turn —
+the runtime executes them concurrently. Never make multiple edits to the same file in parallel.
 
 ## Tool Usage
 

@@ -1,4 +1,4 @@
-import { Cause, Deferred, Effect, Exit, Fiber, Queue, Ref, Stream } from "effect";
+import { Cause, Deferred, Effect, Exit, Fiber, Queue, Ref, Semaphore, Stream } from "effect";
 import type { LLMProvider } from "@vvtxn/relay/api/types.ts";
 import { createToolRegistry, createWorkspaceTools, withApproval } from "@vvtxn/relay/core/tools/index.ts";
 import { summarizeToolArgs } from "@vvtxn/relay/core/display.ts";
@@ -39,6 +39,13 @@ interface SessionRecord {
 	ownerId: string | null;
 	readonly subscribers: Set<Queue.Queue<ServerEvent>>;
 	readonly alwaysApproved: Set<string>;
+	/**
+	 * Serializes approval prompts. Side-effect tools may execute in parallel
+	 * (the agent loop runs them concurrently across distinct resources), but
+	 * the protocol surfaces one pending approval at a time, so the prompt
+	 * section of `requestApproval` holds this permit.
+	 */
+	readonly approvalLock: Semaphore.Semaphore;
 	tokens: number;
 	cost: number;
 	run: ActiveRun | null;
@@ -493,6 +500,7 @@ export class RunManager {
 				ownerId: null,
 				subscribers: new Set(),
 				alwaysApproved: new Set(),
+				approvalLock: Semaphore.makeUnsafe(1),
 				tokens: 0,
 				cost: 0,
 				run: null,
@@ -507,6 +515,12 @@ export class RunManager {
 	 * `Deferred` that `resolveApproval` completes and that {@link finalizeRun}
 	 * denies if the run ends first; because the wait sits inside the run fiber,
 	 * interruption cancels it automatically.
+	 *
+	 * Prompts are serialized per session: parallel side-effect tools may reach
+	 * this point together, while the protocol surfaces one pending approval at a
+	 * time. Queued calls re-check `alwaysApproved` and the abort signal, so an
+	 * "always" decision (or a cancellation) skips the prompt for everything
+	 * still waiting behind it.
 	 */
 	private requestApproval(
 		sessionId: string,
@@ -520,15 +534,20 @@ export class RunManager {
 		if (session?.run?.abort.signal.aborted) return Effect.succeed(false);
 
 		const publish = (event: ServerEvent): void => this.publish(sessionId, event);
-		const deferred = Deferred.makeUnsafe<ApprovalDecision>();
-		const toolCallId = crypto.randomUUID();
-		const info: PendingApprovalInfo = {
-			toolCallId,
-			toolName: name,
-			summary: summarizeToolArgs(name, JSON.stringify(input)),
-		};
+		const request = Effect.gen(function* () {
+			// Re-check after acquiring the lock: while this call was queued, an
+			// earlier prompt may have been answered "always" — or the run cancelled.
+			if (session?.alwaysApproved.has(name)) return true;
+			if (session?.run?.abort.signal.aborted) return false;
 
-		return Effect.gen(function* () {
+			const deferred = Deferred.makeUnsafe<ApprovalDecision>();
+			const toolCallId = crypto.randomUUID();
+			const info: PendingApprovalInfo = {
+				toolCallId,
+				toolName: name,
+				summary: summarizeToolArgs(name, JSON.stringify(input)),
+			};
+
 			yield* Ref.update(runRef, (state) => {
 				const pendingApprovals = new Map(state.pendingApprovals);
 				pendingApprovals.set(toolCallId, { deferred, info });
@@ -540,6 +559,7 @@ export class RunManager {
 			if (decision === "always") session?.alwaysApproved.add(name);
 			return decision !== "deny";
 		});
+		return session ? Semaphore.withPermit(session.approvalLock)(request) : request;
 	}
 }
 

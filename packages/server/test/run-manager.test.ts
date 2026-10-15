@@ -78,6 +78,23 @@ async function waitForEvent<T extends ServerEvent["type"]>(
 	throw new Error(`event ${type} not received in time`);
 }
 
+async function waitForApprovalCount(
+	events: ServerEvent[],
+	count: number,
+	timeoutMs = 2000,
+): Promise<Extract<ServerEvent, { type: "approval_required" }>> {
+	const deadline = Date.now() + timeoutMs;
+	while (Date.now() < deadline) {
+		const approvals = events.filter(
+			(event): event is Extract<ServerEvent, { type: "approval_required" }> => event.type === "approval_required",
+		);
+		const latest = approvals[count - 1];
+		if (approvals.length >= count && latest) return latest;
+		await new Promise((resolve) => setTimeout(resolve, 5));
+	}
+	throw new Error(`fewer than ${count} approval_required events received in time`);
+}
+
 async function fileExists(path: string): Promise<boolean> {
 	try {
 		await readFile(path);
@@ -177,6 +194,64 @@ describe("RunManager", () => {
 		expect(await readFile(join(cwd, "a.txt"), "utf8")).toBe("one");
 		expect(await readFile(join(cwd, "b.txt"), "utf8")).toBe("two");
 		expect(run.events.filter((event) => event.type === "approval_required")).toHaveLength(1);
+		run.unsubscribe();
+	});
+
+	it("serializes approval prompts for parallel side-effect calls", async () => {
+		const provider = new ScriptedProvider([
+			chunks(
+				twoToolCallsChunk(
+					{ id: "call-1", name: "write_file", args: JSON.stringify({ path: "a.txt", content: "one" }) },
+					{ id: "call-2", name: "write_file", args: JSON.stringify({ path: "b.txt", content: "two" }) },
+				),
+				doneChunk(),
+			),
+			chunks(doneChunk()),
+		]);
+		const { cwd, runs, sessionId } = await setupRun(provider);
+		const run = collect(runs, sessionId);
+
+		runs.startMessage(sessionId, "write two files");
+
+		// Both calls execute in parallel, but the second prompt stays queued
+		// until the first one is answered.
+		const first = await waitForEvent(run.events, "approval_required");
+		expect(run.events.filter((event) => event.type === "approval_required")).toHaveLength(1);
+
+		expect(runs.resolveApproval(sessionId, first.approval.toolCallId, "allow")).toBe(true);
+		const second = await waitForApprovalCount(run.events, 2);
+		expect(second.approval.toolCallId).not.toBe(first.approval.toolCallId);
+		expect(runs.resolveApproval(sessionId, second.approval.toolCallId, "allow")).toBe(true);
+
+		const finished = await run.finished();
+		expect(finished.reason).toBe("completed");
+		expect(await readFile(join(cwd, "a.txt"), "utf8")).toBe("one");
+		expect(await readFile(join(cwd, "b.txt"), "utf8")).toBe("two");
+		run.unsubscribe();
+	});
+
+	it("cancels cleanly while another approval is still queued", async () => {
+		const provider = new ScriptedProvider([
+			chunks(
+				twoToolCallsChunk(
+					{ id: "call-1", name: "write_file", args: JSON.stringify({ path: "a.txt", content: "one" }) },
+					{ id: "call-2", name: "write_file", args: JSON.stringify({ path: "b.txt", content: "two" }) },
+				),
+				doneChunk(),
+			),
+		]);
+		const { cwd, runs, sessionId } = await setupRun(provider);
+		const run = collect(runs, sessionId);
+
+		runs.startMessage(sessionId, "write two files");
+		await waitForEvent(run.events, "approval_required");
+		runs.cancel(sessionId);
+		const finished = await run.finished();
+
+		expect(finished.reason).toBe("cancelled");
+		expect(await fileExists(join(cwd, "a.txt"))).toBe(false);
+		expect(await fileExists(join(cwd, "b.txt"))).toBe(false);
+		expect(runs.isRunning(sessionId)).toBe(false);
 		run.unsubscribe();
 	});
 

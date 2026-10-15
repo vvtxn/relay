@@ -102,6 +102,7 @@ export function chunksThenHang(...items: StreamChunk[]): StreamScript {
 export function fakeTool(options: {
 	name: string;
 	readonly: boolean;
+	resourceKey?: (input: unknown) => string | undefined;
 	execute: (input: unknown) => Effect.Effect<ToolResult>;
 }): Tool {
 	return {
@@ -110,6 +111,7 @@ export function fakeTool(options: {
 			function: { name: options.name, description: options.name, parameters: { type: "object" } },
 		},
 		readonly: options.readonly,
+		...(options.resourceKey ? { resourceKey: options.resourceKey } : {}),
 		execute: options.execute,
 	};
 }

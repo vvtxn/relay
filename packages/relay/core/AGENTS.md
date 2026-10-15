@@ -54,7 +54,9 @@ core/
 2. Build context (system prompt + history + tools)
 3. Stream the LLM response via `provider.stream()` (an Effect `Stream`)
 4. Parse response for tool calls
-5. Execute tools: read-only tools in parallel (`Effect.forEach`, unbounded), side-effect tools sequentially
+5. Execute tools: read-only tools in parallel (unbounded); side-effect tools with dependency-aware concurrency — calls
+   sharing a resource (same file) are serialized, an exclusive tool (e.g. bash) waits for all earlier calls and blocks
+   all later ones, and independent calls overlap
 6. Emit `AgentEvent`s for the UI to consume
 7. Repeat until the assistant responds without tool calls
 
@@ -120,6 +122,7 @@ Tools are defined using `defineTool()`:
 interface Tool {
 	definition: ToolDefinition;
 	readonly?: boolean;
+	resourceKey?(input: unknown): string | undefined;
 	execute(input: unknown): Effect.Effect<ToolResult, ToolError>;
 }
 ```
@@ -130,7 +133,9 @@ Effect-based interface: an unexpected throw becomes a typed `ToolError`. Built-i
 
 `createWorkspaceTools(root)` returns the built-in tools rooted at a workspace directory: file tools resolve their `path`
 argument against `root` via `resolveWithinRoot` (escapes are rejected with an error result), and bash runs with `root`
-as its cwd. Note bash is not truly confined — shell commands can still use absolute paths.
+as its cwd. Note bash is not truly confined — shell commands can still use absolute paths. Each file tool also gets a
+`resourceKey` of its canonical path, so concurrent calls to the same file are serialized by the agent loop while calls
+to different files overlap; bash stays exclusive (no key).
 
 `withApproval(tools, handler)` wraps each tool's `execute` so calls are gated on an `Effect<boolean>` decision.
 Readonly tools skip approval by default (`skipReadonly: false` to change). Denials return an `isError` ToolResult, so
@@ -191,7 +196,9 @@ After concluding that a task is complete, always run these commands from the rep
 ## Code Patterns
 
 - Tools use `defineTool()` helper for consistent structure (async bodies, Effect interface)
-- Tools have a `readonly` flag for parallel execution optimization
+- Tools have a `readonly` flag for parallel execution optimization, and an optional `resourceKey` so the agent loop can
+  serialize side-effect calls that touch the same resource while running independent ones concurrently (`confinePathArg`
+  attaches the resolved file path for the workspace file tools; tools without a key are exclusive)
 - Use `ToolResult` with `isError` flag for error reporting; unexpected throws become `ToolError`
 - `ToolResult.meta.diff` carries unified diff output from `write_file` and `edit_file` for UI rendering; the server persists it on `tool_result` entries (`ToolResultEntry.diff`) so reloaded transcripts keep the diff
 - `diff.ts` generates unified diffs with a pure Myers algorithm and emits git-style headers (`diff --git` + file name) so UIs can render them with path-aware diff viewers

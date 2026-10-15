@@ -1,4 +1,4 @@
-import { Duration, Effect, Queue, Schedule, Stream } from "effect";
+import { Deferred, Duration, Effect, Queue, Schedule, Stream } from "effect";
 import type { DeltaToolCall, LLMProvider, Message, ToolCall, Usage } from "#/api/types.ts";
 import { ProviderError } from "../api/errors.ts";
 import { getDefinitions } from "./tools/types.ts";
@@ -201,8 +201,10 @@ function runLoop(
 				});
 			}
 
-			// Execute tool calls with dependency-aware ordering:
-			// read-only tools run in parallel first, then side-effect tools run sequentially
+			// Execute tool calls with dependency-aware ordering: readonly tools run
+			// in parallel first; side-effect tools run concurrently across distinct
+			// resources, while calls that share a resource (same file) or involve an
+			// exclusive tool (e.g. bash) keep their relative order.
 			const readonlyCalls = toolCalls.filter((tc) => config.tools.get(tc.function.name)?.readonly);
 			const sideEffectCalls = toolCalls.filter((tc) => !config.tools.get(tc.function.name)?.readonly);
 
@@ -214,8 +216,8 @@ function runLoop(
 					})),
 				);
 			}
-			for (const tc of sideEffectCalls) {
-				results.push(yield* executeTool(tc, config.tools, config.signal));
+			if (sideEffectCalls.length > 0) {
+				results.push(...(yield* executeSideEffectCalls(sideEffectCalls, config.tools, config.signal)));
 			}
 
 			// Emit results in original tool call order and collect tool result messages
@@ -285,6 +287,74 @@ function executeTool(
 		);
 		return { tc, result };
 	});
+}
+
+/**
+ * Executes side-effect tool calls with dependency-aware concurrency. A call
+ * waits for every earlier call that touches the same resource (as declared by
+ * `Tool.resourceKey`), and a call without a resource key is exclusive: it waits
+ * for all earlier calls and blocks all later ones. Independent calls overlap.
+ * Results are returned in call order.
+ */
+function executeSideEffectCalls(
+	calls: ToolCall[],
+	tools: ToolRegistry,
+	signal?: AbortSignal,
+): Effect.Effect<{ tc: ToolCall; result: ToolResult }[]> {
+	return Effect.gen(function* () {
+		const entries = calls.map((tc, index) => ({
+			tc,
+			index,
+			key: resourceKeyFor(tc, tools),
+			completed: Deferred.makeUnsafe<void>(),
+		}));
+
+		const results = yield* Effect.forEach(
+			entries,
+			(entry) =>
+				Effect.gen(function* () {
+					for (const earlier of entries.slice(0, entry.index)) {
+						if (conflicts(earlier.key, entry.key)) yield* Deferred.await(earlier.completed);
+					}
+					const executed = yield* executeTool(entry.tc, tools, signal);
+					yield* Deferred.succeed(entry.completed, undefined);
+					return { ...entry, result: executed.result };
+				}).pipe(
+					// Always release dependents: an interrupted call must not deadlock
+					// the calls waiting on it.
+					Effect.ensuring(Deferred.succeed(entry.completed, undefined)),
+				),
+			{ concurrency: "unbounded", discard: false },
+		);
+
+		return results.sort((a, b) => a.index - b.index).map(({ tc, result }) => ({ tc, result }));
+	});
+}
+
+/** True when two side-effect calls must not overlap. */
+function conflicts(a: string | undefined, b: string | undefined): boolean {
+	return a === undefined || b === undefined || a === b;
+}
+
+/**
+ * Resolves a side-effect call's resource key; `undefined` marks an exclusive
+ * call. Calls whose tool is unknown or whose arguments are malformed get a
+ * unique key — they fail without touching a resource, so they must not hold up
+ * unrelated calls.
+ */
+function resourceKeyFor(tc: ToolCall, tools: ToolRegistry): string | undefined {
+	const tool = tools.get(tc.function.name);
+	if (!tool) return `unknown:${tc.id}`;
+	if (!tool.resourceKey) return undefined;
+
+	let parsed: unknown;
+	try {
+		parsed = JSON.parse(tc.function.arguments);
+	} catch {
+		return `invalid:${tc.id}`;
+	}
+	sanitizeToolArgs(tc.function.name, parsed);
+	return tool.resourceKey(parsed);
 }
 
 function sanitizeToolArgs(toolName: string, args: unknown): void {

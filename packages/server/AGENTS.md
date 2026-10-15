@@ -61,7 +61,9 @@ Owns active runs, one per session:
 - `cancel()` interrupts the fiber; a single uninterruptible finalizer aborts the provider call, denies still-pending
   approvals (their `Deferred`s resolve), flushes the session handle, publishes `run_finished`, and releases the session
   when idle and unwatched
-- Approvals are `Deferred`s; `resolveApproval()` takes one out of the `Ref` atomically and resolves it
+- Approvals are `Deferred`s; `resolveApproval()` takes one out of the `Ref` atomically and resolves it. Prompts are
+  serialized per session (a semaphore): side-effect tools may execute in parallel, but the protocol surfaces one
+  pending approval at a time, and queued calls re-check `alwaysApproved`/abort before prompting
 - `subscribe`/`subscribeStream` register SSE consumers; `getRunState` serves the catch-up `run_state` snapshot
 - "always allow" is per session, in memory
 
