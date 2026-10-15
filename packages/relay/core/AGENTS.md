@@ -31,6 +31,7 @@ core/
 │   ├── index.ts          # Tool exports, defaultTools registry, createWorkspaceTools
 │   ├── types.ts          # Tool, ToolRegistry, ToolResult, ToolError types; defineTool helper
 │   ├── approval.ts       # withApproval wrapper (gate tool execution on an Effect decision)
+│   ├── delegate.ts       # createDelegateTool: read-only subagent factory over the agent loop
 │   ├── bash.ts           # Shell command execution (createBashTool factory, optional cwd)
 │   ├── read.ts           # File reading
 │   ├── write.ts          # File writing
@@ -136,6 +137,13 @@ argument against `root` via `resolveWithinRoot` (escapes are rejected with an er
 as its cwd. Note bash is not truly confined — shell commands can still use absolute paths. Each file tool also gets a
 `resourceKey` of its canonical path, so concurrent calls to the same file are serialized by the agent loop while calls
 to different files overlap; bash stays exclusive (no key).
+
+`createDelegateTool(options)` builds the `delegate` tool: each call runs a fresh, isolated `run()` with the given
+(typically read-only) tool registry — no conversation history, an appended subagent section in the system prompt, its
+own round cap, and the parent abort signal. The final report returns as a `ToolResult`, and subagent cost is
+aggregated into `meta.cost` so the server can roll it into the session total. The tool is `readonly`, so calls skip
+approval and run in the parallel readonly phase; an internal semaphore caps concurrent subagent loops
+(`maxConcurrency`, default 3). The server wires one per run with `read_file` + `grep`.
 
 `withApproval(tools, handler)` wraps each tool's `execute` so calls are gated on an `Effect<boolean>` decision.
 Readonly tools skip approval by default (`skipReadonly: false` to change). Denials return an `isError` ToolResult, so

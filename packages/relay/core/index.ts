@@ -19,8 +19,15 @@ export type { DiffLine, UIMessage, UIToolCall } from "./display.ts";
 export { estimateMessageTokens, estimateTokens, trimContext } from "./context.ts";
 export type { TrimOptions } from "./context.ts";
 
-export { createToolRegistry, createWorkspaceTools, defaultTools, defineTool, getDefinitions } from "./tools/index.ts";
-export type { Tool, ToolRegistry, ToolResult } from "./tools/index.ts";
+export {
+	createDelegateTool,
+	createToolRegistry,
+	createWorkspaceTools,
+	defaultTools,
+	defineTool,
+	getDefinitions,
+} from "./tools/index.ts";
+export type { DelegateToolOptions, Tool, ToolRegistry, ToolResult } from "./tools/index.ts";
 export { ToolError } from "./tools/index.ts";
 export { type ApprovalHandler, type ApprovalOptions, withApproval } from "./tools/approval.ts";
 

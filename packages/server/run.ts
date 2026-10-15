@@ -1,6 +1,11 @@
 import { Cause, Deferred, Effect, Exit, Fiber, Queue, Ref, Semaphore, Stream } from "effect";
 import type { LLMProvider } from "@vvtxn/relay/api/types.ts";
-import { createToolRegistry, createWorkspaceTools, withApproval } from "@vvtxn/relay/core/tools/index.ts";
+import {
+	createDelegateTool,
+	createToolRegistry,
+	createWorkspaceTools,
+	withApproval,
+} from "@vvtxn/relay/core/tools/index.ts";
 import { summarizeToolArgs } from "@vvtxn/relay/core/display.ts";
 import { expandMentions, validateWorkspacePath } from "@vvtxn/relay/core/workspace.ts";
 import { entriesToMessages, type SessionHandle, stripAttachedContext } from "@vvtxn/relay/core/sessions/index.ts";
@@ -286,8 +291,25 @@ export class RunManager {
 				}
 			}
 
+			const workspaceTools = createWorkspaceTools(cwd);
+			// Subagents get a fresh loop with read-only workspace tools and no
+			// access to this conversation; their cost rolls into the session below.
+			const delegate = createDelegateTool({
+				provider,
+				model: config.model,
+				systemPrompt: SYSTEM_PROMPT,
+				tools: createToolRegistry(workspaceTools.filter((tool) => tool.readonly)),
+				maxToolRounds: 10,
+				temperature: config.temperature,
+				contextLimit: {
+					maxTokens: config.maxTokens,
+					preserveRecentTurns: config.preserveRecentTurns,
+				},
+				maxTokens: config.maxCompletionTokens,
+				signal: abort.signal,
+			});
 			const tools = createToolRegistry(
-				withApproval(createWorkspaceTools(cwd), (tool, input) => requestApproval(tool, input)),
+				withApproval([...workspaceTools, delegate], (tool, input) => requestApproval(tool, input)),
 			);
 
 			// The agent loop is a Stream of events; the run fiber consumes it and
@@ -388,6 +410,15 @@ export class RunManager {
 						return { ...state, draftToolCalls };
 					});
 					publish({ type: "tool_result", id: event.id, result: event.result });
+					// Subagent cost rolls into the session total; the next
+					// `message_complete` publishes the updated numbers.
+					if (event.result.meta?.cost) {
+						const session = getSession();
+						if (session) {
+							session.cost += event.result.meta.cost;
+							session.handle?.setCost(session.cost);
+						}
+					}
 					return;
 				}
 				case "message_complete": {

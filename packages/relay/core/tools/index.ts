@@ -1,6 +1,7 @@
 export { createToolRegistry, defineTool, getDefinitions, ToolError } from "./types.ts";
 export type { Tool, ToolRegistry, ToolResult } from "./types.ts";
 export { type ApprovalHandler, type ApprovalOptions, withApproval } from "./approval.ts";
+export { createDelegateTool, type DelegateToolOptions } from "./delegate.ts";
 
 import { basename, dirname, join } from "node:path";
 import { realpathSync } from "node:fs";

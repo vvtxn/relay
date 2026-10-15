@@ -25,6 +25,10 @@ the runtime executes them concurrently. Never make multiple edits to the same fi
 - **edit_file** — Edit files with find-and-replace. Always use this instead of `sed`/`awk`
 - **grep** — Search files with regex patterns. Always use this instead of `grep`/`rg` via bash. Use the `glob` parameter
   to filter by file type
+- **delegate** — Hand a self-contained investigation to a read-only subagent and get back one report. Use it for
+  independent research that would otherwise flood your context (e.g. mapping an unfamiliar subsystem), and issue
+  several delegate calls in one turn to run them in parallel. The subagent cannot see this conversation or ask
+  questions, so give it a complete prompt: what to find, where to look, and what the report should contain
 
 All file paths are relative to the current working directory.
 

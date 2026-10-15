@@ -94,13 +94,14 @@ export type { TrimOptions } from "./core/context.ts";
 
 // Tools
 export {
+	createDelegateTool,
 	createToolRegistry,
 	createWorkspaceTools,
 	defaultTools,
 	defineTool,
 	getDefinitions,
 } from "./core/tools/index.ts";
-export type { Tool, ToolRegistry, ToolResult } from "./core/tools/index.ts";
+export type { DelegateToolOptions, Tool, ToolRegistry, ToolResult } from "./core/tools/index.ts";
 export { ToolError } from "./core/tools/index.ts";
 export { type ApprovalHandler, type ApprovalOptions, withApproval } from "./core/tools/approval.ts";
 

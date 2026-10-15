@@ -13,6 +13,8 @@ export interface ToolResult {
 		durationMs?: number;
 		/** Unified diff output from file-editing tools */
 		diff?: string;
+		/** Cost accumulated by nested agent work (the `delegate` tool) */
+		cost?: number;
 	};
 }
 

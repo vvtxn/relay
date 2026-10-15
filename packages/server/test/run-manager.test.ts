@@ -350,6 +350,43 @@ describe("RunManager", () => {
 		run.unsubscribe();
 	});
 
+	it("runs delegate calls and rolls subagent cost into the session", async () => {
+		const provider = new ScriptedProvider([
+			chunks(
+				toolCallChunk(
+					"call-1",
+					"delegate",
+					JSON.stringify({ prompt: "Find the answer", description: "investigate" }),
+				),
+				doneChunk(),
+			),
+			chunks(
+				textChunk("The answer is 42"),
+				usageChunk({ prompt_tokens: 100, completion_tokens: 20, total_tokens: 120, cost: 0.05 }),
+			),
+			chunks(textChunk("Thanks"), doneChunk()),
+		]);
+		const { runs, sessionId, handle } = await setupRun(provider);
+		const run = collect(runs, sessionId);
+
+		runs.startMessage(sessionId, "delegate this");
+		const finished = await run.finished();
+
+		expect(finished.reason).toBe("completed");
+		// The parent's follow-up request carries the subagent's report.
+		const parentFollowUp = provider.requests[2];
+		expect(
+			parentFollowUp?.messages.some(
+				(message) => message.role === "tool" && message.content?.includes("The answer is 42"),
+			),
+		).toBe(true);
+		// The subagent loop only sees the read-only workspace tools.
+		const subagentTools = provider.requests[1]?.tools?.map((tool) => tool.function.name).sort();
+		expect(subagentTools).toEqual(["grep", "read_file"]);
+		expect(handle.getCost()).toBe(0.05);
+		run.unsubscribe();
+	});
+
 	it("persists entries and usage, and tracks tokens and cost", async () => {
 		const provider = new ScriptedProvider([
 			chunks(
