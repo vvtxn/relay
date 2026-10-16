@@ -319,6 +319,32 @@ describe("agent loop", () => {
 		expect(order.indexOf("end:edit_c")).toBeLessThan(order.indexOf("start:shell"));
 	});
 
+	it("suggests only tools present in the registry in execution hints", async () => {
+		const failingRead = fakeTool({
+			name: "read_file",
+			readonly: true,
+			execute: () => Effect.die(new Error("ENOENT: no such file or directory")),
+		});
+		const bash = fakeTool({ name: "bash", readonly: false, execute: () => Effect.succeed({ content: "" }) });
+		const script = () =>
+			new ScriptedProvider([
+				chunks(toolCallsChunk([{ id: "call-1", name: "read_file", args: "{}" }]), doneChunk()),
+				chunks(doneChunk()),
+			]);
+
+		const content = (events: AgentEvent[]): string => {
+			const event = events.find((candidate) => candidate.type === "tool_result");
+			return event && event.type === "tool_result" ? event.result.content : "";
+		};
+
+		const withoutBash = await Effect.runPromise(collect(run([USER_MESSAGE], config(script(), [failingRead]))));
+		const withBash = await Effect.runPromise(collect(run([USER_MESSAGE], config(script(), [failingRead, bash]))));
+
+		expect(content(withoutBash)).toContain("Use grep to locate");
+		expect(content(withoutBash)).not.toContain("bash");
+		expect(content(withBash)).toContain("Use grep or bash");
+	});
+
 	it("stops with an error after exceeding the maximum tool rounds", async () => {
 		const loop = () => chunks(toolCallsChunk([{ id: "call-1", name: "read_file", args: "{}" }]), doneChunk());
 		const provider = new ScriptedProvider([loop(), loop()]);

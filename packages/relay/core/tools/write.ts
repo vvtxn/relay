@@ -1,10 +1,13 @@
-import { readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { dirname } from "node:path";
 import { generateDiff } from "./diff.ts";
 import { defineTool } from "./types.ts";
 
 export const writeFileTool = defineTool({
 	name: "write_file",
-	description: "Write content to a file. Creates the file if it does not exist, or overwrites it if it does.",
+	description:
+		"Write content to a file. Creates the file if it does not exist (including any missing parent directories), " +
+		"or overwrites it if it does.",
 	usageHint: "Write or create files. Always use this instead of echo/heredoc via bash.",
 	parameters: {
 		type: "object",
@@ -31,6 +34,8 @@ export const writeFileTool = defineTool({
 				// File doesn't exist yet
 			}
 
+			// A nested path (e.g. a new module) may not have its directories yet.
+			await mkdir(dirname(path), { recursive: true });
 			await writeFile(path, content);
 
 			const isNew = original === null;

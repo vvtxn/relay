@@ -561,16 +561,17 @@ export class RunManager {
 	}
 
 	/**
-	 * Ask the user for permission to run a side-effecting tool. The wait is a
-	 * `Deferred` that `resolveApproval` completes and that {@link finalizeRun}
-	 * denies if the run ends first; because the wait sits inside the run fiber,
-	 * interruption cancels it automatically.
+	 * Ask the user for permission to run an unconfined side-effecting tool
+	 * (in a workspace run: bash; readonly and `confined` tools never get here).
+	 * The wait is a `Deferred` that `resolveApproval` completes and that
+	 * {@link finalizeRun} denies if the run ends first; because the wait sits
+	 * inside the run fiber, interruption cancels it automatically.
 	 *
-	 * Prompts are serialized per session: parallel side-effect tools may reach
-	 * this point together, while the protocol surfaces one pending approval at a
-	 * time. Queued calls re-check `alwaysApproved` and the abort signal, so an
-	 * "always" decision (or a cancellation) skips the prompt for everything
-	 * still waiting behind it.
+	 * Prompts are serialized per session: tool sets that gate parallel
+	 * side-effects may reach this point together, while the protocol surfaces
+	 * one pending approval at a time. Queued calls re-check `alwaysApproved`
+	 * and the abort signal, so an "always" decision (or a cancellation) skips
+	 * the prompt for everything still waiting behind it.
 	 */
 	private requestApproval(
 		sessionId: string,

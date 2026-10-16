@@ -283,27 +283,46 @@ async function realPathWithinRoot(root: string, absPath: string): Promise<string
 
 /**
  * Like {@link resolveWithinRoot}, but also resolves symlinks so a link inside
- * the root cannot be used to reach outside it. For a path that does not exist
- * yet (e.g. a new file), the parent directory is resolved and the basename is
- * appended, so the check still applies.
+ * the root cannot be used to reach outside it.
+ *
+ * Paths that do not exist yet are resolved against their deepest existing
+ * ancestor: the ancestor's real path is used and the missing suffix appended,
+ * so a new file in a new (nested) directory stays confined while still being
+ * allowed. An existing symlink component is resolved; a dangling one rejects
+ * the path rather than being treated as creatable.
  */
 export async function resolveRealWithinRoot(root: string, rel: string): Promise<string | null> {
 	const abs = resolveWithinRoot(root, rel);
 	if (!abs) return null;
 
-	// If the path exists (including as a symlink), its realpath must stay in
-	// the root. `lstat` does not follow the final symlink, so an escaping link
-	// is detected rather than treated as a missing path.
-	let exists = true;
-	try {
-		await lstat(abs);
-	} catch {
-		exists = false;
-	}
-	if (exists) return await realPathWithinRoot(root, abs);
+	const realRoot = await realpath(root).catch(() => null);
+	if (!realRoot) return null;
 
-	const realParent = await realPathWithinRoot(root, dirname(abs));
-	return realParent ? join(realParent, basename(abs)) : null;
+	let current = abs;
+	let suffix = "";
+	while (true) {
+		// `lstat` does not follow the final symlink, so an escaping (or dangling)
+		// link is detected rather than treated as a missing path.
+		let exists = true;
+		try {
+			await lstat(current);
+		} catch {
+			exists = false;
+		}
+		if (exists) {
+			const real = await realpath(current).catch(() => null);
+			if (!real) return null;
+			const resolved = suffix ? join(real, suffix) : real;
+			return resolved === realRoot || resolved.startsWith(realRoot + sep) ? resolved : null;
+		}
+
+		const parent = dirname(current);
+		if (parent === current) return null;
+		suffix = suffix ? join(basename(current), suffix) : basename(current);
+		current = parent;
+		// Never walk above the (lexical) root.
+		if (resolveWithinRoot(root, current) === null) return null;
+	}
 }
 
 /**
