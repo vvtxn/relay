@@ -14,17 +14,24 @@ export type ApprovalHandler = (tool: Tool, input: unknown) => Effect.Effect<bool
 export interface ApprovalOptions {
 	/** Skip approval for tools marked `readonly`. Defaults to true. */
 	skipReadonly?: boolean;
+	/** Skip approval for tools confined to a sandbox root. Defaults to true. */
+	skipConfined?: boolean;
 }
 
 /**
- * Wraps each tool so execution is gated on an approval decision. The agent
- * loop needs no changes: approval happens between the `tool_call_end` and
- * `tool_result` events, and a denial is returned as an isError ToolResult.
+ * Wraps each tool so execution is gated on an approval decision. Readonly and
+ * workspace-confined tools skip the prompt by default — reads change nothing,
+ * and confined tools cannot reach outside the sandbox — so in a workspace run
+ * only unconfined side-effecting tools (bash) ask. The agent loop needs no
+ * changes: approval happens between the `tool_call_end` and `tool_result`
+ * events, and a denial is returned as an isError ToolResult.
  */
 export function withApproval(tools: Tool[], handler: ApprovalHandler, options: ApprovalOptions = {}): Tool[] {
 	const skipReadonly = options.skipReadonly ?? true;
+	const skipConfined = options.skipConfined ?? true;
 	return tools.map((tool) => {
 		if (skipReadonly && tool.readonly) return tool;
+		if (skipConfined && tool.confined) return tool;
 		return {
 			...tool,
 			execute: (input) =>

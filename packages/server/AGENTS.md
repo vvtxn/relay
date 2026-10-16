@@ -61,9 +61,11 @@ Owns active runs, one per session:
 - `cancel()` interrupts the fiber; a single uninterruptible finalizer aborts the provider call, denies still-pending
   approvals (their `Deferred`s resolve), flushes the session handle, publishes `run_finished`, and releases the session
   when idle and unwatched
-- Approvals are `Deferred`s; `resolveApproval()` takes one out of the `Ref` atomically and resolves it. Prompts are
-  serialized per session (a semaphore): side-effect tools may execute in parallel, but the protocol surfaces one
-  pending approval at a time, and queued calls re-check `alwaysApproved`/abort before prompting
+- Approvals are `Deferred`s; `resolveApproval()` takes one out of the `Ref` atomically and resolves it. Only
+  unconfined tools prompt in a workspace run — reads, workspace-confined file mutations, and `delegate` execute
+  unattended; bash is the tool that asks. Prompts are serialized per session (a semaphore) so custom gated tool sets
+  may execute in parallel while the protocol surfaces one pending approval at a time, and queued calls re-check
+  `alwaysApproved`/abort before prompting
 - Each run registers a `delegate` subagent tool (relay core) with the read-only workspace tools, and builds its system
   prompt from the run's registry (`buildSystemPrompt`); subagent cost rides on the tool result's `meta.cost` and is
   added to the session total

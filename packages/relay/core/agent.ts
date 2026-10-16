@@ -264,16 +264,22 @@ function executeTool(
 			return { tc, result: { content: "Aborted.", isError: true } };
 		}
 
+		// Hints must only mention tools this run actually exposes (subagents
+		// have no bash, for example).
+		const hasBash = tools.has("bash");
 		const tool = tools.get(tc.function.name);
 		if (!tool) {
-			return { tc, result: enrichError(tc.function.name, `Unknown tool: ${tc.function.name}`, "unknown_tool") };
+			return {
+				tc,
+				result: enrichError(tc.function.name, `Unknown tool: ${tc.function.name}`, "unknown_tool", hasBash),
+			};
 		}
 
 		let parsedArgs: unknown;
 		try {
 			parsedArgs = JSON.parse(tc.function.arguments);
 		} catch {
-			return { tc, result: enrichError(tc.function.name, tc.function.arguments, "invalid_args") };
+			return { tc, result: enrichError(tc.function.name, tc.function.arguments, "invalid_args", hasBash) };
 		}
 
 		sanitizeToolArgs(tc.function.name, parsedArgs);
@@ -282,7 +288,7 @@ function executeTool(
 			// Tools report expected failures as `ToolResult.isError` values; only
 			// unexpected throws reach this handler.
 			Effect.catchCause((cause) =>
-				Effect.succeed(enrichError(tc.function.name, causeMessage(cause), "execution")),
+				Effect.succeed(enrichError(tc.function.name, causeMessage(cause), "execution", hasBash)),
 			),
 		);
 		return { tc, result };
@@ -379,11 +385,11 @@ function sanitizeToolArgs(toolName: string, args: unknown): void {
 
 type ErrorKind = "unknown_tool" | "invalid_args" | "execution";
 
-function enrichError(toolName: string, rawError: string, kind: ErrorKind): ToolResult {
+function enrichError(toolName: string, rawError: string, kind: ErrorKind, hasBash: boolean): ToolResult {
 	const hints: Record<ErrorKind, string> = {
 		unknown_tool: `Available tools may have different names. Check the tool list and try again with the correct name.`,
 		invalid_args: `The arguments could not be parsed as JSON. Review the tool's parameter schema and provide valid JSON.`,
-		execution: getExecutionHint(rawError),
+		execution: getExecutionHint(rawError, hasBash),
 	};
 
 	return {
@@ -392,9 +398,10 @@ function enrichError(toolName: string, rawError: string, kind: ErrorKind): ToolR
 	};
 }
 
-function getExecutionHint(error: string): string {
+function getExecutionHint(error: string, hasBash: boolean): string {
 	if (error.includes("No such file") || error.includes("ENOENT") || error.includes("not found")) {
-		return "The file or path does not exist. Use grep or bash (rg/find/ls) to locate the correct path before retrying.";
+		const locate = hasBash ? "Use grep or bash (rg/find/ls)" : "Use grep";
+		return `The file or path does not exist. ${locate} to locate the correct path before retrying.`;
 	}
 	if (error.includes("Permission denied") || error.includes("EACCES")) {
 		return "Permission denied. Check file permissions or try a different approach.";

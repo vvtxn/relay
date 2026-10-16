@@ -124,6 +124,7 @@ Tools are defined using `defineTool()`:
 interface Tool {
 	definition: ToolDefinition;
 	readonly?: boolean;
+	confined?: boolean;
 	usageHint?: string;
 	resourceKey?(input: unknown): string | undefined;
 	execute(input: unknown): Effect.Effect<ToolResult, ToolError>;
@@ -137,10 +138,12 @@ Effect-based interface: an unexpected throw becomes a typed `ToolError`. Built-i
 model-facing mechanics.
 
 `createWorkspaceTools(root)` returns the built-in tools rooted at a workspace directory: file tools resolve their `path`
-argument against `root` via `resolveWithinRoot` (escapes are rejected with an error result), and bash runs with `root`
-as its cwd. Note bash is not truly confined — shell commands can still use absolute paths. Each file tool also gets a
-`resourceKey` of its canonical path, so concurrent calls to the same file are serialized by the agent loop while calls
-to different files overlap; bash stays exclusive (no key).
+argument against `root` (escapes are rejected with an error result, and paths whose parent directories do not exist yet
+resolve against their deepest existing ancestor), `write_file` creates missing parent directories, and bash runs with
+`root` as its cwd. Note bash is not truly confined — shell commands can still use absolute paths. Wrapped file tools
+are marked `confined` (approval layers treat them as sandboxed) and get a `resourceKey` of their canonical path, so
+concurrent calls to the same file are serialized by the agent loop while calls to different files overlap; bash stays
+exclusive (no key) and unconfined.
 
 `createDelegateTool(options)` builds the `delegate` tool: each call runs a fresh, isolated `run()` with the given
 (typically read-only) tool registry — no conversation history, its own round cap, and the parent abort signal. The
@@ -151,7 +154,8 @@ readonly phase; an internal semaphore caps concurrent subagent loops (`maxConcur
 one per run with `read_file` + `grep`.
 
 `withApproval(tools, handler)` wraps each tool's `execute` so calls are gated on an `Effect<boolean>` decision.
-Readonly tools skip approval by default (`skipReadonly: false` to change). Denials return an `isError` ToolResult, so
+Readonly and workspace-`confined` tools skip approval by default (`skipReadonly` / `skipConfined` to change), so a
+workspace run only prompts for unconfined side-effecting tools (bash). Denials return an `isError` ToolResult, so
 the agent loop needs no changes and the model can react. Handlers waiting on user input should await a `Deferred` (see
 `packages/server/run.ts`) so cancelling the run interrupts the wait.
 
@@ -196,7 +200,10 @@ actually wires (workspace tools + `delegate`), and `createDelegateTool` defaults
 Filesystem helpers rooted at an explicit workspace directory — the CLI passes `process.cwd()`, a server passes a
 per-session workspace:
 
-- `resolveWithinRoot(root, rel)` — resolves a path, returning null when it escapes the root
+- `resolveWithinRoot(root, rel)` — resolves a path lexically, returning null when it escapes the root
+- `resolveRealWithinRoot(root, rel)` — the symlink-safe variant used by file tools: existing components resolve through
+  `realpath`, missing suffixes resolve against the deepest existing ancestor (so a new file in a new nested directory
+  is allowed), and escaping or dangling symlinks are rejected
 - `validateWorkspacePath(raw, roots)` / `validateWorkspacePathSync(...)` — canonicalize (symlinks resolved) and validate
   a candidate workspace directory: absolute, existing directory, and within `roots` (empty roots = allow anywhere)
 - `expandMentions(text, root)` — expands `@path` mentions into `<attached_context>` blocks
@@ -229,6 +236,8 @@ After concluding that a task is complete, always run these commands from the rep
 - Tools have a `readonly` flag for parallel execution optimization, and an optional `resourceKey` so the agent loop can
   serialize side-effect calls that touch the same resource while running independent ones concurrently (`confinePathArg`
   attaches the resolved file path for the workspace file tools; tools without a key are exclusive)
+- Sandboxed tools are marked `confined` (set by the workspace wrappers); `withApproval` skips them, so the sandbox — not
+  the prompt — is the boundary and only unconfined tools (bash) ask for permission
 - Prompt guidance for a tool lives on the tool (`usageHint`) and is rendered by `buildSystemPrompt`; never hardcode
   tool names or availability in prompt prose
 - Use `ToolResult` with `isError` flag for error reporting; unexpected throws become `ToolError`
