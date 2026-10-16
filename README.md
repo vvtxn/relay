@@ -115,23 +115,6 @@ pnpm web:dev             # Vite dev server with HMR
 `pnpm relay` builds the CLI bundle (`packages/cli/dist`) automatically and then runs the same commands as before:
 `relay`, `relay web`, `relay serve`, `relay stop`, `relay status`, `relay fonts`, `relay workspace`.
 
-### Run from any project directory
-
-`pnpm relay` builds and runs the CLI from the checkout, so it is normally started from the repo. To use `relay` from
-other projects like a global command, install the dev launcher once:
-
-```bash
-pnpm relay:install    # writes ~/.local/bin/relay (rebuilds the bundle on each launch)
-cd ~/Code/other-project
-relay                 # scoped to this directory, server reused or started as needed
-pnpm relay:uninstall  # remove the launcher
-```
-
-The launcher runs this checkout's CLI with the current directory as its workspace and loads the checkout's env files
-(`RELAY_ENV_ROOT`), so the background server gets the same credentials as `pnpm relay`. It is a development convenience
-— a true installable release would need the server packaged alongside the CLI, which the source-only release flow does
-not do yet.
-
 ## Authentication
 
 Relay is GitHub-OAuth-only. Callers authenticate by completing a GitHub App user-authorization flow and receiving an
@@ -182,8 +165,7 @@ These are user-specific, so put them in the gitignored `.env.<mode>.local` file.
   a non-loopback host.
 
 A workspace path is validated when it is created or registered: it must be an absolute, existing directory, and its
-canonical (symlink-resolved) path must sit within an allowed root. See [SECURITY.md](SECURITY.md) for the full threat
-model and checklist.
+canonical (symlink-resolved) path must sit within an allowed root.
 
 ## Architecture
 
@@ -235,7 +217,7 @@ The single source of truth for the server↔client contract, used by the CLI (No
 
 ### `packages/server/` — Agent Runtime Host
 
-A plain Node application built on a small `node:http` → Fetch adapter (`http-server.ts`) — no web framework:
+An HTTP + SSE server built on `effect/http` and `@effect/platform-node`:
 
 - **RunManager** — one active run per session; bridges agent events onto per-session SSE streams; gates side-effecting
   tools behind approval decisions that arrive over HTTP
@@ -369,8 +351,6 @@ pnpm relay             # Build the CLI bundle, then start/reuse the server + ter
 pnpm relay web         # Open the web client (server starts in the background)
 pnpm relay stop        # Stop the background server
 pnpm relay status      # Show the background server
-pnpm relay:install     # Install a `relay` launcher usable from any project directory
-pnpm relay:uninstall   # Remove that launcher
 pnpm relay workspace list          # List registered workspaces
 pnpm relay workspace add <path>    # Register a project directory (default: cwd)
 pnpm relay workspace remove <path> # Hide a workspace (sessions are kept; re-add restores it)

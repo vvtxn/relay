@@ -54,7 +54,7 @@ reachable, else the server's bundled SPA) and returns unless `--foreground` is p
 - **Relay display utilities** (`@vvtxn/relay/core/display.ts`) — `entriesToUIMessages`, `createUIToolCall`, display
   names/output, diff parsing (pure, shared with the web app)
 - **API client** (`./client.ts`, `@vvtxn/client`) — RelayClient + protocol types
-- **TUI framework** (`@/tui`) — terminal rendering, components, hooks, input handling
+- **TUI framework** (`#/tui`) — terminal rendering, components, hooks, input handling
 - **Local modules** — config, UI components, project-files hook
 
 The agent runtime is NOT in this package. `runAgentLoop`, tools, providers, and session stores were removed — use
@@ -137,7 +137,7 @@ the same typeface.
 - `@vvtxn/client` — protocol types + RelayClient
 - `@vvtxn/server` — the `serve` entry point the supervisor launches
 - `@vvtxn/relay` — display utilities, theme tokens, and the shared font manifest
-- `@/tui` — terminal UI framework
+- `#/tui` — terminal UI framework
 
 ## Running
 
@@ -152,8 +152,6 @@ pnpm relay status    # show the background server
 pnpm relay workspace add ~/Code/foo  # register a workspace (no TUI)
 pnpm relay workspace list            # list registered workspaces
 pnpm relay fonts status  # check whether the shared font is installed
-pnpm relay:install       # install a `relay` launcher usable from any project directory
-pnpm relay:uninstall     # remove that launcher
 ```
 
 The CLI runs from the built bundle (`packages/cli/dist`, produced by `pnpm relay`), using the same commands as the
