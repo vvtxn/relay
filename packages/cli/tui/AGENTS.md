@@ -212,7 +212,7 @@ All exported from `render/hooks/index.ts`:
 - Layout handlers are pure functions: `(instance) => void` (mutates Yoga node)
 - Elements are registered via `registerElement(type, { render, layout, hasChildren })` in `render/elements/index.ts`
 - Hooks use global index tracking (reset per render cycle via `resetHooks()`)
-- Use `toAnsi(colorName)` from `@/tui/core/primitives/color.ts` for color conversion
+- Use `toAnsi(colorName)` from `#/tui/core/primitives/color.ts` for color conversion
 - All coordinates are integer character positions
 - Text editing logic is centralized in `hooks/text-utils.ts` (exports `TextState` and operations like `insertChar`,
   `deleteBackward`, `moveCursor`, etc.); each operation writes value + cursor in one `batch()` so the UI commits once
@@ -220,7 +220,7 @@ All exported from `render/hooks/index.ts`:
 - Text inputs wrap with `wrapTextForEditing` + `cursorPositionInWrappedText` (`core/primitives/wrap-text.ts`): the wrap
   preserves every source character and tracks spans, and the cursor is mapped from the same result the measurer and
   painter use
-- Wrap long-lived presentational components in `memo()` (from `@/tui/render/components.tsx` or `@/tui/render/index.ts`)
+- Wrap long-lived presentational components in `memo()` (from `#/tui/render/components.tsx` or `#/tui/render/index.ts`)
   so idle frames skip re-invoking them; never wrap signal- or hook-driven components (see Render-Cost Model)
 
 ## Task Completion Checklist

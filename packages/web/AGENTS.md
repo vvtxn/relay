@@ -109,7 +109,7 @@ status bar and sidebar.
 
 ### Theming
 
-`packages/relay/core/theme.ts` is the single source of tokens; the CLI re-exports it from `@/tui/theme.ts`. It exports
+`packages/relay/core/theme.ts` is the single source of tokens; the CLI re-exports it from `#/tui/theme.ts`. It exports
 `lightTheme` alongside the dark default plus a `themes` map. `theme.ts` here calls `themeToCssVariables(themes[mode])`,
 applies `--relay-*` custom properties and `color-scheme` to `document.documentElement`, and tags `data-theme`.
 `state/theme.ts` holds the persisted preference (localStorage key `relay.theme`, dark default) and is applied before the

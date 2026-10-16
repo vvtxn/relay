@@ -16,7 +16,7 @@ Terminal-based coding agent with custom TUI framework.
 │   │   └── tui/            # Terminal UI framework (JSX runtime, Yoga layout)
 │   └── web/                # Solid + Vite SPA client (@vvtxn/web)
 │       └── src/            # Effect API layer, TanStack Query/Router, components
-├── scripts/                # Env loading, dev launcher, and version bump scripts
+├── scripts/                # Env loading and version bump scripts
 ├── pnpm-workspace.yaml     # Workspace definition
 ├── vite.config.ts          # Workspace-wide Vite+ tooling (fmt/lint/check)
 └── tsconfig.base.json      # Shared strict TypeScript options
@@ -65,8 +65,6 @@ modules stay Effect-free on purpose.
 - **Type-check**: `pnpm check` (strict; checks every entrypoint)
 - **Run CLI**: `pnpm relay` (starts/reuses the background server, then the TUI)
 - **Open web client**: `pnpm relay web` (ensures the server, opens the browser)
-- **Install a dev `relay` launcher**: `pnpm relay:install` (writes `~/.local/bin/relay`; runs this checkout's built CLI
-  from any project directory, so workspaces can be tested like a global install; `pnpm relay:uninstall` removes it)
 - **Stop/status the background server**: `pnpm relay stop` / `pnpm relay status`
 - **Manage workspaces**: `pnpm relay workspace add|list|remove [path]` (no TUI; attaches to the running server)
 - **Install the shared terminal font**: `pnpm relay fonts install` / `pnpm relay fonts status`
@@ -104,8 +102,7 @@ syntax that requires transformation. Only `packages/cli` is bundled (for JSX).
 files with explicit precedence — **process env > `.env.<mode>.local` > `.env.<mode>` > `.env.local` > `.env`** (Node has
 no multi-file "if exists" env loading, so the merge is explicit). Files resolve relative to the working directory,
 falling back to the current worktree root and then the main worktree root, so gitignored secrets also load in linked
-worktrees. An explicit `RELAY_ENV_ROOT` checkout (set by the installed dev launcher) is consulted as the least specific
-root, so running the CLI outside the repo still loads its credentials.
+worktrees.
 
 - `.env.development` / `.env.production` — committed non-secret mode defaults.
 - `.env.local`, `.env.<mode>.local` — gitignored secrets (`TURSO_*`, `GITHUB_APP_*`).
