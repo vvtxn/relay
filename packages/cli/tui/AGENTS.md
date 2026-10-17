@@ -94,8 +94,14 @@ The root is always laid out at the full terminal size, and the `Terminal` carrie
 the app background always fills the entire window. For hex colors the terminal itself is also themed via **OSC 11**
 (restored on exit). Boxes with `bgColor` paint a full-rect fill — edge to edge across their computed bounds — and
 re-apply their background after any full SGR reset in child text, so nested surfaces survive styled markdown/mentions.
-`bgColor="default"` means transparent (inherits the parent). There are no borders: visual hierarchy comes from the
-background steps (`background` → `surface` → `surfaceElevated`) plus padding, not outlines.
+`bgColor="default"` means transparent (inherits the parent). Borders are opt-in: `borderColor` draws a 1-cell outline
+(occupying its own padding cell) and `borderRadius` swaps in quarter-circle corner glyphs. A border owns the outer ring
+of cells, so a fill is **clipped to the outline's interior** and the ring shows `RenderContext.inheritedBg` — the
+nearest painted ancestor's background — instead of the box's own surface: the fill can never bleed outside the outline,
+which is what makes rounded corners safe (an arc cannot mask a partial-cell fill). The composer and the modal overlays
+(command palette, approval prompt) are border-only rounded boxes (no fill, so there is nothing to bleed); everywhere
+else, hierarchy comes from the background steps (`background` → `surface` → `surfaceElevated`) plus padding, not
+outlines.
 
 ### Core Classes
 
@@ -137,6 +143,7 @@ Supports flexbox properties on `<Box>`:
 - `gap`, `padding`
 - `width`, `height`
 - `bgColor`
+- `borderColor`, `borderRadius` (1-cell outline; the fill clips to its interior; rounded corner glyphs)
 - `position` (relative/absolute), `top`, `left`, `right`, `bottom`
 
 ### Styling
@@ -152,18 +159,19 @@ Text styling via `<Text>` props:
 
 All exported from `render/components.tsx`:
 
-- **`Box`** - Flexbox container with background, padding, and positioning support
+- **`Box`** - Flexbox container with background, border (optional rounded corners), padding, and positioning support
 - **`Text`** - Styled text with color, bold, italic, underline, strikethrough
 - **`TextInput`** - Text input field with cursor, placeholder, and vim mode support. Soft-wraps at word boundaries
   (spaces kept at line ends, cursor mapped by source offsets), auto-grows up to `maxLines` and scrolls internally past
   that; `height` pins a fixed viewport instead
 - **`Spinner`** - Animated spinner (default 80ms interval, 10 frames)
-- **`ScrollArea`** - Scrollable container (extends BoxProps) with `autoScroll`, `scrollbar`, and `scrollStep`
+- **`ScrollArea`** - Scrollable container (extends BoxProps; shares Box's per-edge padding resolution and the scrollbar
+  gutter) with `autoScroll`, `scrollbar`, and `scrollStep`
 - **`Markdown`** - Renders markdown content as styled Text lines via `parseMarkdown()` (memoized: parse + format are
   cached per content string)
 - **`memo(component)`** - Marks a pure presentational component so the renderer skips re-invocation while its props are
   shallow-equal (see Render-Cost Model)
-- **`WelcomeScreen`** - Welcome screen with version display, re-exported from `components/welcome-screen.tsx`
+- **`WelcomeScreen`** - Welcome screen with logo, subtitle, and hints, re-exported from `components/welcome-screen.tsx`
 - **`CommandPalette`** - Re-exported from `components/command-palette.tsx`
 - **`ApprovalPrompt`** - Modal tool-approval overlay (y allow / a always / n deny), re-exported from
   `components/approval-prompt.tsx`

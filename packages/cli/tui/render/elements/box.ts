@@ -1,6 +1,7 @@
 import Y from "yoga-layout";
-import { applyInheritedBackground, toBgAnsi } from "#/tui/core/primitives/color.ts";
-import { fillPositions } from "#/tui/core/primitives/fill.ts";
+import { applyInheritedBackground, toAnsi, toBgAnsi } from "#/tui/core/primitives/color.ts";
+import { borderPositions, fillPositions } from "#/tui/core/primitives/fill.ts";
+import { applyBoxPadding } from "./padding.ts";
 import type { BoxInstance, ElementHandler, Position } from "../types/index.ts";
 import type { LayoutHandler } from "./index.ts";
 
@@ -46,13 +47,8 @@ export const BoxLayout: LayoutHandler<BoxInstance> = (instance) => {
 		const isRow = props.flexDirection === "row" || props.flexDirection === "row-reverse";
 		yogaNode.setGap(isRow ? Y.GUTTER_COLUMN : Y.GUTTER_ROW, props.gap);
 	}
-	// Resolve each edge independently: explicit side > axis shorthand > all-edge
-	// padding. Setting every edge (rather than EDGE_ALL then overrides) keeps
-	// stale values from leaking when a directional prop is removed.
-	yogaNode.setPadding(Y.EDGE_TOP, props.paddingTop ?? props.paddingY ?? props.padding);
-	yogaNode.setPadding(Y.EDGE_BOTTOM, props.paddingBottom ?? props.paddingY ?? props.padding);
-	yogaNode.setPadding(Y.EDGE_LEFT, props.paddingLeft ?? props.paddingX ?? props.padding);
-	yogaNode.setPadding(Y.EDGE_RIGHT, props.paddingRight ?? props.paddingX ?? props.padding);
+	// A border occupies its own cell, so it adds one cell of padding per edge.
+	applyBoxPadding(yogaNode, props, props.borderColor ? 1 : 0);
 	if (props.width !== undefined) yogaNode.setWidth(props.width);
 	else yogaNode.setWidthAuto();
 	if (props.height !== undefined) yogaNode.setHeight(props.height);
@@ -77,11 +73,27 @@ export const BoxElement: ElementHandler<BoxInstance> = (instance, context): Posi
 	const positions: Position[] = [];
 
 	const bg = instance.props.bgColor && instance.props.bgColor !== "default" ? toBgAnsi(instance.props.bgColor) : null;
+	const borderFg = instance.props.borderColor ? toAnsi(instance.props.borderColor) : null;
+	const hasBorder = borderFg !== null && w >= 2 && h >= 2;
+
+	// A border owns the outer ring of cells, so the fill is clipped to the
+	// interior: the surface must never paint outside the outline (clearest at
+	// rounded corners, where an arc cannot mask a partial-cell fill). The ring
+	// itself shows the inherited backdrop, not this box's surface.
 	if (bg) {
-		positions.push(...fillPositions(x, y, w, h, bg));
+		const inset = hasBorder ? 1 : 0;
+		positions.push(...fillPositions(x + inset, y + inset, w - 2 * inset, h - 2 * inset, bg));
 	}
 
-	const childPositions = instance.children.flatMap((child) => context.renderInstance(child, x, y));
+	if (hasBorder && borderFg) {
+		positions.push(
+			...borderPositions(x, y, w, h, borderFg, context.inheritedBg, instance.props.borderRadius ?? false),
+		);
+	}
+
+	const childPositions = instance.children.flatMap((child) =>
+		context.renderInstance(child, x, y, bg ?? context.inheritedBg),
+	);
 	if (bg) {
 		for (const pos of childPositions) {
 			pos.text = applyInheritedBackground(pos.text, bg);
