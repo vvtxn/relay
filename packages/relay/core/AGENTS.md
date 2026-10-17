@@ -112,7 +112,9 @@ Shared across all clients (TUI, web). Deliberately dependency-free so browser bu
 - `summarizeToolArgs()` — Converts JSON args to human-readable summary (path, pattern, command, etc.)
 - `getToolDisplayName()` — Maps internal tool names to display labels (e.g. `read_file` → "read")
 - `getToolDisplayOutput()` — Formats tool output as concise summaries for display
-- `summarizeToolCalls()` — Collapses a turn's tool calls into one line (e.g. "Searched 3 files. Read 2 files.")
+- `groupToolCalls()` — Collapses a turn's tool calls into one row per tool (first-seen order): compact targets
+  (`app.tsx, chat.tsx +2 more`, capped by count and length), an aggregated stat (`12 matches in 3 files`, `+4 −2`,
+  `running…` while results are pending), and an error count
 - `abbreviateHome()` / `expandHome()` — Replace a home-directory prefix with `~` for display and back
 - `parseDiffLines()` — Parses unified diff into structured `DiffLine[]` (without color assignment)
 
