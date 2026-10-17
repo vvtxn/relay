@@ -1,5 +1,5 @@
 import { entriesToUIMessages, getToolDisplayName } from "@vvtxn/relay/core/display.ts";
-import type { ConfigResponse, MeResponse, PendingApprovalInfo, ServerEvent } from "@vvtxn/client/protocol.ts";
+import type { ConfigResponse, PendingApprovalInfo, ServerEvent } from "@vvtxn/client/protocol.ts";
 import {
 	applyServerEvent,
 	initialSessionStreamState,
@@ -81,12 +81,11 @@ function formatStatus(status: AgentStatus): string {
 
 interface AppProps {
 	onQuit: () => void;
-	user: MeResponse;
 	initialSessionId: string;
 	info: ConfigResponse;
 }
 
-function App({ onQuit, user, initialSessionId, info }: AppProps) {
+function App({ onQuit, initialSessionId, info }: AppProps) {
 	// Registered first so a pending approval consumes keys (Esc denies) before
 	// the double-Esc cancel handler below sees them.
 	const approval = useApprovalPrompt();
@@ -153,7 +152,6 @@ function App({ onQuit, user, initialSessionId, info }: AppProps) {
 				draftText: "",
 				draftToolCalls: [],
 				toolCallIndex: {},
-				tokens: response.tokens,
 				cost: response.cost,
 			};
 			syncStream(true);
@@ -452,14 +450,7 @@ function App({ onQuit, user, initialSessionId, info }: AppProps) {
 
 	return (
 		<Box flex flexDirection="column" padding={1} bgColor={theme.background}>
-			<StatusBar
-				tokenCount={stream.value.tokens}
-				totalCost={stream.value.cost}
-				branchName={branchName.value ?? ""}
-				userName={user.name}
-				contextWindow={info.contextTokens}
-				model={info.model}
-			/>
+			<StatusBar totalCost={stream.value.cost} branchName={branchName.value ?? ""} />
 
 			{messages.length === 0 ? (
 				loadingSession.value !== null ? (
@@ -469,24 +460,18 @@ function App({ onQuit, user, initialSessionId, info }: AppProps) {
 						</Text>
 					</Box>
 				) : (
-					<WelcomeScreen
-						version={VERSION}
-						userName={user.name}
-						model={info.model}
-						hints="Enter to send • @ for files • / for commands • PageUp/PageDown to scroll • i/Esc to toggle mode"
-					/>
+					<WelcomeScreen hints="Enter to send • @ for files • / for commands • PageUp/PageDown to scroll • i/Esc to toggle mode" />
 				)
 			) : (
-				<ScrollArea flex flexDirection="column" padding={1} gap={1} scrollbar focused autoScroll>
+				<ScrollArea flex flexDirection="column" paddingX={2} paddingY={1} gap={1} scrollbar focused autoScroll>
 					{messages.map((msg, i) => (
 						<MessageView key={i} msg={msg} />
 					))}
 				</ScrollArea>
 			)}
 
-			<Box height={1} />
 			{stream.value.running && (
-				<Box flexDirection="row" gap={1} paddingBottom={1}>
+				<Box flexDirection="row" gap={1} paddingX={2} paddingTop={1} paddingBottom={1}>
 					<Spinner color={theme.accent} />
 					<Text color={theme.textMuted} bold italic>
 						{formatStatus(stream.value.status)}
@@ -502,7 +487,8 @@ function App({ onQuit, user, initialSessionId, info }: AppProps) {
 					)}
 				</Box>
 			)}
-			<Box bgColor={theme.surface} paddingX={1} paddingY={1}>
+			<Box height={1} />
+			<Box paddingX={1} paddingY={1} borderColor={theme.border} borderRadius>
 				<TextInput
 					value={input.value}
 					cursorPosition={cursor.value}
@@ -513,20 +499,23 @@ function App({ onQuit, user, initialSessionId, info }: AppProps) {
 				/>
 			</Box>
 
-			<Box flexDirection="row" gap={1} paddingTop={1}>
-				<Text color={theme.brand} bold>
-					{mode.value}
-				</Text>
-				{!stream.value.running && (
-					<Text color={theme.textFaint} italic>
-						@ files • / commands • i/Esc mode
+			<Box flexDirection="row" gap={1} paddingX={2} paddingTop={1} justifyContent="space-between">
+				<Box flexDirection="row" gap={1}>
+					<Text color={theme.brand} bold>
+						{mode.value}
 					</Text>
-				)}
+					{!stream.value.running && (
+						<Text color={theme.textFaint} italic>
+							@ files • / commands • i/Esc mode
+						</Text>
+					)}
+				</Box>
+				<Text color={theme.textFaint}>v{VERSION}</Text>
 			</Box>
 
 			<CommandPalette palette={palette} />
-			<CommandPalette palette={filePalette} placeholder="Search files..." title="Files" />
-			<CommandPalette palette={threadsPalette} placeholder="Search threads..." title="Threads" width={80} />
+			<CommandPalette palette={filePalette} placeholder="Search files..." />
+			<CommandPalette palette={threadsPalette} placeholder="Search threads..." width={80} />
 			<ApprovalPrompt approval={approval} />
 		</Box>
 	);
@@ -539,7 +528,7 @@ function App({ onQuit, user, initialSessionId, info }: AppProps) {
 type BootState =
 	| { kind: "loading" }
 	| { kind: "error"; message: string }
-	| { kind: "ready"; user: MeResponse; sessionId: string; info: ConfigResponse };
+	| { kind: "ready"; sessionId: string; info: ConfigResponse };
 
 const boot = signal<BootState>({ kind: "loading" });
 
@@ -552,9 +541,10 @@ async function bootstrap(): Promise<void> {
 		} catch {
 			throw new Error(`Cannot reach the Relay server at ${serverUrl()}. Start one with 'relay serve'.`);
 		}
-		const [user, info] = await Promise.all([getClient().me(), getClient().getConfig()]);
+		// `me()` validates the session; the CLI no longer renders the user identity.
+		const [, info] = await Promise.all([getClient().me(), getClient().getConfig()]);
 		const sessionId = await initialSession(workspaceCwd());
-		boot.value = { kind: "ready", user, sessionId, info };
+		boot.value = { kind: "ready", sessionId, info };
 	} catch (error) {
 		boot.value = { kind: "error", message: error instanceof Error ? error.message : String(error) };
 	}
@@ -582,7 +572,7 @@ function Root({ quit }: { quit: () => void }) {
 	const state = boot.value;
 	if (state.kind === "loading") return <BootScreen />;
 	if (state.kind === "error") return <BootError message={state.message} />;
-	return <App onQuit={quit} user={state.user} initialSessionId={state.sessionId} info={state.info} />;
+	return <App onQuit={quit} initialSessionId={state.sessionId} info={state.info} />;
 }
 
 // ---------------------------------------------------------------------------

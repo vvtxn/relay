@@ -19,7 +19,7 @@ agent/
 ├── components/
 │   ├── boot-screen.tsx   # BootScreen (loading) and BootError shown while the server is resolved
 │   ├── chat.tsx          # MessageView (user/agent turns + tool-call summary); re-exports UIMessage
-│   └── status-bar.tsx    # StatusBar, TokenBar (context window arrives from /api/config)
+│   └── status-bar.tsx    # StatusBar (branch + accumulated cost)
 └── hooks/
     └── project-files.ts  # useProjectFiles hook (file listing from the server)
 ```
@@ -116,11 +116,12 @@ without one.
 - `Root` — Switches between BootScreen, BootError, and App based on the boot signal
 - `App` — Signals, event folding, palettes, approval handling; while a thread's history loads it shows a "Loading
   thread…" hint instead of the welcome screen (`loadingSession` signal)
-- `StatusBar` — Model (from server), branch, user, token bar, cost
+- `StatusBar` — Branch and accumulated session cost
 - `MessageView` (components/chat.tsx) — Shared display contract from `@vvtxn/relay/core/display.ts`; `UIMessage` is
   re-exported from there (single definition). User turns are marked with a `│` bar (borderLabel), agent turns with a `●`
-  (brand), and turns are separated by the scroll gap — no per-message panels. Tool calls are collapsed by
-  `summarizeToolCalls()` into one summary line on a `surface` panel instead of a row per call. Wrapped in `memo()` (pure
+  (brand), and turns are separated by the scroll gap — no per-message panels. Tool calls are grouped per tool by
+  `groupToolCalls()` into compact rows — per-tool accent on the name, the targets it touched, and a right-aligned
+  result stat — instead of a row per call. Wrapped in `memo()` (pure
   function of props) so idle frames and streamed deltas skip re-rendering unchanged messages
 
 ### Fonts (`fonts.ts`)
@@ -154,9 +155,11 @@ pnpm relay workspace list            # list registered workspaces
 pnpm relay fonts status  # check whether the shared font is installed
 ```
 
-The CLI runs from the built bundle (`packages/cli/dist`, produced by `pnpm relay`), using the same commands as the
-source entrypoint: `relay [-c|--workspace]`, `relay web`, `relay serve`, `relay stop`, `relay status`,
-`relay workspace add|list|remove`, `relay fonts`.
+`scripts/relay.ts` decides the entrypoint: non-TUI subcommands (`serve`, `web`, `stop`, `status`, `workspace`,
+`fonts`) run `packages/cli/agent/index.ts` straight from source under Node's native TypeScript support — no bundle
+build — while the TUI command packs `packages/cli` (`vp pack`, JSX needs compilation) and runs
+`packages/cli/dist/index.mjs`. Both paths use the same commands: `relay [-c|--workspace]`, `relay web`, `relay serve`,
+`relay stop`, `relay status`, `relay workspace add|list|remove`, `relay fonts`.
 
 ## Task Completion Checklist
 
