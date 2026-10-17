@@ -51,7 +51,7 @@ export interface ServerConfig {
 const DEFAULT_PORT = 7433;
 const DEFAULT_HOSTNAME = "127.0.0.1";
 const DEFAULT_BASE_URL = "https://openrouter.ai/api/v1";
-const DEFAULT_MODEL = "moonshotai/kimi-k2.6";
+const DEFAULT_MODEL = "deepseek/deepseek-v4.1-flash";
 const DEFAULT_SESSION_TTL_DAYS = 30;
 
 function required(env: Record<string, string | undefined>, key: string): string {
