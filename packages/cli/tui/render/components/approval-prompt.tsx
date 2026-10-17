@@ -24,7 +24,7 @@ export function ApprovalPrompt(props: ApprovalPromptProps) {
 			justifyContent="center"
 			alignItems="center"
 		>
-			<Box width={width} bgColor={theme.surfaceElevated} flexDirection="column" padding={1} gap={1}>
+			<Box width={width} flexDirection="column" padding={1} gap={1} borderColor={theme.border} borderRadius>
 				<Text bold color={theme.warning}>
 					Approval required
 				</Text>

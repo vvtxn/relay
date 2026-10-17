@@ -33,7 +33,14 @@ export interface Position {
 export interface RenderContext {
 	parentX: number;
 	parentY: number;
-	renderInstance: (instance: Instance, parentX: number, parentY: number) => Position[];
+	/**
+	 * ANSI background prefix of the nearest painted ancestor cell behind this
+	 * element (null = terminal default). Elements that cut into their own
+	 * surface — e.g. a border's ring and rounded corner cells — use it to show
+	 * the backdrop instead of leaking their own fill.
+	 */
+	inheritedBg: string | null;
+	renderInstance: (instance: Instance, parentX: number, parentY: number, inheritedBg?: string | null) => Position[];
 }
 
 export type ElementHandler<T extends Instance = Instance> = (instance: T, context: RenderContext) => Position[];
@@ -78,6 +85,10 @@ export interface BoxProps extends BaseProps {
 	flexWrap?: "wrap" | "wrap-reverse" | "nowrap";
 	/** Background color of the box */
 	bgColor?: string;
+	/** Border color; when set, draws a 1-cell outline around the box, and the background fill is clipped inside it */
+	borderColor?: string;
+	/** Rounded corner glyphs for the border (only meaningful with `borderColor`) */
+	borderRadius?: boolean;
 	/** Position type for overlay behavior */
 	position?: "relative" | "absolute";
 	/** Top edge offset (for absolute positioning) */

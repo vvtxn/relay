@@ -4,6 +4,7 @@ import { fillPositions } from "#/tui/core/primitives/fill.ts";
 import { theme } from "#/tui/theme.ts";
 import type { ElementHandler, Position, ScrollAreaInstance } from "../types/index.ts";
 import type { LayoutHandler } from "./index.ts";
+import { applyBoxPadding } from "./padding.ts";
 
 const FLEX_DIRECTION_MAP = {
 	row: Y.FLEX_DIRECTION_ROW,
@@ -41,15 +42,15 @@ export const ScrollAreaLayout: LayoutHandler<ScrollAreaInstance> = (instance) =>
 		const isRow = props.flexDirection === "row" || props.flexDirection === "row-reverse";
 		yogaNode.setGap(isRow ? Y.GUTTER_COLUMN : Y.GUTTER_ROW, props.gap);
 	}
-	const basePadding = props.padding ?? 0;
-	yogaNode.setPadding(Y.EDGE_ALL, basePadding || undefined);
+	applyBoxPadding(yogaNode, props);
 	if (props.width !== undefined) yogaNode.setWidth(props.width);
 	else yogaNode.setWidthAuto();
 	if (props.height !== undefined) yogaNode.setHeight(props.height);
 	else yogaNode.setHeightAuto();
 	yogaNode.setOverflow(Y.OVERFLOW_SCROLL);
 	if (props.scrollbar) {
-		yogaNode.setPadding(Y.EDGE_RIGHT, basePadding + 1);
+		// The scrollbar owns a gutter just inside the box's right edge.
+		yogaNode.setPadding(Y.EDGE_RIGHT, (props.paddingRight ?? props.paddingX ?? props.padding ?? 0) + 1);
 	}
 };
 
@@ -93,7 +94,7 @@ export const ScrollAreaElement: ElementHandler<ScrollAreaInstance> = (instance, 
 
 		if (childBottom < 0 || childTop >= viewportHeight) continue;
 
-		const childPositions = context.renderInstance(child, x, y - scrollOffset);
+		const childPositions = context.renderInstance(child, x, y - scrollOffset, bg ?? context.inheritedBg);
 		for (const pos of childPositions) {
 			if (pos.y >= clipTop && pos.y <= clipBottom) {
 				clipped.push(pos);

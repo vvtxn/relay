@@ -63,7 +63,8 @@ modules stay Effect-free on purpose.
 - **Check formatting**: `pnpm fmt:check`
 - **Lint**: `pnpm lint`
 - **Type-check**: `pnpm check` (strict; checks every entrypoint)
-- **Run CLI**: `pnpm relay` (starts/reuses the background server, then the TUI)
+- **Run CLI**: `pnpm relay` (starts/reuses the background server, then the TUI; non-TUI subcommands run from source
+  without a bundle build — see `scripts/relay.ts`)
 - **Open web client**: `pnpm relay web` (ensures the server, opens the browser)
 - **Stop/status the background server**: `pnpm relay stop` / `pnpm relay status`
 - **Manage workspaces**: `pnpm relay workspace add|list|remove [path]` (no TUI; attaches to the running server)

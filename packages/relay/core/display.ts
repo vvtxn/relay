@@ -173,55 +173,140 @@ function formatCount(count: number, singular: string, plural: string): string {
 	return `${count} ${count === 1 ? singular : plural}`;
 }
 
-/**
- * Collapse a turn's tool calls into one human-readable line, e.g.
- * "Searched 3 files. Read 2 files. Edited 1 file." Calls are grouped by action
- * (first-seen order) and counted, so a long burst collapses to a single line
- * instead of a row/card per call. `grep` reports the number of distinct files
- * that matched, falling back to the number of searches when output is absent.
- */
-export function summarizeToolCalls(toolCalls: UIToolCall[]): string {
-	if (toolCalls.length === 0) return "";
+// ---------------------------------------------------------------------------
+// Tool call grouping
+// ---------------------------------------------------------------------------
 
-	const order: string[] = [];
-	const counts = new Map<string, number>();
-	const searchedFiles = new Set<string>();
+/** One tool's calls within a turn, collapsed for compact display. */
+export interface ToolCallGroup {
+	/** Raw tool name (e.g. `read_file`), for per-tool accents. */
+	name: string;
+	/** Display label (e.g. `read`). */
+	label: string;
+	/** Compact target list, e.g. `app.tsx, chat.tsx +2 more`; may be empty. */
+	args: string;
+	/** Aggregated result stat, e.g. `12 matches in 3 files`, `+4 −2`, `running…`; may be empty. */
+	stat: string;
+	/** Calls in the group that returned an error. */
+	errorCount: number;
+}
 
-	for (const tool of toolCalls) {
-		if (!counts.has(tool.name)) order.push(tool.name);
-		counts.set(tool.name, (counts.get(tool.name) ?? 0) + 1);
-		if (tool.name === "grep" && tool.output) {
-			for (const line of tool.output.split("\n")) {
-				if (!line) continue;
-				const file = line.split(":")[0];
-				if (file) searchedFiles.add(file);
+/** A call without a result yet (its output/diff/error arrives later). */
+function isPendingToolCall(tool: UIToolCall): boolean {
+	return tool.output.length === 0 && tool.diff === undefined && tool.isError !== true;
+}
+
+const GREP_MATCH_LINE = /^(.*?):(\d+):(.*)$/;
+const GREP_NO_MATCHES = "No matches found.";
+const ARG_LIST_MAX_ITEMS = 3;
+const ARG_LIST_MAX_LENGTH = 44;
+
+function truncateText(text: string, maxLength: number): string {
+	if (text.length <= maxLength) return text;
+	return `${text.slice(0, Math.max(1, maxLength - 1))}…`;
+}
+
+/** First-seen unique targets, capped by count and length (`a.ts, b.ts +2 more`). */
+function compactToolArgs(name: string, calls: UIToolCall[]): string {
+	const targets = [...new Set(calls.map((tool) => (name === "grep" ? `"${tool.input}"` : tool.input)))].filter(
+		(target) => target.length > 0,
+	);
+	if (targets.length === 0) return "";
+
+	const shown: string[] = [];
+	for (const target of targets) {
+		if (shown.length === ARG_LIST_MAX_ITEMS) break;
+		const candidate = [...shown, target].join(", ");
+		const remaining = targets.length - shown.length - 1;
+		const suffix = remaining > 0 ? ` +${remaining} more` : "";
+		if (shown.length > 0 && candidate.length + suffix.length > ARG_LIST_MAX_LENGTH) break;
+		shown.push(target);
+	}
+
+	const hidden = targets.length - shown.length;
+	const suffix = hidden > 0 ? ` +${hidden} more` : "";
+	const joined = shown.join(", ");
+	return joined.length + suffix.length <= ARG_LIST_MAX_LENGTH
+		? `${joined}${suffix}`
+		: `${truncateText(joined, ARG_LIST_MAX_LENGTH - suffix.length)}${suffix}`;
+}
+
+/** Aggregate the group's completed results into one short stat. */
+function groupStat(name: string, calls: UIToolCall[]): string {
+	if (calls.some(isPendingToolCall)) return "running…";
+	const done = calls.filter((tool) => !isPendingToolCall(tool) && tool.isError !== true);
+	if (done.length === 0) return "";
+
+	switch (name) {
+		case "read_file": {
+			const lines = done.reduce((total, tool) => total + tool.output.split("\n").length, 0);
+			return formatCount(lines, "line", "lines");
+		}
+		case "grep": {
+			if (done.every((tool) => tool.output === GREP_NO_MATCHES)) return "no matches";
+			let matches = 0;
+			const files = new Set<string>();
+			for (const tool of done) {
+				for (const line of tool.output.split("\n")) {
+					const match = GREP_MATCH_LINE.exec(line);
+					if (!match) continue;
+					matches++;
+					if (match[1]) files.add(match[1]);
+				}
 			}
+			return `${formatCount(matches, "match", "matches")} in ${formatCount(files.size, "file", "files")}`;
+		}
+		case "write_file":
+		case "edit_file": {
+			let adds = 0;
+			let deletes = 0;
+			let hasDiff = false;
+			for (const tool of done) {
+				if (!tool.diff) continue;
+				hasDiff = true;
+				for (const line of tool.diff.split("\n")) {
+					if (line.startsWith("+") && !line.startsWith("+++")) adds++;
+					else if (line.startsWith("-") && !line.startsWith("---")) deletes++;
+				}
+			}
+			return hasDiff ? `+${adds} −${deletes}` : formatCount(done.length, "file", "files");
+		}
+		case "bash":
+			return done.length > 1 ? formatCount(done.length, "command", "commands") : "";
+		case "delegate":
+			return done.length > 1 ? formatCount(done.length, "task", "tasks") : "";
+		default:
+			return "";
+	}
+}
+
+/**
+ * Collapse a turn's tool calls into one row per tool (first-seen order) for
+ * compact display: the unique targets it touched plus an aggregated result
+ * stat. A long burst stays one row per tool instead of a row per call.
+ */
+export function groupToolCalls(toolCalls: UIToolCall[]): ToolCallGroup[] {
+	const names: string[] = [];
+	const grouped = new Map<string, UIToolCall[]>();
+	for (const tool of toolCalls) {
+		const existing = grouped.get(tool.name);
+		if (existing) existing.push(tool);
+		else {
+			names.push(tool.name);
+			grouped.set(tool.name, [tool]);
 		}
 	}
 
-	const phrases = order.map((name) => {
-		const count = counts.get(name) ?? 0;
-		switch (name) {
-			case "grep":
-				return `Searched ${formatCount(searchedFiles.size || count, "file", "files")}`;
-			case "read_file":
-				return `Read ${formatCount(count, "file", "files")}`;
-			case "write_file":
-				return `Wrote ${formatCount(count, "file", "files")}`;
-			case "edit_file":
-				return `Edited ${formatCount(count, "file", "files")}`;
-			case "bash":
-				return `Ran ${formatCount(count, "command", "commands")}`;
-			case "delegate":
-				return `Delegated ${formatCount(count, "task", "tasks")}`;
-			default: {
-				const label = getToolDisplayName(name);
-				return `${label.charAt(0).toUpperCase()}${label.slice(1)} ${formatCount(count, "time", "times")}`;
-			}
-		}
+	return names.map((name) => {
+		const calls = grouped.get(name) ?? [];
+		return {
+			name,
+			label: getToolDisplayName(name),
+			args: compactToolArgs(name, calls),
+			stat: groupStat(name, calls),
+			errorCount: calls.filter((tool) => tool.isError === true).length,
+		};
 	});
-
-	return `${phrases.join(". ")}.`;
 }
 
 // ---------------------------------------------------------------------------
