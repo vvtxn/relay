@@ -52,15 +52,30 @@ export { createDatabaseClient, databaseCredentialsFromEnv } from "./database.ts"
 export type { DatabaseClient, DatabaseCredentials } from "./database.ts";
 
 export { DatabaseUserStore } from "./auth/db.ts";
-export { DatabaseUserSettingsStore } from "./auth/settings.ts";
+export { apiKeyHint, DatabaseUserSettingsStore } from "./auth/settings.ts";
+export { FileUserSettingsStore } from "./auth/settings-file.ts";
+export { migrateApiKeysToFile } from "./auth/settings-migrate.ts";
+export {
+	createSecretCipher,
+	isEncryptedSecret,
+	loadMasterKey,
+	loadOrCreateLocalMasterKey,
+	parseMasterKey,
+	userSettingsAad,
+} from "./auth/secret.ts";
 export { GitHubAuthProvider } from "./auth/github.ts";
 export { DatabaseAuthSessionStore } from "./auth/sessions.ts";
 export { clearStoredSession, readStoredSession, writeStoredSession } from "./auth/session-file.ts";
 export { authenticate } from "./auth/service.ts";
+export type { ApiKeyMigrationResult } from "./auth/settings-migrate.ts";
+export type { SecretCipher } from "./auth/secret.ts";
+export type { UserSettingsStatus, UserSettingsStore } from "./auth/settings.ts";
 export type { GitHubProfile } from "./auth/github.ts";
 export type { AuthSession, AuthSessionStore } from "./auth/sessions.ts";
 export type { StoredSession } from "./auth/session-file.ts";
 export type { AuthenticatedUser, AuthIdentity, AuthProvider, UserDirectory, UserStore } from "./auth/types.ts";
+
+export { scrubbedAgentEnv } from "./env.ts";
 
 export { homeDir, relayDir } from "./paths.ts";
 
