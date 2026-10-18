@@ -121,8 +121,8 @@ saved, so the TUI cannot start without one.
   to the input hints when idle
 - `StatusBar` — Branch and accumulated session cost
 - `MessageView` (components/chat.tsx) — Shared display contract from `@vvtxn/relay/core/display.ts`; `UIMessage` is
-  re-exported from there (single definition). User turns sit on a full-width `surfaceElevated` band marked with a `│`
-  bar (borderLabel), agent turns are marked with a `●` (brand), and turns are separated by the scroll gap. Tool calls
+  re-exported from there (single definition). User turns sit on a full-width `surfaceElevated` band, agent turns are
+  marked with a `●` (brand), and turns are separated by the scroll gap. Tool calls
   are grouped per tool by `groupToolCalls()` into compact rows — per-tool accent on the name, the targets it touched,
   and a right-aligned result stat — instead of a row per call. Wrapped in `memo()` (pure
   function of props) so idle frames and streamed deltas skip re-rendering unchanged messages
