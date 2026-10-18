@@ -1,15 +1,26 @@
 import { collectCommand, spawnCommand } from "../command.ts";
+import { scrubbedAgentEnv } from "../env.ts";
 import { defineTool, type Tool } from "./types.ts";
 
 const MAX_OUTPUT = 10_000;
 const DEFAULT_TIMEOUT = 30_000;
+
+export interface BashToolOptions {
+	/**
+	 * Environment for spawned commands. Defaults to {@link scrubbedAgentEnv},
+	 * so commands never inherit the server's credentials (database token,
+	 * OAuth secrets, settings master key).
+	 */
+	env?: Record<string, string>;
+}
 
 /**
  * Creates the bash tool. When `cwd` is provided, commands run in that
  * directory (e.g. a session's workspace root); otherwise they inherit the
  * process working directory.
  */
-export function createBashTool(cwd?: string): Tool {
+export function createBashTool(cwd?: string, options: BashToolOptions = {}): Tool {
+	const env = options.env ?? scrubbedAgentEnv();
 	return defineTool({
 		name: "bash",
 		description:
@@ -40,6 +51,7 @@ export function createBashTool(cwd?: string): Tool {
 				const child = spawnCommand("bash", {
 					args: ["-c", command],
 					...(cwd ? { cwd } : {}),
+					env,
 					stdout: "piped",
 					stderr: "piped",
 				});
