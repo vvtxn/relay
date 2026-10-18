@@ -89,6 +89,10 @@ export interface BoxProps extends BaseProps {
 	borderColor?: string;
 	/** Rounded corner glyphs for the border (only meaningful with `borderColor`) */
 	borderRadius?: boolean;
+	/** Label embedded in the top border after a leading dash: `╭─ Label ─────╮` (needs `borderColor`) */
+	borderLabel?: string;
+	/** Foreground of `borderLabel`; defaults to `borderColor` */
+	borderLabelColor?: string;
 	/** Position type for overlay behavior */
 	position?: "relative" | "absolute";
 	/** Top edge offset (for absolute positioning) */

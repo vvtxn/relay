@@ -22,6 +22,13 @@ const BORDER_GLYPHS = {
 	rounded: { tl: "╭", tr: "╮", bl: "╰", br: "╯" },
 } as const;
 
+/** Optional label painted into a border's top edge. */
+export interface BorderLabel {
+	text: string;
+	/** Foreground of the label; falls back to the border's own foreground. */
+	fgAnsi?: string | null;
+}
+
 /**
  * Border positions for a box: a 1-cell outline drawn on the box's outer ring.
  * The ring shows `outerBgAnsi` — the backdrop *behind* the box (its inherited
@@ -29,6 +36,10 @@ const BORDER_GLYPHS = {
  * bleed outside the outline. `rounded` swaps square corners for quarter-circle
  * arcs (the arc cannot fill a partial cell, hence the same rule for corners).
  * Needs at least a 2x2 box; smaller boxes render no border.
+ *
+ * An optional `label` is embedded at the start of the top edge
+ * (`╭─ LABEL ─────╮`). The label is clipped to the cells between the corners,
+ * so it can never overflow the outline.
  */
 export function borderPositions(
 	x: number,
@@ -38,14 +49,29 @@ export function borderPositions(
 	fgAnsi: string,
 	outerBgAnsi: string | null,
 	rounded: boolean,
+	label?: BorderLabel | null,
 ): Position[] {
 	if (w < 2 || h < 2) return [];
 
 	const { tl, tr, bl, br } = rounded ? BORDER_GLYPHS.rounded : BORDER_GLYPHS.square;
 	const style = `${outerBgAnsi ?? ""}${fgAnsi}`;
 	const horizontal = "─".repeat(w - 2);
+
+	let top = `${style}${tl}`;
+	if (label && label.text !== "" && w >= 6) {
+		// Leading dash + padded label, then dashes up to the corner: w >= 6
+		// leaves room for the corners, one label cell, and the padding spaces.
+		const room = w - 5;
+		const text = label.text.slice(0, room);
+		const labelStyle = label.fgAnsi ? `${outerBgAnsi ?? ""}${label.fgAnsi}` : "";
+		top += `─${labelStyle} ${text} ${style}${"─".repeat(room - text.length)}`;
+	} else {
+		top += horizontal;
+	}
+	top += tr;
+
 	const positions: Position[] = [
-		{ x, y, text: `${style}${tl}${horizontal}${tr}` },
+		{ x, y, text: top },
 		{ x, y: y + h - 1, text: `${style}${bl}${horizontal}${br}` },
 	];
 	for (let i = 1; i < h - 1; i++) {

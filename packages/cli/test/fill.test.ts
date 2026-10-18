@@ -11,6 +11,7 @@ import { BoxElement } from "../tui/render/elements/box.ts";
 import type { BoxInstance, RenderContext } from "../tui/render/types/index.ts";
 
 const FG = fgRgb(0x30, 0x30, 0x30);
+const LABEL_FG = fgRgb(0x80, 0x80, 0x80);
 const SURFACE = bgRgb(0x10, 0x10, 0x10);
 const OUTER = bgRgb(0x0a, 0x0a, 0x0a);
 
@@ -52,6 +53,34 @@ describe("borderPositions", () => {
 	});
 });
 
+describe("borderPositions labels", () => {
+	it("embeds a colored label after the leading dash, then dashes to the corner", () => {
+		const positions = borderPositions(2, 3, 16, 4, FG, OUTER, true, { text: "INSERT", fgAnsi: LABEL_FG });
+		expect(positions[0]).toEqual({
+			x: 2,
+			y: 3,
+			text: `${OUTER}${FG}╭─${OUTER}${LABEL_FG} INSERT ${OUTER}${FG}─────╮`,
+		});
+		// The rest of the outline is unaffected.
+		expect(positions[1]).toEqual({ x: 2, y: 6, text: `${OUTER}${FG}╰──────────────╯` });
+	});
+
+	it("keeps the border foreground when the label has no color of its own", () => {
+		const positions = borderPositions(0, 0, 11, 2, FG, OUTER, true, { text: "NORMAL" });
+		expect(positions[0]?.text).toBe(`${OUTER}${FG}╭─ NORMAL ${OUTER}${FG}╮`);
+	});
+
+	it("clips an overlong label to the cells between the corners", () => {
+		const positions = borderPositions(0, 0, 10, 2, FG, OUTER, true, { text: "INSERT", fgAnsi: LABEL_FG });
+		expect(positions[0]?.text).toBe(`${OUTER}${FG}╭─${OUTER}${LABEL_FG} INSER ${OUTER}${FG}╮`);
+	});
+
+	it("ignores labels that cannot fit a corner and one label cell", () => {
+		const positions = borderPositions(0, 0, 5, 2, FG, OUTER, true, { text: "INSERT", fgAnsi: LABEL_FG });
+		expect(positions[0]?.text).toBe(`${OUTER}${FG}╭───╮`);
+	});
+});
+
 describe("BoxElement", () => {
 	function renderBox(props: BoxInstance["props"], w: number, h: number, inheritedBg: string | null) {
 		const node = Y.Node.create();
@@ -88,5 +117,19 @@ describe("BoxElement", () => {
 			{ x: 0, y: 0, text: `${SURFACE}    ${RESET_BG}` },
 			{ x: 0, y: 1, text: `${SURFACE}    ${RESET_BG}` },
 		]);
+	});
+
+	it("paints borderLabel on the top edge in its own color", () => {
+		const positions = renderBox(
+			{ borderColor: "#303030", borderRadius: true, borderLabel: "INSERT", borderLabelColor: "#808080" },
+			20,
+			4,
+			OUTER,
+		);
+		expect(positions[0]).toEqual({
+			x: 0,
+			y: 0,
+			text: `${OUTER}${FG}╭─${OUTER}${LABEL_FG} INSERT ${OUTER}${FG}─────────╮`,
+		});
 	});
 });

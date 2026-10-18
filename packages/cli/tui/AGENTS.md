@@ -98,10 +98,11 @@ re-apply their background after any full SGR reset in child text, so nested surf
 (occupying its own padding cell) and `borderRadius` swaps in quarter-circle corner glyphs. A border owns the outer ring
 of cells, so a fill is **clipped to the outline's interior** and the ring shows `RenderContext.inheritedBg` — the
 nearest painted ancestor's background — instead of the box's own surface: the fill can never bleed outside the outline,
-which is what makes rounded corners safe (an arc cannot mask a partial-cell fill). The composer and the modal overlays
-(command palette, approval prompt) are border-only rounded boxes (no fill, so there is nothing to bleed); everywhere
-else, hierarchy comes from the background steps (`background` → `surface` → `surfaceElevated`) plus padding, not
-outlines.
+which is what makes rounded corners safe (an arc cannot mask a partial-cell fill). `borderLabel` (with
+`borderLabelColor`) embeds a label in the top edge (`╭─ LABEL ─────╮`), clipped to the cells between the corners. The
+composer and the modal overlays (command palette, approval prompt) are border-only rounded boxes (no fill, so there is
+nothing to bleed); everywhere else, hierarchy comes from the background steps (`background` → `surface` →
+`surfaceElevated`) plus padding, not outlines.
 
 ### Core Classes
 
@@ -144,6 +145,7 @@ Supports flexbox properties on `<Box>`:
 - `width`, `height`
 - `bgColor`
 - `borderColor`, `borderRadius` (1-cell outline; the fill clips to its interior; rounded corner glyphs)
+- `borderLabel`, `borderLabelColor` (label embedded in the top edge, `╭─ LABEL ─────╮`)
 - `position` (relative/absolute), `top`, `left`, `right`, `bottom`
 
 ### Styling
@@ -159,7 +161,8 @@ Text styling via `<Text>` props:
 
 All exported from `render/components.tsx`:
 
-- **`Box`** - Flexbox container with background, border (optional rounded corners), padding, and positioning support
+- **`Box`** - Flexbox container with background, border (optional rounded corners and a top-edge label), padding, and
+  positioning support
 - **`Text`** - Styled text with color, bold, italic, underline, strikethrough
 - **`TextInput`** - Text input field with cursor, placeholder, and vim mode support. Soft-wraps at word boundaries
   (spaces kept at line ends, cursor mapped by source offsets), auto-grows up to `maxLines` and scrolls internally past

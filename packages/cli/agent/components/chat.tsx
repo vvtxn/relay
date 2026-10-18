@@ -22,20 +22,18 @@ const TOOL_NAME_WIDTH = 8;
 // ---------------------------------------------------------------------------
 
 /**
- * A single chat turn. User turns are marked with a `│` bar, agent turns with a
- * `●`; tool activity renders as one compact row per tool instead of a row per
- * call — colored tool name, the targets it touched, and an aggregated result
- * stat (`12 matches in 3 files`, `+4 −2`, `running…`).
+ * A single chat turn. User turns sit on a full-width `surfaceElevated` band,
+ * agent turns are marked with a `●`; tool activity renders as one compact row
+ * per tool instead of a row per call — colored tool name, the targets it
+ * touched, and an aggregated result stat (`12 matches in 3 files`, `+4 −2`,
+ * `running…`).
  * Pure: memoized so unchanged messages skip re-rendering across commits.
  */
 export const MessageView = memo(function MessageView({ msg }: { key?: number; msg: UIMessage }) {
 	if (msg.role === "user") {
 		return (
-			<Box flexDirection="row" gap={1}>
-				<Text color={theme.borderLabel}>│</Text>
-				<Text flex color={theme.text}>
-					{msg.content}
-				</Text>
+			<Box bgColor={theme.surfaceElevated} paddingX={2}>
+				<Text color={theme.text}>{msg.content}</Text>
 			</Box>
 		);
 	}

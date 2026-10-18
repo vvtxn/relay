@@ -86,8 +86,16 @@ export const BoxElement: ElementHandler<BoxInstance> = (instance, context): Posi
 	}
 
 	if (hasBorder && borderFg) {
+		const labelText = instance.props.borderLabel;
+		const label =
+			labelText && labelText !== ""
+				? {
+						text: labelText,
+						fgAnsi: instance.props.borderLabelColor ? toAnsi(instance.props.borderLabelColor) : borderFg,
+					}
+				: null;
 		positions.push(
-			...borderPositions(x, y, w, h, borderFg, context.inheritedBg, instance.props.borderRadius ?? false),
+			...borderPositions(x, y, w, h, borderFg, context.inheritedBg, instance.props.borderRadius ?? false, label),
 		);
 	}
 
