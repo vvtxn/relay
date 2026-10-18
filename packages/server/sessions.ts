@@ -199,7 +199,14 @@ export function handleSendMessage(
 
 		// Fail fast with a clear message rather than starting a run that can only
 		// error out: a provider cannot be built without the user's API key.
-		if (!(yield* services.userSettings.getApiKey(services.user.id))) {
+		const apiKey = yield* services.userSettings
+			.getApiKey(services.user.id)
+			.pipe(
+				Effect.catchTag("StoreError", (storeError) =>
+					Effect.fail(new BadRequestError(`Stored API key could not be read: ${storeError.message}`)),
+				),
+			);
+		if (!apiKey) {
 			return error(400, "No API key configured. Add one in Settings.");
 		}
 

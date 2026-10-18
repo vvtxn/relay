@@ -8,23 +8,16 @@ import { BadRequestError, json, readJsonBody } from "./http.ts";
 /** Longest accepted API key; real keys are far shorter. */
 const MAX_API_KEY_LENGTH = 512;
 
-/** Last 4 characters only — enough to recognize a key without leaking it. */
-function hintFor(apiKey: string): string {
-	return apiKey.length <= 4 ? "•" : apiKey.slice(-4);
-}
-
 /**
  * Per-user settings. The API key is never echoed back; clients receive only
- * whether one is set plus a masked hint.
+ * whether one is set plus a masked hint, and status reads never decrypt.
  */
 export function handleGetSettings(
 	services: RequestServices,
 ): Effect.Effect<HttpServerResponse.HttpServerResponse, StoreError> {
 	return Effect.gen(function* () {
-		const apiKey = yield* services.userSettings.getApiKey(services.user.id);
-		return json({
-			apiKey: { set: apiKey !== null, hint: apiKey !== null ? hintFor(apiKey) : null },
-		} satisfies SettingsResponse);
+		const status = yield* services.userSettings.getApiKeyStatus(services.user.id);
+		return json({ apiKey: status } satisfies SettingsResponse);
 	});
 }
 

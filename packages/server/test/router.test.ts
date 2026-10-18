@@ -38,7 +38,10 @@ async function makeServices(provider: LLMProvider, overrides: Partial<ServerConf
 		config,
 		db: {},
 		userStore: { getById: (id: string) => Effect.succeed(id === USER_ID ? user : null) },
-		userSettings: { getApiKey: () => Effect.succeed("fake-key") },
+		userSettings: {
+			getApiKey: () => Effect.succeed("fake-key"),
+			getApiKeyStatus: () => Effect.succeed({ set: true, hint: "1234" }),
+		},
 		authSessions: { resolve: (token: string) => Effect.succeed(token === TEST_TOKEN ? { userId: USER_ID } : null) },
 		sessionStore: store,
 		runs,
@@ -93,6 +96,14 @@ describe("handleRequest", () => {
 		const meResponse = await handleRequest(services, apiRequest("GET", "/api/me", { token: TEST_TOKEN }));
 		expect(meResponse.status).toBe(200);
 		expect(await meResponse.json()).toEqual({ id: USER_ID, name: "Test User", provider: "github" });
+	});
+
+	it("serves per-user settings as presence plus a masked hint", async () => {
+		const { services } = await makeServices(new ScriptedProvider([]));
+		const response = await handleRequest(services, apiRequest("GET", "/api/settings", { token: TEST_TOKEN }));
+
+		expect(response.status).toBe(200);
+		expect(await response.json()).toEqual({ apiKey: { set: true, hint: "1234" } });
 	});
 
 	it("rejects cross-origin state-changing API requests with 403", async () => {

@@ -2,6 +2,8 @@
 // provider.
 
 import { Effect, Stream } from "effect";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { CompletionRequest, CompletionResponse, LLMProvider, StreamChunk, Usage } from "@vvtxn/relay/api/types.ts";
 import { ProviderError } from "@vvtxn/relay/api/errors.ts";
 import type {
@@ -40,6 +42,10 @@ export function makeConfig(defaultCwd: string, overrides: Partial<ServerConfig> 
 		defaultCwd,
 		workspaceRoots: [],
 		allowedGithub: [],
+		settingsStore: "file",
+		dataDir: join(tmpdir(), "relay-test-data"),
+		secretKey: null,
+		secretKeyFile: null,
 		staticDir: null,
 		...overrides,
 	};
