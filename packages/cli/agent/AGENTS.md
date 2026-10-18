@@ -115,7 +115,10 @@ saved, so the TUI cannot start without one.
 
 - `Root` — Switches between BootScreen, BootError, and App based on the boot signal
 - `App` — Signals, event folding, palettes, approval handling; while a thread's history loads it shows a "Loading
-  thread…" hint instead of the welcome screen (`loadingSession` signal)
+  thread…" hint instead of the welcome screen (`loadingSession` signal). The composer's top border carries the vim mode
+  label (`borderLabel`, rendered as `╭─ INSERT ─────╮` / `╭─ NORMAL ─────╮`), and the bottom-left status line shows the
+  running agent status (spinner + `Thinking…`/`Writing…`/`Running <tool>…`, plus the Esc-to-cancel hint), falling back
+  to the input hints when idle
 - `StatusBar` — Branch and accumulated session cost
 - `MessageView` (components/chat.tsx) — Shared display contract from `@vvtxn/relay/core/display.ts`; `UIMessage` is
   re-exported from there (single definition). User turns are marked with a `│` bar (borderLabel), agent turns with a `●`
