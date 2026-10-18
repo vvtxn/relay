@@ -67,10 +67,11 @@ export class Renderer {
 		this.terminal = terminal;
 	}
 
-	renderInstance(instance: Instance, parentX = 0, parentY = 0): Position[] {
+	renderInstance(instance: Instance, parentX = 0, parentY = 0, inheritedBg: string | null = null): Position[] {
 		const context: RenderContext = {
 			parentX: Math.round(parentX),
 			parentY: Math.round(parentY),
+			inheritedBg,
 			renderInstance: this.renderInstance.bind(this),
 		};
 

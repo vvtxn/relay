@@ -3,7 +3,7 @@
 	"private": true,
 	"type": "module",
 	"scripts": {
-		"relay": "vp -C packages/cli pack && node scripts/run-env.ts packages/cli/dist/index.mjs",
+		"relay": "node scripts/relay.ts",
 		"relay:dev": "pnpm relay",
 		"relay:prod": "RELAY_ENV=production pnpm relay",
 		"relay:web": "pnpm relay web",

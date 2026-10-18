@@ -7,11 +7,10 @@ export interface CommandPaletteProps {
 	palette: ReturnType<typeof useCommandPalette>;
 	width?: number;
 	placeholder?: string;
-	title?: string;
 }
 
 export function CommandPalette(props: CommandPaletteProps) {
-	const { palette, width = 60, placeholder = "Type a command...", title = "Commands" } = props;
+	const { palette, width = 60, placeholder = "Type a command..." } = props;
 
 	if (!palette.open.value) return <Box />;
 
@@ -26,17 +25,14 @@ export function CommandPalette(props: CommandPaletteProps) {
 			justifyContent="center"
 			alignItems="center"
 		>
-			<Box width={width} bgColor={theme.surfaceElevated} flexDirection="column" padding={1} gap={1}>
-				<Text bold color={theme.textDim}>
-					{title}
-				</Text>
+			<Box width={width} flexDirection="column" padding={1} gap={1} borderColor={theme.border} borderRadius>
 				<TextInput
 					value={palette.query.value}
 					cursorPosition={palette.cursor.value}
 					placeholder={placeholder}
 					placeholderColor={theme.textDim}
 					focused
-					width={width - 2}
+					width={width - 4}
 					maxLines={1}
 				/>
 				<Box flexDirection="column">
@@ -57,7 +53,7 @@ export function CommandPalette(props: CommandPaletteProps) {
 					})}
 					{palette.matches.length === 0 && (
 						<Text color={theme.textDim} italic>
-							No matching commands
+							No matches
 						</Text>
 					)}
 				</Box>

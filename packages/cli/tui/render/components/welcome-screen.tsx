@@ -13,21 +13,11 @@ const LOGO = [
 ].map(({ text, color }) => ({ text: text.replace(/ /g, "\u00A0"), color }));
 
 export interface WelcomeScreenProps {
-	version: string;
 	subtitle?: string | undefined;
 	hints?: string | undefined;
-	userName?: string | undefined;
-	/** Active model identifier, when the client knows it. */
-	model?: string | undefined;
 }
 
-export function WelcomeScreen({
-	version,
-	subtitle = "Type a message to get started",
-	hints,
-	userName,
-	model,
-}: WelcomeScreenProps) {
+export function WelcomeScreen({ subtitle = "Type a message to get started", hints }: WelcomeScreenProps) {
 	return (
 		<Box flex flexDirection="column" justifyContent="center" alignItems="center" gap={1}>
 			<Box flexDirection="column">
@@ -38,9 +28,6 @@ export function WelcomeScreen({
 				))}
 			</Box>
 			<Box flexDirection="column" alignItems="center" gap={1}>
-				<Text color={theme.textMuted}>v{version}</Text>
-				{model && <Text color={theme.textDim}>{model.split("/").pop()}</Text>}
-				{userName && <Text color={theme.textDim}>signed in as {userName}</Text>}
 				<Text color={theme.textDim} italic>
 					{subtitle}
 				</Text>
