@@ -33,8 +33,10 @@ server/
 
 `serverLayer(config)` composes tagged services (`Config`, `Database`, the stores, `Runs`) as Effect Layers; acquisition
 is sequential (config → database → stores → RunManager) and the store layer awaits each schema `ready` in order
-(`users` backs the `auth_sessions` foreign key — a test pins the DDL order). `createServices(config)` materializes the
-bundle once for `main.ts`. The Turso client exposes only `execute`/`batch` (no close), so the layers are unscoped.
+(`users` backs the `auth_sessions` foreign key — a test pins the DDL order). `UserSettings` is built by
+`createUserSettingsStore`: the file backend plus a one-shot migration of database keys, or the encrypted database
+store. `createServices(config)` materializes the bundle once for `main.ts`. The Turso client exposes only
+`execute`/`batch` (no close), so the layers are unscoped.
 
 ### HTTP (`router.ts`, `main.ts`)
 
@@ -109,10 +111,13 @@ GitHub identity mapping and the session store are the only new storage — sessi
 
 ### API key
 
-The LLM API key is per user, stored in the `user_settings` table. It is plaintext (the server must present it verbatim
-as a Bearer token) and never returned to clients — `GET /api/settings` exposes only `{ set, hint }`. `RunManager` builds
-a provider from the owning user's key at run start; a missing key fails the run with a clear message, and
-`handleSendMessage` returns 400 before a doomed run begins.
+The LLM API key is per user, entered once in the web Settings page, and encrypted at rest under a master key
+(`RELAY_SECRET_KEY`/`RELAY_SECRET_KEY_FILE`, or a generated `RELAY_DATA_DIR/secret.key`). The default backend keeps it
+in local files (`RELAY_DATA_DIR/settings/<userId>.json`, mode `0600`, AES-GCM with owner-bound AAD); the database
+backend stores it encrypted in `user_settings` instead. Startup with the file backend migrates any database keys into
+the files and clears them. `getApiKey` is the only plaintext path (used by `RunManager` to build the provider at run
+start, never handed to the model); `GET /api/settings` reads a status that never decrypts, exposing only `{ set, hint }`.
+A missing key fails the run with a clear message, and `handleSendMessage` returns 400 before a doomed run begins.
 
 ### Background state
 
@@ -164,6 +169,8 @@ Payload types live in `@vvtxn/client/protocol.ts` — never redeclare them here.
   roots; defaults to the server user's home, `*` allows any directory); both required when binding a non-loopback
   `RELAY_HOST`, and `*` is rejected there
 - `RELAY_PORT` (default 7433), `RELAY_HOST` (default 127.0.0.1), `RELAY_WORKSPACE`, `RELAY_STATIC_DIR`
+- Settings storage: `RELAY_SETTINGS_STORE` (`file` default, or `database`), `RELAY_DATA_DIR` (default `~/.relay`),
+  `RELAY_SECRET_KEY` / `RELAY_SECRET_KEY_FILE` (master key; required with the database backend)
 
 ## Running
 

@@ -48,7 +48,8 @@ pnpm install
 pnpm relay
 ```
 
-The server reads each user's LLM API key from the database; users paste theirs in the web app's Settings page.
+The server stores each user's LLM API key encrypted at rest (per-user local files by default, optionally the database);
+users paste theirs in the web app's Settings page.
 
 Server settings (`serverUrl` for the terminal client) are configured in `~/.relay/config.json`.
 
@@ -380,8 +381,9 @@ Tag-based releases via GitHub Actions (`.github/workflows/release.yml`):
 4. CI verifies checks and creates the GitHub Release (source-only — no binary artifact is published)
 
 Relay reads `TURSO_DB_URL`, `TURSO_DB_TOKEN`, `GITHUB_APP_CLIENT_ID`, and `GITHUB_APP_CLIENT_SECRET` from its runtime
-environment (loaded from the mode-aware `.env` files). The LLM API key is per user and stored in the database (set via
-the web Settings page).
+environment (loaded from the mode-aware `.env` files). The LLM API key is per user, encrypted at rest, and kept in
+local files by default (set via the web Settings page); `RELAY_SETTINGS_STORE=database` keeps it in the database
+instead.
 
 ## License
 
