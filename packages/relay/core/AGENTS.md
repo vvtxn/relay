@@ -16,13 +16,17 @@ core/
 ├── paths.ts              # relayDir(), homeDir() helpers
 ├── context.ts            # Context trimming (token estimation, turn-based truncation)
 ├── effect.ts             # Shared Effect helpers: attempt, causeMessage, StoreError, storeEffect
+├── env.ts                # scrubbedAgentEnv(): credential-free environment for tool subprocesses
 ├── database.ts           # Shared Turso client factory + env credentials (used by session and user stores)
 ├── auth/                 # Identity + sessions
 │   ├── types.ts          # AuthIdentity, AuthenticatedUser, AuthProvider, UserStore, UserDirectory
 │   ├── github.ts         # GitHubAuthProvider (profile → identity)
 │   ├── db.ts             # DatabaseUserStore: provider identity → user, profile columns
 │   ├── sessions.ts       # DatabaseAuthSessionStore: opaque hashed session tokens
-│   ├── settings.ts       # DatabaseUserSettingsStore: per-user LLM API key (plaintext)
+│   ├── settings.ts       # UserSettingsStore contract + DatabaseUserSettingsStore (encrypted keys)
+│   ├── settings-file.ts  # FileUserSettingsStore: per-user encrypted files (the default backend)
+│   ├── settings-migrate.ts # migrateApiKeysToFile(): one-shot database → file move + purge
+│   ├── secret.ts         # AES-GCM SecretCipher, master-key parsing/generation, owner-bound AAD
 │   └── service.ts        # authenticate(): provider + user store → AuthenticatedUser
 ├── prompts.ts            # buildSystemPrompt(): section composition + registry-aware tool guidance
 ├── system-prompt.ts      # SYSTEM_PROMPT default (built from defaultTools); re-exports the builder
@@ -33,7 +37,7 @@ core/
 │   ├── types.ts          # Tool, ToolRegistry, ToolResult, ToolError types; defineTool helper
 │   ├── approval.ts       # withApproval wrapper (gate tool execution on an Effect decision)
 │   ├── delegate.ts       # createDelegateTool: read-only subagent factory over the agent loop
-│   ├── bash.ts           # Shell command execution (createBashTool factory, optional cwd)
+│   ├── bash.ts           # Shell command execution (createBashTool factory, optional cwd, scrubbed env)
 │   ├── read.ts           # File reading
 │   ├── write.ts          # File writing
 │   ├── edit.ts           # File editing (find-and-replace)
@@ -142,7 +146,9 @@ model-facing mechanics.
 `createWorkspaceTools(root)` returns the built-in tools rooted at a workspace directory: file tools resolve their `path`
 argument against `root` (escapes are rejected with an error result, and paths whose parent directories do not exist yet
 resolve against their deepest existing ancestor), `write_file` creates missing parent directories, and bash runs with
-`root` as its cwd. Note bash is not truly confined — shell commands can still use absolute paths. Wrapped file tools
+`root` as its cwd and a scrubbed environment (`scrubbedAgentEnv`, no `*_TOKEN`/`*_SECRET`/`RELAY_SECRET_KEY*` — see
+`env.ts`), so `env` in a command cannot hand the model server credentials. Note bash is not truly confined — shell
+commands can still use absolute paths. Wrapped file tools
 are marked `confined` (approval layers treat them as sandboxed) and get a `resourceKey` of their canonical path, so
 concurrent calls to the same file are serialized by the agent loop while calls to different files overlap; bash stays
 exclusive (no key) and unconfined.
@@ -194,8 +200,10 @@ actually wires (workspace tools + `delegate`), and `createDelegateTool` defaults
   (`append`, `flush`) are Effects that fail with `StoreError`, while synchronous in-memory reads stay synchronous
 - `FileSessionStore` preserves the JSONL implementation for fallback tooling (also Effect-facing)
 - Session ownership and workspace are explicit in `SessionScope`
-- `authenticate()` and the auth store interfaces (`UserStore`, `UserDirectory`, `AuthSessionStore`) follow the same
-  contract; `ready` is an Effect on every store
+- `authenticate()` and the auth store interfaces (`UserStore`, `UserDirectory`, `AuthSessionStore`, `UserSettingsStore`)
+  follow the same contract; `ready` is an Effect on every store
+- `UserSettingsStore` (auth/settings*.ts) is the one place the LLM API key lives: encrypted at rest (AES-256-GCM under a
+  master key, owner-bound AAD), local files by default, database optional, with `getApiKey` the only plaintext path
 
 ### Workspace Helpers (`workspace.ts`)
 

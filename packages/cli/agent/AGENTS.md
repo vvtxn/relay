@@ -107,9 +107,9 @@ AbortController; `run_finished(cancelled)` arrives on the stream like any other 
 - `RELAY_SERVER_URL` env overrides `~/.relay/config.json` `serverUrl` (default `http://127.0.0.1:7433`)
 - `config.json` is auto-created with defaults on first run
 
-The LLM API key is stored per user in the database and set from the web app's Settings page. The CLI never prompts for
-one: at startup (`ensureApiKey`) it opens the Settings page and waits until a key is saved, so the TUI cannot start
-without one.
+The LLM API key is stored per user, encrypted at rest (local files by default), and set from the web app's Settings
+page. The CLI never prompts for one: at startup (`ensureApiKey`) it opens the Settings page and waits until a key is
+saved, so the TUI cannot start without one.
 
 ### UI Components
 

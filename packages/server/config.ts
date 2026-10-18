@@ -1,11 +1,14 @@
 /** Server configuration — read once from the environment at startup. */
 
 import { resolve } from "node:path";
-import { homeDir } from "@vvtxn/relay/core/paths.ts";
+import { homeDir, relayDir } from "@vvtxn/relay/core/paths.ts";
 import { validateWorkspacePathSync } from "@vvtxn/relay/core/workspace.ts";
 
 /** Deployment mode selected by `RELAY_ENV`. */
 export type RelayEnv = "development" | "production";
+
+/** Backend holding per-user settings (the LLM API key). */
+export type SettingsStoreBackend = "file" | "database";
 
 export interface ServerConfig {
 	/** Deployment mode (informational; `development` by default). */
@@ -44,6 +47,14 @@ export interface ServerConfig {
 	workspaceRoots: string[];
 	/** Allowed GitHub logins or numeric ids (empty = allow any). */
 	allowedGithub: string[];
+	/** Backend storing per-user API keys: local files (default) or the database. */
+	settingsStore: SettingsStoreBackend;
+	/** Directory for local state: settings files and the generated master key. */
+	dataDir: string;
+	/** Master key (base64url/hex, 32 bytes) for encrypting per-user secrets. */
+	secretKey: string | null;
+	/** File holding the master key; used when `secretKey` is unset. */
+	secretKeyFile: string | null;
 	/** Directory containing the built web app to serve statically, when present. */
 	staticDir: string | null;
 }
@@ -100,6 +111,17 @@ export function serverConfigFromEnv(env: Record<string, string | undefined> = { 
 		? []
 		: (rawRoots.length > 0 ? rawRoots : homeRoots()).map((root) => resolve(root));
 	const allowedGithub = parseList(env.AUTH_ALLOWED_GITHUB).map((entry) => entry.toLowerCase());
+	// Per-user settings: local files by default so API keys never reach the
+	// database; the database backend requires an explicit master key.
+	const settingsStore = env.RELAY_SETTINGS_STORE ?? "file";
+	if (settingsStore !== "file" && settingsStore !== "database") {
+		throw new Error(`RELAY_SETTINGS_STORE must be "file" or "database" (got "${settingsStore}")`);
+	}
+	const secretKey = env.RELAY_SECRET_KEY ?? null;
+	const secretKeyFile = env.RELAY_SECRET_KEY_FILE ?? null;
+	if (settingsStore === "database" && !secretKey && !secretKeyFile) {
+		throw new Error("RELAY_SECRET_KEY (or RELAY_SECRET_KEY_FILE) is required when RELAY_SETTINGS_STORE=database");
+	}
 
 	// GitHub OAuth is the only auth transport.
 	if (!githubClientId) throw new Error("GITHUB_APP_CLIENT_ID is required");
@@ -150,6 +172,10 @@ export function serverConfigFromEnv(env: Record<string, string | undefined> = { 
 		defaultCwd: defaultWorkspace.path,
 		workspaceRoots,
 		allowedGithub,
+		settingsStore,
+		dataDir: env.RELAY_DATA_DIR ?? relayDir(),
+		secretKey,
+		secretKeyFile,
 		staticDir: env.RELAY_STATIC_DIR ?? null,
 	};
 }

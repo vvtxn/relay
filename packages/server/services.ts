@@ -1,8 +1,20 @@
 import { Context, Effect, Layer } from "effect";
+import { join } from "node:path";
 import type { AuthenticatedUser } from "@vvtxn/relay/core/index.ts";
-import { DatabaseAuthSessionStore, DatabaseUserSettingsStore, DatabaseUserStore } from "@vvtxn/relay/core/index.ts";
+import {
+	createSecretCipher,
+	DatabaseAuthSessionStore,
+	DatabaseUserSettingsStore,
+	DatabaseUserStore,
+	FileUserSettingsStore,
+	loadMasterKey,
+	loadOrCreateLocalMasterKey,
+	migrateApiKeysToFile,
+	type UserSettingsStore,
+} from "@vvtxn/relay/core/index.ts";
 import { CompletionsProvider } from "@vvtxn/relay/api/providers/completions.ts";
 import { createDatabaseClient, type DatabaseClient } from "@vvtxn/relay/core/database.ts";
+import { storeEffect, type StoreError } from "@vvtxn/relay/core/effect.ts";
 import { DatabaseSessionStore } from "@vvtxn/relay/core/sessions/index.ts";
 import type { ServerConfig } from "./config.ts";
 import { RunManager } from "./run.ts";
@@ -20,7 +32,7 @@ export interface ServerServices {
 	config: ServerConfig;
 	db: DatabaseClient;
 	userStore: DatabaseUserStore;
-	userSettings: DatabaseUserSettingsStore;
+	userSettings: UserSettingsStore;
 	authSessions: DatabaseAuthSessionStore;
 	sessionStore: DatabaseSessionStore;
 	runs: RunManager;
@@ -38,9 +50,7 @@ export interface RequestServices extends ServerServices {
 export class Config extends Context.Service<Config, ServerConfig>()("relay/server/Config") {}
 export class Database extends Context.Service<Database, DatabaseClient>()("relay/server/Database") {}
 export class UserStore extends Context.Service<UserStore, DatabaseUserStore>()("relay/server/UserStore") {}
-export class UserSettings extends Context.Service<UserSettings, DatabaseUserSettingsStore>()(
-	"relay/server/UserSettings",
-) {}
+export class UserSettings extends Context.Service<UserSettings, UserSettingsStore>()("relay/server/UserSettings") {}
 export class AuthSessions extends Context.Service<AuthSessions, DatabaseAuthSessionStore>()(
 	"relay/server/AuthSessions",
 ) {}
@@ -77,11 +87,7 @@ export const storesLayer = Layer.effectContext(
 
 		const userStore = new DatabaseUserStore({ url: config.tursoUrl, authToken: config.tursoToken, client: db });
 		yield* userStore.ready;
-		const userSettings = new DatabaseUserSettingsStore({
-			url: config.tursoUrl,
-			authToken: config.tursoToken,
-			client: db,
-		});
+		const userSettings = yield* createUserSettingsStore(config, db);
 		yield* userSettings.ready;
 		const authSessions = new DatabaseAuthSessionStore({
 			url: config.tursoUrl,
@@ -105,9 +111,50 @@ export const storesLayer = Layer.effectContext(
 );
 
 /**
+ * Builds the per-user settings store for the configured backend. The file
+ * backend (the default) keeps API keys on the server host and migrates any
+ * keys already stored in the database, clearing the cloud columns. The
+ * database backend encrypts them at rest under the configured master key.
+ */
+function createUserSettingsStore(
+	config: ServerConfig,
+	db: DatabaseClient,
+): Effect.Effect<UserSettingsStore, StoreError> {
+	return Effect.gen(function* () {
+		const cipher = yield* storeEffect(async () => {
+			const masterKey =
+				(await loadMasterKey({ key: config.secretKey, file: config.secretKeyFile })) ??
+				loadOrCreateLocalMasterKey(config.dataDir);
+			return await createSecretCipher(masterKey);
+		});
+		const databaseStore = () =>
+			new DatabaseUserSettingsStore({
+				url: config.tursoUrl,
+				authToken: config.tursoToken,
+				client: db,
+				cipher,
+			});
+		if (config.settingsStore === "database") return databaseStore();
+
+		const fileStore = new FileUserSettingsStore({ dir: join(config.dataDir, "settings"), cipher });
+		const migration = yield* migrateApiKeysToFile(databaseStore(), fileStore);
+		if (migration.migrated > 0) {
+			console.log(`Migrated ${migration.migrated} API key(s) out of the database into ${config.dataDir}`);
+		}
+		if (migration.failed > 0) {
+			console.error(
+				`Failed to migrate ${migration.failed} API key(s); they remain in the database. ` +
+					`Set the previous RELAY_SECRET_KEY to recover them.`,
+			);
+		}
+		return fileStore;
+	});
+}
+
+/**
  * The per-process RunManager. Each run builds a provider from the owning
- * user's stored key: the key is per-user and lives in the database, not in
- * server config.
+ * user's stored key: the key is per-user, decrypted on demand, and never
+ * enters the model's context.
  */
 const runsLayer = Layer.effect(
 	Runs,
