@@ -1,5 +1,5 @@
 import { createSignal, For, type JSX, Show } from "solid-js";
-import { getToolDisplayName, type UIToolCall } from "@vvtxn/relay/core/display.ts";
+import { diffStats, getToolDisplayName, type UIToolCall } from "@vvtxn/relay/core/display.ts";
 import { openDiffPreview } from "#/state/diff-preview.ts";
 import { DiffBlock } from "./DiffBlock.tsx";
 
@@ -29,18 +29,6 @@ function isPending(tool: UIToolCall): boolean {
 
 function countLabel(count: number, singular: string, plural: string): string {
 	return `${count} ${count === 1 ? singular : plural}`;
-}
-
-/** Added/removed line counts from a unified diff. */
-function diffStats(diff: string | undefined): { adds: number; deletes: number } | undefined {
-	if (!diff) return undefined;
-	let adds = 0;
-	let deletes = 0;
-	for (const line of diff.split("\n")) {
-		if (line.startsWith("+") && !line.startsWith("+++")) adds++;
-		else if (line.startsWith("-") && !line.startsWith("---")) deletes++;
-	}
-	return { adds, deletes };
 }
 
 function ToolCall(props: { tool: UIToolCall }) {
@@ -135,8 +123,8 @@ function ResultBadge(props: { tool: UIToolCall }): JSX.Element {
 				);
 			case "write_file":
 			case "edit_file": {
+				if (!tool.diff) return null;
 				const stats = diffStats(tool.diff);
-				if (!stats) return null;
 				return (
 					<span class="tool-call-badge">
 						<span class="badge-add">+{stats.adds}</span> <span class="badge-del">−{stats.deletes}</span>

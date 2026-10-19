@@ -6,15 +6,17 @@ export type { RunnerCallbacks } from "./runner.ts";
 
 export {
 	createUIToolCall,
+	diffStats,
 	entriesToUIMessages,
 	getToolDisplayName,
 	getToolDisplayOutput,
 	groupToolCalls,
+	parseDiff,
 	parseDiffLines,
 	summarizeToolArgs,
 	TOOL_DISPLAY_NAMES,
 } from "./display.ts";
-export type { DiffLine, ToolCallGroup, UIMessage, UIToolCall } from "./display.ts";
+export type { DiffFile, DiffHunk, DiffLine, ToolCallGroup, UIMessage, UIToolCall } from "./display.ts";
 
 export { estimateMessageTokens, estimateTokens, trimContext } from "./context.ts";
 export type { TrimOptions } from "./context.ts";

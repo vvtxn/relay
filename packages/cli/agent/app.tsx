@@ -34,6 +34,8 @@ import { VERSION } from "../version.ts";
 import { StatusBar } from "./components/status-bar.tsx";
 import { BootError, BootScreen } from "./components/boot-screen.tsx";
 import { MessageView } from "./components/chat.tsx";
+import { DiffViewer } from "./components/diff.tsx";
+import { buildDiffRows, collectSessionDiffs, type DiffRows, type SessionDiff } from "./diffs.ts";
 
 // ---------------------------------------------------------------------------
 // Commands
@@ -53,6 +55,12 @@ const COMMANDS: CommandPaletteItem[] = [
 		description: "Open this session in the web client",
 		keywords: ["browser", "web", "url"],
 	},
+	{
+		id: "diffs",
+		title: "Review Changes",
+		description: "Open the latest edit/write diff",
+		keywords: ["diff", "diffs", "changes", "patch"],
+	},
 	{ id: "quit", title: "Quit", description: "Exit the agent", keywords: ["exit", "close"] },
 ];
 
@@ -71,7 +79,7 @@ function formatStatus(status: AgentStatus): string {
 		case "writing":
 			return "Writing...";
 		case "running_tool":
-			return `Running ${status.toolName}...`;
+			return `Running ${getToolDisplayName(status.toolName)}...`;
 	}
 }
 
@@ -114,6 +122,16 @@ function App({ onQuit, initialSessionId, info }: AppProps) {
 	const remotelyResolved = useSignal<Set<string>>(new Set());
 	/** Session id whose history is still loading — shows a hint instead of the welcome screen. */
 	const loadingSession = useSignal<string | null>(null);
+	/**
+	 * Open diff review: the session's diffs at the time it was opened, the
+	 * selected position, and pre-built full-context rows. Held by value so
+	 * streamed events behind the overlay never close or re-parse it.
+	 */
+	const diffViewer = useSignal<{
+		diffs: SessionDiff[];
+		index: number;
+		view: DiffRows;
+	} | null>(null);
 
 	const pushStream = () => {
 		stream.value = sync.value.pending;
@@ -259,40 +277,37 @@ function App({ onQuit, initialSessionId, info }: AppProps) {
 		return () => ac.abort();
 	});
 
-	// Double-Esc to cancel the running turn (only when loading, so it doesn't
-	// conflict with vim mode toggle)
-	const cancelKey = getHookKey("cancel-");
-	if (!hasCleanup(cancelKey)) {
-		let lastEsc = 0;
-		let escTimer: ReturnType<typeof setTimeout> | null = null;
-		const cleanup = inputManager.onKeyGlobal((event) => {
-			if (event.key !== "escape" || !stream.value.running) return false;
-			const id = sessionId.value;
-			if (!id) return false;
-			const now = Date.now();
-			if (now - lastEsc < 1500) {
-				void getClient()
-					.cancel(id)
-					.catch(() => {});
-				lastEsc = 0;
-				escPrimed.value = false;
-				if (escTimer) {
-					clearTimeout(escTimer);
-					escTimer = null;
-				}
-			} else {
-				lastEsc = now;
-				escPrimed.value = true;
-				if (escTimer) clearTimeout(escTimer);
-				escTimer = setTimeout(() => {
-					escPrimed.value = false;
-					escTimer = null;
-				}, 1500);
-			}
-			return true;
-		});
-		setCleanup(cancelKey, cleanup);
-	}
+	// -----------------------------------------------------------------------
+	// Diff review overlay
+	// -----------------------------------------------------------------------
+
+	const openDiffViewer = (index?: number) => {
+		const diffs = collectSessionDiffs(viewMessages(stream.value));
+		if (diffs.length === 0) return;
+		const next = Math.max(0, Math.min(index ?? diffs.length - 1, diffs.length - 1));
+		const diff = diffs[next];
+		if (!diff) return;
+		diffViewer.value = { diffs, index: next, view: buildDiffRows(diff.diff, { context: true }) };
+	};
+
+	const cycleDiffViewer = (delta: number) => {
+		const current = diffViewer.value;
+		if (!current) return;
+		// Rebuild so changes that arrived while the overlay was open are included.
+		const diffs = collectSessionDiffs(viewMessages(stream.value));
+		if (diffs.length === 0) {
+			diffViewer.value = null;
+			return;
+		}
+		const index = (current.index + delta + diffs.length) % diffs.length;
+		const diff = diffs[index];
+		if (!diff) return;
+		diffViewer.value = { diffs, index, view: buildDiffRows(diff.diff, { context: true }) };
+	};
+
+	const closeDiffViewer = () => {
+		diffViewer.value = null;
+	};
 
 	// -----------------------------------------------------------------------
 	// Actions
@@ -328,6 +343,7 @@ function App({ onQuit, initialSessionId, info }: AppProps) {
 	const openSessionById = (id: string) => {
 		if (sessionId.value === id) return;
 		dropPendingAsk(true);
+		closeDiffViewer();
 		sessionId.value = id;
 		sync.value.pending = resetSessionStreamState();
 		syncStream(true);
@@ -338,6 +354,7 @@ function App({ onQuit, initialSessionId, info }: AppProps) {
 
 	const startNewChat = async () => {
 		dropPendingAsk(true);
+		closeDiffViewer();
 		try {
 			const response = await getClient().createSession(workspaceCwd());
 			sessionId.value = response.id;
@@ -400,6 +417,8 @@ function App({ onQuit, initialSessionId, info }: AppProps) {
 	const palette = useCommandPalette({
 		items: COMMANDS,
 		mode,
+		// The review overlay owns the keyboard while it is open.
+		openKey: diffViewer.value === null ? "/" : null,
 		onSelect: (item) => {
 			if (item.id === "new-chat") {
 				void startNewChat();
@@ -425,6 +444,8 @@ function App({ onQuit, initialSessionId, info }: AppProps) {
 			} else if (item.id === "web") {
 				const id = sessionId.value;
 				openBrowser(id ? `${info.webUrl}/s/${id}` : info.webUrl);
+			} else if (item.id === "diffs") {
+				openDiffViewer();
 			} else if (item.id === "quit") {
 				onQuit();
 			}
@@ -435,7 +456,7 @@ function App({ onQuit, initialSessionId, info }: AppProps) {
 		value: input,
 		cursorPosition: cursor,
 		mode,
-		focused: true,
+		focused: diffViewer.value === null,
 		onSubmit: handleSubmit,
 		onCharInserted: (char, cursorPos) => {
 			if (char === "@" && !filePalette.open.value && !palette.open.value && !stream.value.running) {
@@ -446,7 +467,80 @@ function App({ onQuit, initialSessionId, info }: AppProps) {
 		},
 	});
 
+	// Diff review keys are registered after the palettes (so an open palette
+	// consumes them) and before cancel (so Escape closes the overlay instead of
+	// priming run cancellation). Navigation keys fall through to the overlay's
+	// ScrollArea; every other key is swallowed so the composer can't type behind it.
+	const diffViewerKey = getHookKey("diff-viewer-");
+	if (!hasCleanup(diffViewerKey)) {
+		const cleanup = inputManager.onKeyGlobal((event) => {
+			if (event.ctrl && event.key === "o") {
+				if (diffViewer.value) closeDiffViewer();
+				else openDiffViewer();
+				return true;
+			}
+
+			if (!diffViewer.value) return false;
+
+			if (event.key === "escape" || event.key === "q") {
+				closeDiffViewer();
+				return true;
+			}
+			if (!event.ctrl && !event.meta && event.key === "n") {
+				cycleDiffViewer(1);
+				return true;
+			}
+			if (!event.ctrl && !event.meta && event.key === "p") {
+				cycleDiffViewer(-1);
+				return true;
+			}
+			if (event.ctrl && event.key === "c") return false;
+
+			if (["up", "down", "pageup", "pagedown", "wheelup", "wheeldown"].includes(event.key)) return false;
+			return true;
+		});
+		setCleanup(diffViewerKey, cleanup);
+	}
+
+	// Double-Esc to cancel the running turn (only when loading, so it doesn't
+	// conflict with vim mode toggle)
+	const cancelKey = getHookKey("cancel-");
+	if (!hasCleanup(cancelKey)) {
+		let lastEsc = 0;
+		let escTimer: ReturnType<typeof setTimeout> | null = null;
+		const cleanup = inputManager.onKeyGlobal((event) => {
+			if (event.key !== "escape" || !stream.value.running) return false;
+			const id = sessionId.value;
+			if (!id) return false;
+			const now = Date.now();
+			if (now - lastEsc < 1500) {
+				void getClient()
+					.cancel(id)
+					.catch(() => {});
+				lastEsc = 0;
+				escPrimed.value = false;
+				if (escTimer) {
+					clearTimeout(escTimer);
+					escTimer = null;
+				}
+			} else {
+				lastEsc = now;
+				escPrimed.value = true;
+				if (escTimer) clearTimeout(escTimer);
+				escTimer = setTimeout(() => {
+					escPrimed.value = false;
+					escTimer = null;
+				}, 1500);
+			}
+			return true;
+		});
+		setCleanup(cancelKey, cleanup);
+	}
+
 	const messages = viewMessages(stream.value);
+	const hasDiffs = messages.some((message) => message.toolCalls?.some((call) => call.diff !== undefined));
+	const viewer = diffViewer.value;
+	const viewerDiff = viewer?.diffs[viewer.index];
 
 	return (
 		<Box flex flexDirection="column" padding={1} bgColor={theme.background}>
@@ -463,7 +557,16 @@ function App({ onQuit, initialSessionId, info }: AppProps) {
 					<WelcomeScreen hints="Enter to send • @ for files • / for commands • PageUp/PageDown to scroll • i/Esc to toggle mode" />
 				)
 			) : (
-				<ScrollArea flex flexDirection="column" paddingX={2} paddingY={1} gap={1} scrollbar focused autoScroll>
+				<ScrollArea
+					flex
+					flexDirection="column"
+					paddingX={2}
+					paddingY={1}
+					gap={1}
+					scrollbar
+					focused={viewer === null}
+					autoScroll
+				>
 					{messages.map((msg, i) => (
 						<MessageView key={i} msg={msg} />
 					))}
@@ -484,7 +587,7 @@ function App({ onQuit, initialSessionId, info }: AppProps) {
 					cursorPosition={cursor.value}
 					placeholder="Write a message..."
 					placeholderColor={theme.textDim}
-					focused
+					focused={viewer === null}
 					maxLines={8}
 				/>
 			</Box>
@@ -509,12 +612,18 @@ function App({ onQuit, initialSessionId, info }: AppProps) {
 						</>
 					) : (
 						<Text color={theme.textFaint} italic>
-							@ files • / commands • i/Esc mode
+							{hasDiffs
+								? "@ files • / commands • ctrl+o diffs • i/Esc mode"
+								: "@ files • / commands • i/Esc mode"}
 						</Text>
 					)}
 				</Box>
 				<Text color={theme.textFaint}>v{VERSION}</Text>
 			</Box>
+
+			{viewer && viewerDiff && (
+				<DiffViewer diff={viewerDiff} view={viewer.view} index={viewer.index} total={viewer.diffs.length} />
+			)}
 
 			<CommandPalette palette={palette} />
 			<CommandPalette palette={filePalette} placeholder="Search files..." />

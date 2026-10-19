@@ -118,9 +118,12 @@ Shared across all clients (TUI, web). Deliberately dependency-free so browser bu
 - `getToolDisplayOutput()` — Formats tool output as concise summaries for display
 - `groupToolCalls()` — Collapses a turn's tool calls into one row per tool (first-seen order): compact targets
   (`app.tsx, chat.tsx +2 more`, capped by count and length), an aggregated stat (`12 matches in 3 files`, `+4 −2`,
-  `running…` while results are pending), and an error count
+  `running…` while results are pending), an error count, and the underlying `calls` for per-call detail rendering
 - `abbreviateHome()` / `expandHome()` — Replace a home-directory prefix with `~` for display and back
-- `parseDiffLines()` — Parses unified diff into structured `DiffLine[]` (without color assignment)
+- `parseDiff()` — Parses unified diffs into files → hunks → lines with line numbers; handles git headers, multiple
+  hunks/files, no-newline markers, and header-looking content lines
+- `diffStats()` — Added/removed line counts from a diff's hunk bodies (never file headers)
+- `parseDiffLines()` — Flat `DiffLine[]` view of `parseDiff()`, kept for the web's plain-line diff fallback
 
 ### Tool System
 

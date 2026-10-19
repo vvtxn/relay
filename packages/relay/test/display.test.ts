@@ -2,7 +2,7 @@
 // capped target lists, aggregated result stats, and error/pending handling.
 
 import { describe, expect, it } from "vite-plus/test";
-import { groupToolCalls, type UIToolCall } from "../core/display.ts";
+import { diffStats, groupToolCalls, parseDiff, parseDiffLines, type UIToolCall } from "../core/display.ts";
 
 function tool(name: string, input: string, output = "", extra: Partial<UIToolCall> = {}): UIToolCall {
 	return { name, input, output, ...extra };
@@ -94,5 +94,120 @@ describe("groupToolCalls", () => {
 		const groups = groupToolCalls([tool("bash", "npm test", "ok")]);
 		expect(groups[0]?.stat).toBe("");
 		expect(groups[0]?.args).toBe("npm test");
+	});
+
+	it("keeps the underlying calls for per-call detail rendering", () => {
+		const diff = ["--- a.ts", "+++ a.ts", "@@ -1 +1 @@", "-old", "+new"].join("\n");
+		const groups = groupToolCalls([tool("edit_file", "a.ts", "ok", { diff }), tool("read_file", "b.ts", "x")]);
+		expect(groups[0]?.calls).toHaveLength(1);
+		expect(groups[0]?.calls[0]?.input).toBe("a.ts");
+	});
+});
+
+describe("parseDiff", () => {
+	const patch = [
+		"diff --git a/src/a.ts b/src/a.ts",
+		"--- a/src/a.ts",
+		"+++ b/src/a.ts",
+		"@@ -10,3 +10,4 @@",
+		" context",
+		"-old",
+		"+new",
+		"+extra",
+		" context2",
+		"@@ -30,2 +31,2 @@",
+		"-old2",
+		"+new2",
+	].join("\n");
+
+	it("parses the file path, hunks, and line numbers", () => {
+		const [file] = parseDiff(patch);
+
+		expect(file?.path).toBe("src/a.ts");
+		expect(file?.hunks).toHaveLength(2);
+		expect(file?.hunks[0]?.header).toBe("@@ -10,3 +10,4 @@");
+		expect(file?.hunks[0]?.lines).toEqual([
+			{ lineNo: 10, prefix: " ", content: "context" },
+			{ lineNo: 11, prefix: "-", content: "old" },
+			{ lineNo: 11, prefix: "+", content: "new" },
+			{ lineNo: 12, prefix: "+", content: "extra" },
+			{ lineNo: 13, prefix: " ", content: "context2" },
+		]);
+	});
+
+	it("treats header-looking content as changed lines inside a hunk", () => {
+		const tricky = [
+			"diff --git a/a.txt b/a.txt",
+			"--- a/a.txt",
+			"+++ b/a.txt",
+			"@@ -1,2 +1,2 @@",
+			"--- removed heading",
+			"+++ added heading",
+		].join("\n");
+
+		expect(parseDiff(tricky)[0]?.hunks[0]?.lines).toEqual([
+			{ lineNo: 1, prefix: "-", content: "-- removed heading" },
+			{ lineNo: 1, prefix: "+", content: "++ added heading" },
+		]);
+	});
+
+	it("flattens to the legacy parseDiffLines output", () => {
+		expect(parseDiffLines(patch)).toEqual(parseDiff(patch).flatMap((file) => file.hunks.flatMap((h) => h.lines)));
+	});
+
+	it("starts a new file at ---/+++ when diff --git is absent", () => {
+		const multi = [
+			"--- a/a.ts",
+			"+++ b/a.ts",
+			"@@ -1 +1 @@",
+			"-old",
+			"+new",
+			"--- a/b.ts",
+			"+++ b/b.ts",
+			"@@ -1 +1 @@",
+			"-old2",
+			"+new2",
+		].join("\n");
+		const files = parseDiff(multi);
+
+		expect(files.map((file) => file.path)).toEqual(["a.ts", "b.ts"]);
+		expect(files[1]?.hunks[0]?.lines[0]).toEqual({ lineNo: 1, prefix: "-", content: "old2" });
+	});
+
+	it("ignores trailing blank lines and no-newline markers", () => {
+		const withMarker = [
+			"--- a/a.txt",
+			"+++ b/a.txt",
+			"@@ -1 +1 @@",
+			"-old",
+			"+new",
+			"\\ No newline at end of file",
+			"",
+		].join("\n");
+
+		expect(parseDiffLines(withMarker)).toEqual([
+			{ lineNo: 1, prefix: "-", content: "old" },
+			{ lineNo: 1, prefix: "+", content: "new" },
+		]);
+	});
+});
+
+describe("diffStats", () => {
+	it("counts only hunk bodies, not file headers or header-looking content", () => {
+		const patch = [
+			"diff --git a/a.ts b/a.ts",
+			"--- a/a.ts",
+			"+++ b/a.ts",
+			"@@ -1,2 +1,3 @@",
+			"--- removed heading",
+			"+++ added heading",
+			"+++ another addition",
+		].join("\n");
+
+		expect(diffStats(patch)).toEqual({ adds: 2, deletes: 1 });
+	});
+
+	it("returns zeroes for a patch without hunks", () => {
+		expect(diffStats("diff --git a/a.ts b/a.ts\n--- a/a.ts\n+++ b/a.ts")).toEqual({ adds: 0, deletes: 0 });
 	});
 });
