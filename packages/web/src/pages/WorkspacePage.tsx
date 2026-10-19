@@ -82,6 +82,8 @@ export function WorkspacePage() {
 		return list.filter((session) => (session.firstUserMessage ?? "").toLowerCase().includes(needle));
 	});
 	const totalThreads = () => sessions.data?.length ?? 0;
+	const sessionLimit = () => config.data?.maxSessionsPerWorkspace ?? 0;
+	const atLimit = () => sessions.isSuccess && sessionLimit() > 0 && totalThreads() >= sessionLimit();
 
 	const [createError, setCreateError] = createSignal("");
 	const create = useMutation(() => ({
@@ -131,14 +133,29 @@ export function WorkspacePage() {
 									{cwd() ? displayPath(cwd()!) : ""}
 								</span>
 							</div>
-							<button
-								type="button"
-								class="btn primary"
-								disabled={!entry() || missing(entry()) || create.isPending}
-								onClick={() => create.mutate()}
-							>
-								{create.isPending ? "Creating…" : "New chat"}
-							</button>
+							<div class="pane-head-actions">
+								<Show when={sessionLimit() > 0}>
+									<div
+										class={`pane-limit${atLimit() ? " full" : ""}`}
+										title={`Relay keeps up to ${sessionLimit()} threads per workspace`}
+									>
+										<span class="pane-limit-count">
+											{sessions.isSuccess ? totalThreads() : "—"} / {sessionLimit()}
+										</span>
+										<Show when={atLimit()}>
+											<span class="pane-limit-hint">oldest removed automatically</span>
+										</Show>
+									</div>
+								</Show>
+								<button
+									type="button"
+									class="btn primary"
+									disabled={!entry() || missing(entry()) || create.isPending}
+									onClick={() => create.mutate()}
+								>
+									{create.isPending ? "Creating…" : "New chat"}
+								</button>
+							</div>
 						</header>
 
 						<Show when={missing(entry())}>

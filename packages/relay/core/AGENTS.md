@@ -197,7 +197,9 @@ actually wires (workspace tools + `delegate`), and `createDelegateTool` defaults
 `sessions/` provides Effect-native storage contracts and adapters:
 
 - `DatabaseSessionStore` stores shared sessions and ordered messages in the database; `SessionHandle` operations
-  (`append`, `flush`) are Effects that fail with `StoreError`, while synchronous in-memory reads stay synchronous
+  (`append`, `flush`) are Effects that fail with `StoreError`, while synchronous in-memory reads stay synchronous.
+  Each owner/workspace is capped at `maxSessionsPerWorkspace` (default 10): persisting a user message atomically
+  deletes older sessions and their entries, and `pruneAll()` trims pre-existing overflow at startup.
 - `FileSessionStore` preserves the JSONL implementation for fallback tooling (also Effect-facing)
 - Session ownership and workspace are explicit in `SessionScope`
 - `authenticate()` and the auth store interfaces (`UserStore`, `UserDirectory`, `AuthSessionStore`, `UserSettingsStore`)

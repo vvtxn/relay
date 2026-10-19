@@ -99,6 +99,7 @@ export const storesLayer = Layer.effectContext(
 			url: config.tursoUrl,
 			authToken: config.tursoToken,
 			client: db,
+			maxSessionsPerWorkspace: config.maxSessionsPerWorkspace,
 		});
 		yield* sessionStore.ready;
 

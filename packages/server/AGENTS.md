@@ -81,6 +81,10 @@ Store contracts are Effect-native (`SessionHandle`/`SessionStore`, `StoreError`)
 sessions created in-process are not yet visible to `store.open()`; all session routes go through `openSessionHandle()`
 (sessions.ts), which falls back to the live RunManager handle.
 
+The database store keeps at most `RELAY_MAX_SESSIONS_PER_WORKSPACE` (default 10) sessions per owner/workspace. When a
+user message is persisted, the insert/update and the delete of older sessions plus their entries run in one atomic
+batch. `pruneAll()` trims pre-existing overflow on startup, before any runs are active.
+
 The per-session workspace cwd comes from the client (CLI sends its terminal cwd). File tools are confined to that cwd;
 bash is not (documented in relay core AGENTS.md).
 
@@ -169,6 +173,8 @@ Payload types live in `@vvtxn/client/protocol.ts` — never redeclare them here.
   roots; defaults to the server user's home, `*` allows any directory); both required when binding a non-loopback
   `RELAY_HOST`, and `*` is rejected there
 - `RELAY_PORT` (default 7433), `RELAY_HOST` (default 127.0.0.1), `RELAY_WORKSPACE`, `RELAY_STATIC_DIR`
+- `RELAY_MAX_SESSIONS_PER_WORKSPACE` (default 10): persisted sessions kept per owner/workspace; older sessions are
+  pruned automatically
 - Settings storage: `RELAY_SETTINGS_STORE` (`file` default, or `database`), `RELAY_DATA_DIR` (default `~/.relay`),
   `RELAY_SECRET_KEY` / `RELAY_SECRET_KEY_FILE` (master key; required with the database backend)
 

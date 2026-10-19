@@ -266,6 +266,8 @@ The server requires `TURSO_DB_URL`, `TURSO_DB_TOKEN`, `GITHUB_APP_CLIENT_ID`, an
 - **Continue** — Resume the most recent session for a workspace
 - **Open** — Load a specific session by opaque session ID
 - **List** — Browse all sessions with summaries (first user message preview)
+- **Bounded** — Each workspace keeps the 10 most recently active sessions (configurable with
+  `RELAY_MAX_SESSIONS_PER_WORKSPACE`); older sessions and their entries are pruned automatically
 - **Cross-client** — A session started in the terminal can be continued on another terminal, and vice versa
 - **Token tracking** — Per-session token and cost counts persisted in session metadata
 

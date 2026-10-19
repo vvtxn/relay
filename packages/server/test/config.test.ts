@@ -50,4 +50,20 @@ describe("serverConfigFromEnv settings backend", () => {
 		const config = serverConfigFromEnv({ ...BASE_ENV, RELAY_DATA_DIR: "/var/lib/relay" });
 		expect(config.dataDir).toBe("/var/lib/relay");
 	});
+
+	it("defaults the per-workspace session limit to 10 and accepts an override", () => {
+		expect(serverConfigFromEnv({ ...BASE_ENV }).maxSessionsPerWorkspace).toBe(10);
+		expect(
+			serverConfigFromEnv({ ...BASE_ENV, RELAY_MAX_SESSIONS_PER_WORKSPACE: "25" }).maxSessionsPerWorkspace,
+		).toBe(25);
+	});
+
+	it("rejects invalid per-workspace session limits", () => {
+		expect(() => serverConfigFromEnv({ ...BASE_ENV, RELAY_MAX_SESSIONS_PER_WORKSPACE: "0" })).toThrow(
+			/RELAY_MAX_SESSIONS_PER_WORKSPACE/,
+		);
+		expect(() => serverConfigFromEnv({ ...BASE_ENV, RELAY_MAX_SESSIONS_PER_WORKSPACE: "many" })).toThrow(
+			/RELAY_MAX_SESSIONS_PER_WORKSPACE/,
+		);
+	});
 });
