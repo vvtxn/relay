@@ -32,8 +32,8 @@ const TOOL_NAME_WIDTH = 8;
 export const MessageView = memo(function MessageView({ msg }: { key?: number; msg: UIMessage }) {
 	if (msg.role === "user") {
 		return (
-			<Box bgColor={theme.surfaceElevated} paddingX={2} paddingY={1}>
-				<Text color={theme.text}>{msg.content}</Text>
+			<Box bgColor={theme.surface} paddingX={1} paddingY={1}>
+				<Text color={theme.textMuted}>{msg.content}</Text>
 			</Box>
 		);
 	}
