@@ -90,8 +90,9 @@ describe("handleRequest", () => {
 		const { services } = await makeServices(new ScriptedProvider([]));
 		const configResponse = await handleRequest(services, apiRequest("GET", "/api/config", { token: TEST_TOKEN }));
 		expect(configResponse.status).toBe(200);
-		const config = (await configResponse.json()) as { model: string };
+		const config = (await configResponse.json()) as { model: string; maxSessionsPerWorkspace: number };
 		expect(config.model).toBe("fake-model");
+		expect(config.maxSessionsPerWorkspace).toBe(10);
 
 		const meResponse = await handleRequest(services, apiRequest("GET", "/api/me", { token: TEST_TOKEN }));
 		expect(meResponse.status).toBe(200);

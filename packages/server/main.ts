@@ -85,6 +85,22 @@ export async function startServer(): Promise<void> {
 	console.log(`OAuth callback: ${config.publicUrl}/api/auth/callback (must match a GitHub App callback URL exactly)`);
 	if (config.staticDir) console.log(`Serving web app from ${config.staticDir}`);
 
+	// Trim any pre-existing overflow before serving so every workspace starts
+	// within the configured cap. No runs exist yet, so nothing active is at risk.
+	try {
+		const removed = await Effect.runPromise(services.sessionStore.pruneAll());
+		if (removed > 0) {
+			console.log(
+				`Removed ${removed} old session(s); keeping at most ${config.maxSessionsPerWorkspace} per workspace.`,
+			);
+		}
+	} catch (error) {
+		console.error(
+			"Failed to enforce the per-workspace session limit:",
+			error instanceof Error ? error.message : error,
+		);
+	}
+
 	const app = createAppLayer(services);
 	const server = NodeHttpServer.layer(() => createServer(), { host: config.hostname, port: config.port });
 	const serve = HttpRouter.serve(app).pipe(

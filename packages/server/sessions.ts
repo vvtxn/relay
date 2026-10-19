@@ -24,7 +24,9 @@ import { RunConflictError } from "./run.ts";
 /**
  * Opens a session by id, falling back to the live in-memory handle for
  * sessions that were created in this process but not persisted yet (the
- * database store inserts lazily on first append).
+ * database store inserts lazily on first append). A handle with entries is
+ * already persisted, so a missing cloud row means it was pruned — do not
+ * resurrect it from memory.
  */
 export function openSessionHandle(
 	services: RequestServices,
@@ -33,7 +35,7 @@ export function openSessionHandle(
 	return services.sessionStore.open(sessionId, services.user.id).pipe(
 		Effect.catchCause(() => {
 			const handle = services.runs.getHandle(sessionId, services.user.id);
-			if (handle) return Effect.succeed(handle);
+			if (handle && handle.getEntries().length === 0) return Effect.succeed(handle);
 			return Effect.fail(new NotFoundError(`Session not found: ${sessionId}`));
 		}),
 	);
@@ -80,6 +82,7 @@ export function handleConfig(services: RequestServices): Effect.Effect<HttpServe
 		json({
 			model: config.model,
 			contextTokens: config.maxTokens,
+			maxSessionsPerWorkspace: config.maxSessionsPerWorkspace,
 			home: homeDir() ?? "",
 			webUrl: config.publicUrl,
 		} satisfies ConfigResponse),

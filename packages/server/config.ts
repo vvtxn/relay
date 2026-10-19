@@ -45,6 +45,8 @@ export interface ServerConfig {
 	defaultCwd: string;
 	/** Absolute roots a session workspace must sit within (empty = allow any). */
 	workspaceRoots: string[];
+	/** Maximum persisted sessions kept per owner and workspace. */
+	maxSessionsPerWorkspace: number;
 	/** Allowed GitHub logins or numeric ids (empty = allow any). */
 	allowedGithub: string[];
 	/** Backend storing per-user API keys: local files (default) or the database. */
@@ -64,6 +66,7 @@ const DEFAULT_HOSTNAME = "127.0.0.1";
 const DEFAULT_BASE_URL = "https://openrouter.ai/api/v1";
 const DEFAULT_MODEL = "deepseek/deepseek-v4.1-flash";
 const DEFAULT_SESSION_TTL_DAYS = 30;
+const DEFAULT_MAX_SESSIONS_PER_WORKSPACE = 10;
 
 function required(env: Record<string, string | undefined>, key: string): string {
 	const value = env[key];
@@ -171,6 +174,12 @@ export function serverConfigFromEnv(env: Record<string, string | undefined> = { 
 		sessionTtlDays: positiveInt(env.AUTH_SESSION_TTL_DAYS, DEFAULT_SESSION_TTL_DAYS, "AUTH_SESSION_TTL_DAYS", 365),
 		defaultCwd: defaultWorkspace.path,
 		workspaceRoots,
+		maxSessionsPerWorkspace: positiveInt(
+			env.RELAY_MAX_SESSIONS_PER_WORKSPACE,
+			DEFAULT_MAX_SESSIONS_PER_WORKSPACE,
+			"RELAY_MAX_SESSIONS_PER_WORKSPACE",
+			10_000,
+		),
 		allowedGithub,
 		settingsStore,
 		dataDir: env.RELAY_DATA_DIR ?? relayDir(),

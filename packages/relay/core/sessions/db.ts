@@ -59,7 +59,11 @@ export interface DatabaseSessionStoreOptions {
 	url: string;
 	authToken: string;
 	client?: DatabaseClient;
+	/** Maximum persisted sessions kept per owner and workspace (default 10). */
+	maxSessionsPerWorkspace?: number;
 }
+
+const DEFAULT_MAX_SESSIONS_PER_WORKSPACE = 10;
 
 function newId(): string {
 	return crypto.randomUUID();
@@ -83,9 +87,15 @@ function rowToEntry(row: Record<string, unknown>): Entry {
 export class DatabaseSessionStore implements SessionStore {
 	private readonly client: DatabaseClient;
 	private readonly schemaReady: Promise<void>;
+	private readonly maxSessionsPerWorkspace: number;
 
 	constructor(options: DatabaseSessionStoreOptions) {
 		this.client = options.client ?? createDatabaseClient({ url: options.url, authToken: options.authToken });
+		const maxSessions = options.maxSessionsPerWorkspace ?? DEFAULT_MAX_SESSIONS_PER_WORKSPACE;
+		if (!Number.isInteger(maxSessions) || maxSessions < 1) {
+			throw new Error("maxSessionsPerWorkspace must be a positive integer");
+		}
+		this.maxSessionsPerWorkspace = maxSessions;
 		this.schemaReady = this.initialize();
 	}
 
@@ -229,6 +239,62 @@ export class DatabaseSessionStore implements SessionStore {
 		return storeEffect(() => this.isWorkspaceHiddenPromise(scope));
 	}
 
+	/**
+	 * Trims every owner/workspace that exceeds the session limit. Intended for
+	 * startup, before runs can be active; returns the number of sessions removed.
+	 */
+	pruneAll(): Effect.Effect<number, StoreError> {
+		return storeEffect(() => this.pruneAllPromise());
+	}
+
+	private async pruneAllPromise(): Promise<number> {
+		const result = await this.execute({
+			// Count in a derived table so the engine never has to order by or
+			// filter an aggregate expression (Turso rejects some of those forms).
+			sql: `SELECT owner_id, cwd FROM (
+				SELECT owner_id, cwd, COUNT(*) AS session_count
+				FROM sessions
+				GROUP BY owner_id, cwd
+			) WHERE session_count > ?`,
+			args: [this.maxSessionsPerWorkspace],
+		});
+		let removed = 0;
+		for (const row of result.rows) {
+			removed += await this.pruneScopePromise({
+				ownerId: stringValue(row, "owner_id"),
+				cwd: stringValue(row, "cwd"),
+			});
+		}
+		return removed;
+	}
+
+	private async pruneScopePromise(scope: SessionScope): Promise<number> {
+		await this.schemaReady;
+		const statements = this.pruneStatements(scope);
+		if (statements.length === 0) return 0;
+		const results = await this.client.batch(statements, "write");
+		return results[1]?.rowsAffected ?? 0;
+	}
+
+	/**
+	 * Deletes all but the newest sessions for a workspace. When `keepId` is set
+	 * that session is never deleted and counts against the configured limit.
+	 */
+	private pruneStatements(scope: SessionScope, keepId?: string): Statement[] {
+		const offset = this.maxSessionsPerWorkspace - (keepId === undefined ? 0 : 1);
+		const exclude = keepId === undefined ? "" : " AND id <> ?";
+		const args: QueryArgs =
+			keepId === undefined ? [scope.ownerId, scope.cwd, offset] : [scope.ownerId, scope.cwd, keepId, offset];
+		const doomed = `SELECT id FROM sessions
+			WHERE owner_id = ? AND cwd = ?${exclude}
+			ORDER BY updated_at DESC, created_at DESC, id DESC
+			LIMIT -1 OFFSET ?`;
+		return [
+			{ sql: `DELETE FROM session_entries WHERE session_id IN (${doomed})`, args },
+			{ sql: `DELETE FROM sessions WHERE id IN (${doomed})`, args },
+		];
+	}
+
 	private async isWorkspaceHiddenPromise(scope: SessionScope): Promise<boolean> {
 		const result = await this.execute({
 			sql: "SELECT 1 FROM hidden_workspaces WHERE owner_id = ? AND cwd = ? LIMIT 1",
@@ -336,6 +402,12 @@ export class DatabaseSessionStore implements SessionStore {
 			VALUES (?, ?, ?, ?, ?, ?)`,
 			args: [header.id, entries.length + 1, id, full.type, full.timestamp, JSON.stringify(full)],
 		});
+		// A user message is the point where a lazily-created session becomes a
+		// cloud row. Prune in the same atomic batch so a workspace never
+		// observably exceeds the configured limit.
+		if (full.type === "message" && full.role === "user") {
+			statements.push(...this.pruneStatements(scope, header.id));
+		}
 		await this.client.batch(statements, "write");
 		return { id, timestamp };
 	}

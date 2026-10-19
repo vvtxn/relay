@@ -41,6 +41,7 @@ export function makeConfig(defaultCwd: string, overrides: Partial<ServerConfig> 
 		sessionTtlDays: 30,
 		defaultCwd,
 		workspaceRoots: [],
+		maxSessionsPerWorkspace: 10,
 		allowedGithub: [],
 		settingsStore: "file",
 		dataDir: join(tmpdir(), "relay-test-data"),
