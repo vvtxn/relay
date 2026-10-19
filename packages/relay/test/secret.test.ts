@@ -50,7 +50,15 @@ describe("secret cipher", () => {
 		const aad = userSettingsAad("user-1");
 		const payload = await cipher.encrypt("secret", aad);
 
-		await expect(cipher.decrypt(`${payload.slice(0, -2)}zz`, aad)).rejects.toThrow(/could not be decrypted/);
+		// Flip a ciphertext byte rather than the last base64url characters: the
+		// trailing characters can encode only padding bits, so changing them may
+		// decode to the exact same bytes and legitimately still decrypt.
+		const [prefix = "", iv = "", ciphertext = ""] = payload.split(".");
+		const bytes = Buffer.from(ciphertext, "base64url");
+		bytes[0] = (bytes[0] ?? 0) ^ 1;
+		const tampered = `${prefix}.${iv}.${bytes.toString("base64url")}`;
+
+		await expect(cipher.decrypt(tampered, aad)).rejects.toThrow(/could not be decrypted/);
 		await expect(cipher.decrypt("sk-plaintext", aad)).rejects.toThrow(/not an encrypted secret/);
 		await expect(cipher.decrypt("v1.only-one-part", aad)).rejects.toThrow(/Malformed/);
 	});
