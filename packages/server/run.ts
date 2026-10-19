@@ -1,5 +1,8 @@
 import { Cause, Deferred, Effect, Exit, Fiber, Queue, Ref, Semaphore, Stream } from "effect";
 import type { LLMProvider } from "@vvtxn/relay/api/types.ts";
+import type { BoxLease, BoxManager } from "@vvtxn/box/types.ts";
+import { DisabledBoxManager } from "@vvtxn/box/manager.ts";
+import { resolveProjectBoxSettings } from "@vvtxn/box/config.ts";
 import {
 	createDelegateTool,
 	createToolRegistry,
@@ -14,6 +17,7 @@ import { attempt, causeMessage, type StoreError } from "@vvtxn/relay/core/effect
 import { buildSystemPrompt } from "@vvtxn/relay/core/prompts.ts";
 import type { ApprovalDecision, PendingApprovalInfo, RunStateEvent, ServerEvent } from "@vvtxn/client/protocol.ts";
 import type { ServerConfig } from "./config.ts";
+import { createBoxBashTool } from "./box-tools.ts";
 
 type Subscriber = (event: ServerEvent) => void;
 type RunFinishReason = Extract<ServerEvent, { type: "run_finished" }>["reason"];
@@ -74,15 +78,18 @@ interface SessionRecord {
 export class RunManager {
 	private readonly config: ServerConfig;
 	private readonly providerFor: (ownerId: string) => Effect.Effect<LLMProvider | null, StoreError>;
+	private readonly boxes: BoxManager;
 
 	private readonly sessions = new Map<string, SessionRecord>();
 
 	constructor(options: {
 		config: ServerConfig;
 		providerFor: (ownerId: string) => Effect.Effect<LLMProvider | null, StoreError>;
+		boxes?: BoxManager;
 	}) {
 		this.config = options.config;
 		this.providerFor = options.providerFor;
+		this.boxes = options.boxes ?? new DisabledBoxManager();
 	}
 
 	isRunning(sessionId: string): boolean {
@@ -264,6 +271,7 @@ export class RunManager {
 	): Effect.Effect<RunFinishReason, never> {
 		const config = this.config;
 		const providerFor = this.providerFor;
+		const boxes = this.boxes;
 		const getSession = () => this.sessions.get(sessionId);
 		const publish = (event: ServerEvent): void => this.publish(sessionId, event);
 		const requestApproval = (tool: { definition: { function: { name: string } } }, input: unknown) =>
@@ -287,58 +295,75 @@ export class RunManager {
 
 			// Re-validate the workspace before every run: the directory may have
 			// been deleted or replaced by a symlink since the session was created.
+			// With boxes enabled, the box manifest is the durable workspace; the
+			// project path is only needed to create the first clone.
 			const storedCwd = handle.getHeader().cwd;
-			const workspace = yield* attempt(() => validateWorkspacePath(storedCwd, config.workspaceRoots));
-			if (!workspace.ok) {
-				return yield* Effect.fail(new Error(`Workspace "${storedCwd}" is not usable: ${workspace.message}`));
-			}
-			const cwd = workspace.path;
+			const ownerId = session.ownerId ?? "";
+			let cwd: string;
+			let lease: BoxLease | null = null;
 
-			// Expand @mentions against the session workspace, persist the stripped version
-			const expanded = yield* attempt(() => expandMentions(content, cwd));
-			yield* handle.append({ type: "message", role: "user", content: stripAttachedContext(expanded) });
-			const messages = entriesToMessages(handle.getEntries());
-
-			// The LLM sees the expanded content for the latest user message
-			for (let i = messages.length - 1; i >= 0; i--) {
-				const message = messages[i];
-				if (message?.role === "user") {
-					messages[i] = { ...message, content: expanded };
-					break;
+			if (boxes.enabled) {
+				const existing = yield* boxes.status(sessionId);
+				if (existing) {
+					lease = yield* boxes.acquire({
+						sessionId,
+						ownerId,
+						projectCwd: existing.projectCwd,
+						settings: config.box.defaults,
+						signal: abort.signal,
+					});
+				} else {
+					const workspace = yield* attempt(() => validateWorkspacePath(storedCwd, config.workspaceRoots));
+					if (!workspace.ok) {
+						return yield* Effect.fail(
+							new Error(`Workspace "${storedCwd}" is not usable: ${workspace.message}`),
+						);
+					}
+					const settings = yield* attempt(() =>
+						resolveProjectBoxSettings(workspace.path, config.box.defaults),
+					);
+					lease = yield* boxes.acquire({
+						sessionId,
+						ownerId,
+						projectCwd: workspace.path,
+						settings,
+						signal: abort.signal,
+					});
 				}
+				cwd = lease.workspace;
+			} else {
+				const workspace = yield* attempt(() => validateWorkspacePath(storedCwd, config.workspaceRoots));
+				if (!workspace.ok) {
+					return yield* Effect.fail(
+						new Error(`Workspace "${storedCwd}" is not usable: ${workspace.message}`),
+					);
+				}
+				cwd = workspace.path;
 			}
 
-			const workspaceTools = createWorkspaceTools(cwd);
-			// Subagents get a fresh loop with read-only workspace tools and no
-			// access to this conversation; their cost rolls into the session below.
-			const delegate = createDelegateTool({
-				provider,
-				model: config.model,
-				tools: createToolRegistry(workspaceTools.filter((tool) => tool.readonly)),
-				maxToolRounds: 10,
-				temperature: config.temperature,
-				contextLimit: {
-					maxTokens: config.maxTokens,
-					preserveRecentTurns: config.preserveRecentTurns,
-				},
-				maxTokens: config.maxCompletionTokens,
-				signal: abort.signal,
-			});
-			const tools = createToolRegistry(
-				withApproval([...workspaceTools, delegate], (tool, input) => requestApproval(tool, input)),
-			);
-			// Rendered from the registry the run actually exposes, so the tool
-			// guidance can never drift from the available tools.
-			const systemPrompt = buildSystemPrompt({ mode: "main", tools });
+			const execute = Effect.gen(function* () {
+				// Expand @mentions against the session workspace, persist the stripped version
+				const expanded = yield* attempt(() => expandMentions(content, cwd));
+				yield* handle.append({ type: "message", role: "user", content: stripAttachedContext(expanded) });
+				const messages = entriesToMessages(handle.getEntries());
 
-			// The agent loop is a Stream of events; the run fiber consumes it and
-			// mirrors each event onto the session draft state + SSE subscribers.
-			yield* Stream.runForEach(
-				run(messages, {
+				// The LLM sees the expanded content for the latest user message
+				for (let i = messages.length - 1; i >= 0; i--) {
+					const message = messages[i];
+					if (message?.role === "user") {
+						messages[i] = { ...message, content: expanded };
+						break;
+					}
+				}
+
+				const workspaceTools = createWorkspaceTools(cwd, lease ? { bash: createBoxBashTool(lease) } : {});
+				// Subagents get a fresh loop with read-only workspace tools and no
+				// access to this conversation; their cost rolls into the session below.
+				const delegate = createDelegateTool({
 					provider,
-					tools,
 					model: config.model,
-					systemPrompt,
+					tools: createToolRegistry(workspaceTools.filter((tool) => tool.readonly)),
+					maxToolRounds: 10,
 					temperature: config.temperature,
 					contextLimit: {
 						maxTokens: config.maxTokens,
@@ -346,12 +371,38 @@ export class RunManager {
 					},
 					maxTokens: config.maxCompletionTokens,
 					signal: abort.signal,
-				}),
-				handleEvent,
-			);
+				});
+				const tools = createToolRegistry(
+					withApproval([...workspaceTools, delegate], (tool, input) => requestApproval(tool, input)),
+				);
+				// Rendered from the registry the run actually exposes, so the tool
+				// guidance can never drift from the available tools.
+				const systemPrompt = buildSystemPrompt({ mode: "main", tools });
 
-			if (abort.signal.aborted) return "cancelled";
-			return Ref.getUnsafe(runRef).hadError ? "error" : "completed";
+				// The agent loop is a Stream of events; the run fiber consumes it and
+				// mirrors each event onto the session draft state + SSE subscribers.
+				yield* Stream.runForEach(
+					run(messages, {
+						provider,
+						tools,
+						model: config.model,
+						systemPrompt,
+						temperature: config.temperature,
+						contextLimit: {
+							maxTokens: config.maxTokens,
+							preserveRecentTurns: config.preserveRecentTurns,
+						},
+						maxTokens: config.maxCompletionTokens,
+						signal: abort.signal,
+					}),
+					handleEvent,
+				);
+
+				if (abort.signal.aborted) return "cancelled";
+				return Ref.getUnsafe(runRef).hadError ? "error" : "completed";
+			});
+
+			return yield* lease ? execute.pipe(Effect.ensuring(lease.release())) : execute;
 		});
 
 		const program = runLoop.pipe(

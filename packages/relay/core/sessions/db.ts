@@ -240,6 +240,18 @@ export class DatabaseSessionStore implements SessionStore {
 	}
 
 	/**
+	 * Every persisted session id, used to garbage-collect session-scoped box
+	 * workspaces at startup. Session rows for a workspace are bounded by the
+	 * per-workspace limit; a box with no surviving session is orphaned.
+	 */
+	allSessionIds(): Effect.Effect<ReadonlySet<string>, StoreError> {
+		return storeEffect(async () => {
+			const result = await this.execute({ sql: "SELECT id FROM sessions", args: [] });
+			return new Set(result.rows.map((row) => stringValue(row, "id")));
+		});
+	}
+
+	/**
 	 * Trims every owner/workspace that exceeds the session limit. Intended for
 	 * startup, before runs can be active; returns the number of sessions removed.
 	 */

@@ -73,6 +73,11 @@ function confinePathArg(tool: Tool, root: string): Tool {
 	};
 }
 
+export interface WorkspaceToolsOptions {
+	/** Replace the host bash tool, e.g. with a box executor. */
+	bash?: Tool;
+}
+
 /**
  * Creates the built-in tools rooted at a workspace directory: file tools
  * resolve (and confine) paths against `root`, and bash commands run with
@@ -82,9 +87,9 @@ function confinePathArg(tool: Tool, root: string): Tool {
  * — a shell command can still reference absolute paths outside the root. For
  * untrusted environments, pair with OS-level isolation.
  */
-export function createWorkspaceTools(root: string): Tool[] {
+export function createWorkspaceTools(root: string, options: WorkspaceToolsOptions = {}): Tool[] {
 	return [
-		createBashTool(root),
+		options.bash ?? createBashTool(root),
 		confinePathArg(readFileTool, root),
 		confinePathArg(writeFileTool, root),
 		confinePathArg(editFileTool, root),

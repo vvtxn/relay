@@ -5,6 +5,31 @@ import { defineTool, type Tool } from "./types.ts";
 const MAX_OUTPUT = 10_000;
 const DEFAULT_TIMEOUT = 30_000;
 
+/** Shared model-facing definition so alternate executors (boxes) cannot drift. */
+export const bashToolDefinition = {
+	name: "bash",
+	description:
+		"Execute a shell command. Use only for running project scripts (e.g. pnpm run, vp run), build/test commands, git operations, and installing packages. Do NOT use bash for file reading, searching, or directory listing — use the dedicated tools (read_file, grep) instead. Commands run in the current working directory.",
+	usageHint:
+		"Run project scripts (`pnpm run`, `vp run`), build/test commands, git operations, and package installs. Do " +
+		"NOT use bash for file reading, searching, or listing — use the dedicated tools. Avoid interactive commands " +
+		"(REPLs, editors, password prompts) and background processes with `&`.",
+	parameters: {
+		type: "object",
+		properties: {
+			command: {
+				type: "string",
+				description: "The shell command to execute.",
+			},
+			timeout: {
+				type: "number",
+				description: "Timeout in milliseconds. Defaults to 30000.",
+			},
+		},
+		required: ["command"],
+	},
+};
+
 export interface BashToolOptions {
 	/**
 	 * Environment for spawned commands. Defaults to {@link scrubbedAgentEnv},
@@ -22,27 +47,7 @@ export interface BashToolOptions {
 export function createBashTool(cwd?: string, options: BashToolOptions = {}): Tool {
 	const env = options.env ?? scrubbedAgentEnv();
 	return defineTool({
-		name: "bash",
-		description:
-			"Execute a shell command. Use only for running project scripts (e.g. pnpm run, vp run), build/test commands, git operations, and installing packages. Do NOT use bash for file reading, searching, or directory listing — use the dedicated tools (read_file, grep) instead. Commands run in the current working directory.",
-		usageHint:
-			"Run project scripts (`pnpm run`, `vp run`), build/test commands, git operations, and package installs. Do " +
-			"NOT use bash for file reading, searching, or listing — use the dedicated tools. Avoid interactive commands " +
-			"(REPLs, editors, password prompts) and background processes with `&`.",
-		parameters: {
-			type: "object",
-			properties: {
-				command: {
-					type: "string",
-					description: "The shell command to execute.",
-				},
-				timeout: {
-					type: "number",
-					description: "Timeout in milliseconds. Defaults to 30000.",
-				},
-			},
-			required: ["command"],
-		},
+		...bashToolDefinition,
 		async execute(input) {
 			const { command, timeout } = input as { command: string; timeout?: number };
 			const start = performance.now();

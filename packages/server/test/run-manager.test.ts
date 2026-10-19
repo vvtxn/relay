@@ -6,6 +6,7 @@ import { mkdtemp, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vite-plus/test";
+import type { BoxLease, BoxManager, BoxSpec, BoxStatus, ExecResult } from "@vvtxn/box/types.ts";
 import type { ServerEvent } from "@vvtxn/client/protocol.ts";
 import type { LLMProvider } from "@vvtxn/relay/api/types.ts";
 import { RunConflictError, RunManager } from "../run.ts";
@@ -27,12 +28,12 @@ import {
 
 const USER_ID = "user-1";
 
-async function setupRun(provider: LLMProvider | null) {
+async function setupRun(provider: LLMProvider | null, boxes?: BoxManager) {
 	const cwd = await mkdtemp(join(tmpdir(), "relay-run-test-"));
 	const config = makeConfig(cwd);
 	const store = new MemorySessionStore();
 	const handle = store.create({ ownerId: USER_ID, cwd }) as MemorySessionHandle;
-	const runs = new RunManager({ config, providerFor: () => Effect.succeed(provider) });
+	const runs = new RunManager({ config, providerFor: () => Effect.succeed(provider), ...(boxes ? { boxes } : {}) });
 	const sessionId = handle.getHeader().id;
 	runs.attachHandle(sessionId, handle, USER_ID);
 	return { cwd, runs, sessionId, handle };
@@ -84,6 +85,74 @@ async function fileExists(path: string): Promise<boolean> {
 		return true;
 	} catch {
 		return false;
+	}
+}
+
+/** Minimal box manager: records exec calls and leases a temp workspace. */
+class RecordingBoxManager implements BoxManager {
+	readonly enabled = true;
+	readonly commands: string[] = [];
+	leases = 0;
+	releases = 0;
+	private readonly workspace: string;
+
+	constructor(workspace: string) {
+		this.workspace = workspace;
+	}
+
+	acquire(spec: BoxSpec): Effect.Effect<BoxLease> {
+		this.leases += 1;
+		const status: BoxStatus = {
+			boxId: "box-1",
+			sessionId: spec.sessionId,
+			projectCwd: spec.projectCwd,
+			workspace: this.workspace,
+			state: "running",
+			createdAt: new Date().toISOString(),
+			lastUsedAt: new Date().toISOString(),
+		};
+		return Effect.succeed({
+			status,
+			workspace: this.workspace,
+			exec: (command: string): Effect.Effect<ExecResult> => {
+				this.commands.push(command);
+				return Effect.succeed({
+					code: 0,
+					stdout: "box-ok\n",
+					stderr: "",
+					durationMs: 1,
+					truncated: false,
+				});
+			},
+			release: () =>
+				Effect.sync(() => {
+					this.releases += 1;
+				}),
+		});
+	}
+
+	status(): Effect.Effect<BoxStatus | null> {
+		return Effect.succeed(null);
+	}
+
+	stop(): Effect.Effect<void> {
+		return Effect.void;
+	}
+
+	destroy(): Effect.Effect<void> {
+		return Effect.void;
+	}
+
+	gc(): Effect.Effect<{ removed: number; trashed: number }> {
+		return Effect.succeed({ removed: 0, trashed: 0 });
+	}
+
+	reconcile(): Effect.Effect<void> {
+		return Effect.void;
+	}
+
+	shutdown(): Effect.Effect<void> {
+		return Effect.void;
 	}
 }
 
@@ -381,6 +450,29 @@ describe("RunManager", () => {
 		expect(finished.reason).toBe("error");
 		const errorEvent = await waitForEvent(run.events, "error");
 		expect(errorEvent.message).toContain("No API key configured");
+		run.unsubscribe();
+	});
+
+	it("routes bash through the box lease and releases it when the run ends", async () => {
+		const workspace = await mkdtemp(join(tmpdir(), "relay-box-run-test-"));
+		const boxes = new RecordingBoxManager(workspace);
+		const provider = new ScriptedProvider([
+			chunks(toolCallChunk("call-1", "bash", JSON.stringify({ command: "echo hi" })), doneChunk()),
+			chunks(doneChunk()),
+		]);
+		const { runs, sessionId } = await setupRun(provider, boxes);
+		const run = collect(runs, sessionId);
+
+		runs.startMessage(sessionId, "run it");
+		const finished = await run.finished();
+
+		expect(finished.reason).toBe("completed");
+		expect(boxes.commands).toEqual(["echo hi"]);
+		expect(boxes.leases).toBe(1);
+		expect(boxes.releases).toBe(1);
+		expect(run.events.some((event) => event.type === "approval_required")).toBe(false);
+		const result = await waitForEvent(run.events, "tool_result");
+		expect(result.result.content).toContain("box-ok");
 		run.unsubscribe();
 	});
 });

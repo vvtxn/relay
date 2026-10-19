@@ -66,4 +66,28 @@ describe("serverConfigFromEnv settings backend", () => {
 			/RELAY_MAX_SESSIONS_PER_WORKSPACE/,
 		);
 	});
+
+	it("defaults boxes off with a bounded runtime configuration", () => {
+		const config = serverConfigFromEnv({ ...BASE_ENV });
+		expect(config.box.enabled).toBe(false);
+		expect(config.box.defaults.image).toBe("node:26-bookworm");
+		expect(config.box.maxRunning).toBe(4);
+		expect(config.box.dataDir.endsWith("/boxes")).toBe(true);
+	});
+
+	it("parses box overrides and rejects malformed values", () => {
+		const config = serverConfigFromEnv({
+			...BASE_ENV,
+			RELAY_BOX: "1",
+			RELAY_BOX_IMAGE: "relay-box:local",
+			RELAY_BOX_MAX_RUNNING: "2",
+			RELAY_BOX_MEMORY_MIB: "4096",
+		});
+		expect(config.box.enabled).toBe(true);
+		expect(config.box.defaults.image).toBe("relay-box:local");
+		expect(config.box.maxRunning).toBe(2);
+		expect(config.box.defaults.memoryMiB).toBe(4096);
+		expect(() => serverConfigFromEnv({ ...BASE_ENV, RELAY_BOX: "sometimes" })).toThrow(/RELAY_BOX/);
+		expect(() => serverConfigFromEnv({ ...BASE_ENV, RELAY_BOX_MAX_RUNNING: "0" })).toThrow(/RELAY_BOX_MAX_RUNNING/);
+	});
 });

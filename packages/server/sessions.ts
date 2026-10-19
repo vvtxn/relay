@@ -168,7 +168,8 @@ export function handleOpenSession(
 	return Effect.gen(function* () {
 		const handle = yield* openSessionHandle(services, sessionId);
 		services.runs.attachHandle(sessionId, handle, services.user.id);
-		const branch = yield* attempt(() => getGitBranch(handle.getHeader().cwd)).pipe(
+		const box = yield* services.boxes.status(sessionId).pipe(Effect.catchCause(() => Effect.succeed(null)));
+		const branch = yield* attempt(() => getGitBranch(box?.workspace ?? handle.getHeader().cwd)).pipe(
 			Effect.catchCause(() => Effect.succeed(null)),
 		);
 
