@@ -19,6 +19,7 @@ import { type ChildProcess } from "node:child_process";
 import { closeSync, mkdirSync, openSync, readFileSync, readSync, rmSync, statSync } from "node:fs";
 import { createServer } from "node:net";
 import { dirname, join } from "node:path";
+import { isSea } from "node:sea";
 import { fileURLToPath } from "node:url";
 import { spawnDetached } from "@vvtxn/relay/core/command.ts";
 import type { SettingsResponse } from "@vvtxn/client/protocol.ts";
@@ -119,7 +120,7 @@ function preferredPort(): number {
 function portFallbackAllowed(): boolean {
 	const explicit = Number(process.env.RELAY_PORT);
 	if (Number.isInteger(explicit) && explicit > 0) return false;
-	return process.env.RELAY_ENV !== "production";
+	return process.env.RELAY_ENV !== "production" || process.env.RELAY_FLAVOR === "local";
 }
 
 function startTimeoutMs(): number {
@@ -155,7 +156,9 @@ async function pickFreePort(): Promise<number> {
 
 /** Arguments that re-launch this program as a foreground server. */
 function serverArgs(): string[] {
-	const entry = fileURLToPath(new URL("../../server/main.ts", import.meta.url));
+	// In a SEA the executable is the server entry; re-exec it with `serve`.
+	if (isSea()) return ["serve"];
+	const entry = fileURLToPath(new URL("../../server/entry.ts", import.meta.url));
 	return [entry];
 }
 

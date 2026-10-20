@@ -1,4 +1,5 @@
 import { startServer } from "@vvtxn/server/main.ts";
+import { VERSION } from "@vvtxn/relay/version.ts";
 import { createClient } from "./client.ts";
 import { resolveWorkspacePath } from "./config.ts";
 import { ensureApiKey, ensureAuthenticated, ensureServer, printStatus, runWeb, stopServer } from "./server.ts";
@@ -30,6 +31,11 @@ function parseRunFlags(argv: string[]): { resume: boolean; workspace: string | n
 
 try {
 	switch (command) {
+		case "version":
+		case "--version":
+		case "-v":
+			console.log(VERSION);
+			break;
 		case "serve":
 			await startServer();
 			break;

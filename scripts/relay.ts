@@ -15,7 +15,7 @@ import { fileURLToPath } from "node:url";
  * `packages/cli/agent/index.ts`.
  */
 
-const SOURCE_COMMANDS = new Set(["serve", "web", "stop", "status", "fonts", "workspace"]);
+const SOURCE_COMMANDS = new Set(["serve", "web", "stop", "status", "fonts", "workspace", "version"]);
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 const args = process.argv.slice(2);

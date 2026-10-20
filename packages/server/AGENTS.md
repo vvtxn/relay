@@ -9,7 +9,8 @@ HTTP + SSE server hosting the Relay agent runtime, built on `effect/http` and
 server/
 ├── package.json     # @vvtxn/server; exports "./main" for the CLI serve subcommand
 ├── mod.ts           # Public exports (startServer, createServices, handleRequest, RunManager)
-├── main.ts          # Entry: config from env → createServices → HttpRouter.serve + Layer.launch
+├── main.ts          # startServer(): config from env → createServices → HttpRouter.serve + Layer.launch
+├── entry.ts         # Direct executable entry; imports main.ts so importing it has no side effects
 ├── config.ts        # serverConfigFromEnv: port, host, LLM key/model, local/Turso DB, auth, static dir
 ├── services.ts      # ServerServices + serverLayer — the composition seam
 ├── router.ts        # HttpRouter app: routes, CSRF/auth guards, error mapping, SPA fallback, handleRequest
@@ -175,8 +176,8 @@ Payload types live in `@vvtxn/client/protocol.ts` — never redeclare them here.
   enabled
 - `RELAY_PUBLIC_URL` (OAuth redirect base), `AUTH_SESSION_TTL_DAYS` (default 30)
 - Hardening: `AUTH_ALLOWED_GITHUB` (logins/ids allowed to sign in) and `RELAY_WORKSPACE_ROOTS` (allowed session cwd
-  roots; defaults to the server user's home, `*` allows any directory); both required when binding a non-loopback
-  `RELAY_HOST` with GitHub auth, and `*` is rejected there
+  roots; local mode allows any directory, GitHub mode defaults to the server user's home, `*` allows any directory);
+  both required when binding a non-loopback `RELAY_HOST` with GitHub auth, and `*` is rejected there
 - `RELAY_PORT` (default 7433), `RELAY_HOST` (default 127.0.0.1), `RELAY_WORKSPACE`, `RELAY_STATIC_DIR`
 - `RELAY_MAX_SESSIONS_PER_WORKSPACE`: persisted sessions kept per owner/workspace; `0` = unlimited (local default),
   Turso default is 10

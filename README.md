@@ -38,8 +38,23 @@ over the same wire protocol. Tooling (format, lint, type-check, builds) runs thr
 
 ## Install
 
-Relay is distributed as source — there is no compiled binary. Clone the repository, install dependencies, and run it
-with Node.js (see [Development](#development) for the full task list):
+### Single executable (Linux x64)
+
+The local build packages the server, TUI, web app, fonts, and libSQL runtime into one executable:
+
+```bash
+pnpm install
+pnpm build:sea
+./dist/relay
+```
+
+The executable needs no Node.js installation. It extracts its web/font/libSQL assets to `~/.relay/runtime/<version>` on
+first launch. Tagged releases attach `relay` and `relay.sha256`; `pnpm smoke:sea` verifies a local build.
+
+### From source
+
+Clone the repository, install dependencies, and run it with Node.js (see [Development](#development) for the full task
+list):
 
 ```bash
 git clone https://github.com/vvtxn/relay.git
@@ -171,9 +186,9 @@ These are user-specific, so put them in the gitignored `.env.<mode>.local` file.
 `RELAY_HOST`, **it refuses to start unless both are set**; on loopback they are optional.
 
 - `AUTH_ALLOWED_GITHUB` — comma-separated GitHub logins or numeric ids allowed to sign in (empty = any GitHub account).
-- `RELAY_WORKSPACE_ROOTS` — comma-separated absolute directories a session workspace may use. **Defaults to the server
-  user's home directory**; set it to `*` to allow any directory (or list one or more roots). Cannot be `*` when binding
-  a non-loopback host.
+- `RELAY_WORKSPACE_ROOTS` — comma-separated absolute directories a session workspace may use. Local auth allows any
+  directory by default; GitHub/shared mode defaults to the server user's home directory. Set it to `*` to allow any
+  directory (or list one or more roots). Cannot be `*` when binding a non-loopback host with GitHub auth.
 
 A workspace path is validated when it is created or registered: it must be an absolute, existing directory, and its
 canonical (symlink-resolved) path must sit within an allowed root.
@@ -190,6 +205,7 @@ canonical (symlink-resolved) path must sit within an allowed root.
 │   ├── cli/                # TUI client + serve subcommand (@vvtxn/cli)
 │   │   ├── agent/          # App entry point, config, components, hooks
 │   │   └── tui/            # Terminal UI framework (JSX runtime, Yoga layout)
+│   ├── local/              # Linux x64 single-executable packaging (@vvtxn/local)
 │   └── web/                # Solid + Vite SPA client (@vvtxn/web)
 │       └── src/            # Effect API layer, TanStack Query/Router, components
 ├── scripts/                # Env loading and version bump scripts
@@ -198,8 +214,9 @@ canonical (symlink-resolved) path must sit within an allowed root.
 └── tsconfig.base.json      # Shared strict TypeScript options
 ```
 
-Only `packages/cli` needs bundling (Node cannot run TSX); everything else runs as native TypeScript under Node 26. The
-CLI bundle lives in `packages/cli/dist` and is produced by `pnpm relay` / `pnpm build`.
+Only the CLI and the `packages/local` SEA entry need bundling (Node cannot run TSX); everything else runs as native
+TypeScript under Node 26. The CLI bundle lives in `packages/cli/dist` and is produced by `pnpm relay` / `pnpm build`.
+`pnpm build:sea` embeds it, the web app, fonts, and the libSQL runtime in `dist/relay`.
 
 ### Package Dependency Graph
 
@@ -211,6 +228,8 @@ packages/client  (protocol + transport + shared session-state reducer)
 packages/server  (HTTP + SSE runtime host)
        ↑
 packages/cli  (TUI client + serve subcommand)   packages/web  (Solid SPA client)
+       ↑
+packages/local  (Linux x64 single executable; packages cli + server)
 ```
 
 The terminal and web clients talk to the server over the shared protocol in `packages/client`. The agent loop, tools,
@@ -376,6 +395,8 @@ pnpm serve:prod        # Run a foreground server with the production env
 pnpm web:dev           # Run the web client with Vite (proxies /api to the server)
 pnpm web:build         # Build the web app to packages/web/dist
 pnpm build             # Build the web app and the CLI bundle
+pnpm build:sea         # Build the Linux x64 single executable (dist/relay)
+pnpm smoke:sea         # Smoke-test dist/relay with a temporary HOME
 pnpm run version         # Show current version
 pnpm run version:bump <patch|minor|major>  # Bump version
 ```

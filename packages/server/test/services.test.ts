@@ -17,7 +17,7 @@ interface RecordedStatement {
 	args?: unknown[];
 }
 
-/** A Turso client stand-in that records every statement and serves canned rows. */
+/** A database client stand-in that records every statement and serves canned rows. */
 function recordingDatabaseLayer(rowsFor?: (sql: string) => Record<string, unknown>[]) {
 	const statements: RecordedStatement[] = [];
 	const client = {

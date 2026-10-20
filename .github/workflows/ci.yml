@@ -37,3 +37,9 @@ jobs:
 
             - name: Build web app and CLI bundle
               run: pnpm build
+
+            - name: Build single executable
+              run: pnpm build:sea
+
+            - name: Smoke-test the executable
+              run: pnpm smoke:sea

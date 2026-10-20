@@ -5,6 +5,9 @@ node_modules
 out
 dist
 *.tgz
+packages/local/.sea-assets.json
+packages/local/.sea-runtime
+packages/local/build
 
 # code coverage
 coverage

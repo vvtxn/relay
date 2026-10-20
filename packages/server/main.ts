@@ -72,7 +72,7 @@ function writeServerState(config: ServerConfig): void {
 	}
 }
 
-/** Entry point for `relay serve`. */
+/** Starts the HTTP/SSE server. `entry.ts` is the direct executable wrapper. */
 export async function startServer(): Promise<void> {
 	const config = serverConfigFromEnv();
 	const services = await createServices(config);
@@ -146,9 +146,4 @@ export async function startServer(): Promise<void> {
 		}
 		throw error;
 	}
-}
-
-// Run when executed directly (node packages/server/main.ts)
-if (import.meta.main) {
-	await startServer();
 }

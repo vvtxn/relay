@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { Effect } from "effect";
 import { describe, expect, it } from "vite-plus/test";
-import { createDatabaseClient, type DatabaseClient } from "@vvtxn/relay/core/database.ts";
+import { createDatabaseClient, normalizeDatabaseUrl, type DatabaseClient } from "@vvtxn/relay/core/database.ts";
 import { DatabaseUserStore } from "@vvtxn/relay/core/auth/db.ts";
 import { DatabaseSessionStore } from "@vvtxn/relay/core/sessions/index.ts";
 
@@ -17,6 +17,15 @@ async function tempDatabase(): Promise<{ client: DatabaseClient; path: string; d
 	const client = createDatabaseClient({ url: pathToFileURL(path).href });
 	return { client, path, dir };
 }
+
+describe("database URL normalization", () => {
+	it("maps Turso/libSQL aliases to HTTPS without touching local files", () => {
+		expect(normalizeDatabaseUrl("turso://example.turso.io")).toBe("https://example.turso.io");
+		expect(normalizeDatabaseUrl("libsql://example.turso.io")).toBe("https://example.turso.io");
+		expect(normalizeDatabaseUrl("https://example.turso.io")).toBe("https://example.turso.io");
+		expect(normalizeDatabaseUrl("file:///tmp/relay.db")).toBe("file:///tmp/relay.db");
+	});
+});
 
 describe("local database client", () => {
 	it("runs the session store against an embedded file", async () => {

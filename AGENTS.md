@@ -14,6 +14,7 @@ Terminal-based coding agent with custom TUI framework.
 │   ├── cli/                # TUI client + serve subcommand (@vvtxn/cli)
 │   │   ├── agent/          # App entry point, config, components, hooks
 │   │   └── tui/            # Terminal UI framework (JSX runtime, Yoga layout)
+│   ├── local/              # Linux x64 single-executable packaging (@vvtxn/local)
 │   └── web/                # Solid + Vite SPA client (@vvtxn/web)
 │       └── src/            # Effect API layer, TanStack Query/Router, components
 ├── scripts/                # Env loading and version bump scripts
@@ -32,6 +33,8 @@ packages/client  (protocol + transport + shared session-state reducer)
        ↑                    ↑
 packages/server       packages/cli / packages/web
 (HTTP + SSE runtime)  (clients — TUI and browser)
+       ↑
+packages/local        (Linux x64 single executable; packages cli + server)
 ```
 
 All clients (CLI, web) talk to the server over the shared protocol in `packages/client`; the agent runtime executes only
@@ -74,6 +77,8 @@ modules stay Effect-free on purpose.
 - **Run web dev server**: `pnpm web:dev` (Vite; proxies `/api` to `127.0.0.1:7433`)
 - **Build web app**: `pnpm web:build` (Vite → `packages/web/dist`; serve with `RELAY_STATIC_DIR`)
 - **Build web app + CLI bundle**: `pnpm build`
+- **Build Linux x64 single executable**: `pnpm build:sea` (outputs `dist/relay`)
+- **Smoke-test the single executable**: `pnpm smoke:sea`
 
 ## Task Completion Checklist
 
@@ -112,6 +117,8 @@ worktrees.
 ### Build & Version
 
 - **Build web app + CLI bundle**: `pnpm build`
+- **Build Linux x64 single executable**: `pnpm build:sea` (outputs `dist/relay`)
+- **Smoke-test the single executable**: `pnpm smoke:sea`
 - **Show version**: `pnpm run version`
 - **Bump version**: `pnpm run version:bump <patch|minor|major>`
 
@@ -137,7 +144,7 @@ import { Box, Text } from "#/tui/render/components.tsx";
 ```
 
 > **Native-Node caveat**: `#/` specifiers are only resolved by bundlers (Vite / `vp pack`). Node's native ESM
-> loader rejects `#/` (`ERR_INVALID_MODULE_SPECIFIER`), and the server runs unbundled (`node packages/server/main.ts`).
+> loader rejects `#/` (`ERR_INVALID_MODULE_SPECIFIER`), and the server runs unbundled (`node packages/server/entry.ts`).
 > Files reachable at runtime by the server (or any `node` entry) must use **relative** imports for runtime bindings;
 > `import type` is fine either way since it is erased. The bundled CLI and web clients can keep using `#/`.
 
@@ -178,6 +185,7 @@ Each sub-package has its own AGENTS.md with package-specific details:
 - `packages/server/AGENTS.md` - HTTP + SSE server hosting the agent runtime
 - `packages/cli/agent/AGENTS.md` - CLI application and TUI components
 - `packages/cli/tui/AGENTS.md` - Terminal UI framework
+- `packages/local/AGENTS.md` - Linux x64 single-executable packaging
 - `packages/web/AGENTS.md` - Solid + Vite web client (TanStack Query/Router + Effect)
 
 ## Git Conventions

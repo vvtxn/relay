@@ -1,0 +1,21 @@
+{
+	"name": "@vvtxn/local",
+	"version": "0.8.0",
+	"private": true,
+	"type": "module",
+	"exports": {
+		".": "./main.ts"
+	},
+	"scripts": {
+		"pack": "vp pack"
+	},
+	"dependencies": {
+		"@libsql/client": "^0.18.0",
+		"@vvtxn/cli": "workspace:*",
+		"@vvtxn/relay": "workspace:*"
+	},
+	"devDependencies": {
+		"@types/node": "^26.6.5",
+		"vite-plus": "^1.1.0"
+	}
+}

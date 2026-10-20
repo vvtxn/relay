@@ -35,7 +35,7 @@ agent/
 2. A healthy server recorded in `~/.relay/server.json` is reused.
 3. A healthy server answering on the preferred port is adopted even without a state file (e.g. a foreground
    `relay serve`).
-4. Otherwise a detached server is spawned (`node packages/server/main.ts`) with
+4. Otherwise a detached server is spawned (`node packages/server/entry.ts`) with
    `RELAY_WORKSPACE=cwd` and `RELAY_PORT` (explicit, else the default 7433 — never derived from `RELAY_PUBLIC_URL`).
 
 The state file is the source of truth for the actual URL: the server writes it after binding, and the CLI discovers the

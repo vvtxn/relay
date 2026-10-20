@@ -73,6 +73,7 @@ describe("serverConfigFromEnv database and auth modes", () => {
 		});
 		expect(config.authMode).toBe("local");
 		expect(config.maxSessionsPerWorkspace).toBe(0);
+		expect(config.workspaceRoots).toEqual([]);
 	});
 
 	it("keeps Turso + GitHub when credentials are present", () => {

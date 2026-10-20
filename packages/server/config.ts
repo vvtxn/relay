@@ -88,6 +88,15 @@ function envValue(env: Record<string, string | undefined>, key: string): string 
 	return value ? value : undefined;
 }
 
+/** Resolve a path, expanding a leading `~` when the home directory is known. */
+function expandHomePath(value: string): string {
+	if (value === "~" || value.startsWith("~/")) {
+		const home = homeDir();
+		if (home) return resolve(home, value.slice(2));
+	}
+	return resolve(value);
+}
+
 /** Comma-separated list, trimmed and without empties. */
 function parseList(value: string | undefined): string[] {
 	if (!value) return [];
@@ -159,7 +168,7 @@ function parseDatabaseBackend(
 	}
 
 	const rawPath = envValue(env, "RELAY_DB_PATH") ?? join(dataDir, "relay.db");
-	const path = rawPath === ":memory:" ? rawPath : resolve(rawPath);
+	const path = rawPath === ":memory:" ? rawPath : expandHomePath(rawPath);
 	return {
 		kind: "local",
 		path,
@@ -200,7 +209,7 @@ export function serverConfigFromEnv(env: Record<string, string | undefined> = { 
 	const hostname = env.RELAY_HOST ?? DEFAULT_HOSTNAME;
 	const flavor = parseFlavor(env);
 
-	const dataDir = env.RELAY_DATA_DIR ?? relayDir();
+	const dataDir = expandHomePath(env.RELAY_DATA_DIR ?? relayDir());
 	const database = parseDatabaseBackend(env, flavor, dataDir);
 
 	// GitHub App credentials. `GITHUB_CLIENT_ID`/`GITHUB_CLIENT_SECRET` are
@@ -208,9 +217,6 @@ export function serverConfigFromEnv(env: Record<string, string | undefined> = { 
 	const githubClientId = env.GITHUB_APP_CLIENT_ID ?? env.GITHUB_CLIENT_ID ?? "";
 	const githubClientSecret = env.GITHUB_APP_CLIENT_SECRET ?? env.GITHUB_CLIENT_SECRET ?? "";
 	const hasGithubCredentials = githubClientId !== "" && githubClientSecret !== "";
-	if ((githubClientId === "") !== (githubClientSecret === "")) {
-		throw new Error("GITHUB_APP_CLIENT_ID and GITHUB_APP_CLIENT_SECRET must be configured together");
-	}
 
 	const authMode = parseAuthMode(env, flavor, hasGithubCredentials, hostname);
 	if (authMode === "github" && !hasGithubCredentials) {
@@ -219,12 +225,14 @@ export function serverConfigFromEnv(env: Record<string, string | undefined> = { 
 
 	const rawRoots = parseList(env.RELAY_WORKSPACE_ROOTS);
 	// A workspace must sit within one of these canonical roots. `*` allows any
-	// directory (empty list); unset defaults to the server user's home so
-	// loopback development stays zero-config while `/etc`, `/proc`, and other
-	// users' homes are blocked.
+	// directory (empty list). Local mode allows any directory by default: the
+	// agent runs as the user on their own machine, and the workspace is a scope
+	// rather than a security boundary. GitHub/shared mode defaults to the
+	// server user's home so a remote server cannot browse arbitrary paths.
+	const defaultRoots = authMode === "local" ? [] : homeRoots();
 	const workspaceRoots = rawRoots.includes("*")
 		? []
-		: (rawRoots.length > 0 ? rawRoots : homeRoots()).map((root) => resolve(root));
+		: (rawRoots.length > 0 ? rawRoots : defaultRoots).map((root) => resolve(root));
 	const allowedGithub = parseList(env.AUTH_ALLOWED_GITHUB).map((entry) => entry.toLowerCase());
 
 	// Exposing the server beyond loopback with GitHub auth requires explicit

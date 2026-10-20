@@ -27,11 +27,24 @@ jobs:
             - name: Verify checks
               run: pnpm check
 
-            # Relay is distributed as source: no compiled binary is produced.
-            - name: Build web app and CLI bundle
-              run: pnpm build
+            - name: Run tests
+              run: pnpm exec vp test
+
+            # Linux x64 single executable. Web assets, fonts, and the libSQL
+            # native runtime are embedded and extracted on first launch.
+            - name: Build single executable
+              run: pnpm build:sea
+
+            - name: Smoke-test the executable
+              run: pnpm smoke:sea
+
+            - name: Generate checksum
+              run: sha256sum dist/relay > dist/relay.sha256
 
             - name: Create GitHub Release
               uses: softprops/action-gh-release@v2
               with:
+                  files: |
+                      dist/relay
+                      dist/relay.sha256
                   generate_release_notes: true
