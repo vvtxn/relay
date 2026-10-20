@@ -38,7 +38,7 @@ export interface ConfigResponse {
 	model: string;
 	/** Context window budget used for the token bar. */
 	contextTokens: number;
-	/** Maximum sessions (threads) kept per workspace; older ones are removed automatically. */
+	/** Maximum sessions (threads) kept per workspace; `0` means unlimited. */
 	maxSessionsPerWorkspace: number;
 	/** Server user's home directory, used to abbreviate/expand `~` paths. */
 	home: string;

@@ -45,6 +45,7 @@ async function makeServices(provider: LLMProvider, overrides: Partial<ServerConf
 		authSessions: { resolve: (token: string) => Effect.succeed(token === TEST_TOKEN ? { userId: USER_ID } : null) },
 		sessionStore: store,
 		runs,
+		localUser: null,
 	} as unknown as ServerServices;
 
 	return { services, runs, cwd, user };

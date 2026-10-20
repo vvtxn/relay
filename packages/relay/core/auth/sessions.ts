@@ -1,5 +1,5 @@
 import type { Effect } from "effect";
-import { createDatabaseClient, type DatabaseClient, databaseCredentialsFromEnv } from "../database.ts";
+import type { DatabaseClient } from "../database.ts";
 import { storeEffect, type StoreError } from "../effect.ts";
 
 const SCHEMA = `
@@ -32,9 +32,7 @@ export interface AuthSessionStore {
 }
 
 export interface DatabaseAuthSessionStoreOptions {
-	url: string;
-	authToken: string;
-	client?: DatabaseClient;
+	client: DatabaseClient;
 }
 
 function base64Url(bytes: Uint8Array): string {
@@ -69,19 +67,13 @@ export class DatabaseAuthSessionStore implements AuthSessionStore {
 	private readonly schemaReady: Promise<void>;
 
 	constructor(options: DatabaseAuthSessionStoreOptions) {
-		this.client = options.client ?? createDatabaseClient({ url: options.url, authToken: options.authToken });
+		this.client = options.client;
 		this.schemaReady = this.initialize();
 	}
 
 	/** Resolves once the store's schema has been initialized. */
 	get ready(): Effect.Effect<void, StoreError> {
 		return storeEffect(() => this.schemaReady);
-	}
-
-	static fromEnv(
-		options: Omit<DatabaseAuthSessionStoreOptions, "url" | "authToken" | "client"> = {},
-	): DatabaseAuthSessionStore {
-		return new DatabaseAuthSessionStore({ ...databaseCredentialsFromEnv(), ...options });
 	}
 
 	create(userId: string, ttlMs: number): Effect.Effect<{ token: string; expiresAt: string }, StoreError> {

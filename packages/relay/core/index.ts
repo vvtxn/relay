@@ -50,7 +50,7 @@ export type {
 	WorkspaceSummary,
 } from "./sessions/index.ts";
 
-export { createDatabaseClient, databaseCredentialsFromEnv } from "./database.ts";
+export { createDatabaseClient } from "./database.ts";
 export type { DatabaseClient, DatabaseCredentials } from "./database.ts";
 
 export { DatabaseUserStore } from "./auth/db.ts";

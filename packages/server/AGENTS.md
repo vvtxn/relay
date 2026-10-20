@@ -10,7 +10,7 @@ server/
 ├── package.json     # @vvtxn/server; exports "./main" for the CLI serve subcommand
 ├── mod.ts           # Public exports (startServer, createServices, handleRequest, RunManager)
 ├── main.ts          # Entry: config from env → createServices → HttpRouter.serve + Layer.launch
-├── config.ts        # serverConfigFromEnv: port, host, LLM key/model, Turso, auth, static dir
+├── config.ts        # serverConfigFromEnv: port, host, LLM key/model, local/Turso DB, auth, static dir
 ├── services.ts      # ServerServices + serverLayer — the composition seam
 ├── router.ts        # HttpRouter app: routes, CSRF/auth guards, error mapping, SPA fallback, handleRequest
 ├── identity.ts      # Per-request user resolution (cookie/bearer session)
@@ -35,8 +35,9 @@ server/
 is sequential (config → database → stores → RunManager) and the store layer awaits each schema `ready` in order
 (`users` backs the `auth_sessions` foreign key — a test pins the DDL order). `UserSettings` is built by
 `createUserSettingsStore`: the file backend plus a one-shot migration of database keys, or the encrypted database
-store. `createServices(config)` materializes the bundle once for `main.ts`. The Turso client exposes only
-`execute`/`batch` (no close), so the layers are unscoped.
+store. `createServices(config)` materializes the bundle once for `main.ts`. The shared `Database` client is the libSQL
+driver in both modes: a `file:` URL opens embedded SQLite, a `libsql://` URL talks to Turso. `main.ts` closes it on
+SIGTERM/SIGINT so SQLite checkpoints its WAL.
 
 ### HTTP (`router.ts`, `main.ts`)
 
@@ -81,9 +82,10 @@ Store contracts are Effect-native (`SessionHandle`/`SessionStore`, `StoreError`)
 sessions created in-process are not yet visible to `store.open()`; all session routes go through `openSessionHandle()`
 (sessions.ts), which falls back to the live RunManager handle.
 
-The database store keeps at most `RELAY_MAX_SESSIONS_PER_WORKSPACE` (default 10) sessions per owner/workspace. When a
-user message is persisted, the insert/update and the delete of older sessions plus their entries run in one atomic
-batch. `pruneAll()` trims pre-existing overflow on startup, before any runs are active.
+The database store keeps at most `RELAY_MAX_SESSIONS_PER_WORKSPACE` sessions per owner/workspace. `0` means unlimited
+(the local default); Turso deployments default to 10. When a user message is persisted with a finite limit, the
+insert/update and the delete of older sessions plus their entries run in one atomic batch. `pruneAll()` trims
+pre-existing overflow on startup, before any runs are active.
 
 The per-session workspace cwd comes from the client (CLI sends its terminal cwd). File tools are confined to that cwd;
 bash is not (documented in relay core AGENTS.md).
@@ -99,19 +101,20 @@ one. `RunManager` re-validates the cwd before every run.
 
 ### Auth
 
-GitHub OAuth is the only auth transport:
+Two transports:
 
-- The browser completes a **GitHub App** user-authorization code + PKCE flow (permissions live on the App, so no `scope`
-  is sent); the server maps the GitHub profile through `GitHubAuthProvider` → `DatabaseUserStore` and issues an **opaque
-  session token** (hashed at rest in `auth_sessions`), set as an `HttpOnly; SameSite=Lax` cookie.
-- Non-browser clients authenticate with `Authorization: Bearer <token>` (the CLI reads the token handed over to
-  `~/.relay/session.json` by a loopback login).
-- `GITHUB_APP_CLIENT_ID`/`GITHUB_APP_CLIENT_SECRET` are required at startup; there is no local/no-auth fallback.
+- **Local (default)** — the server seeds a stable `local` identity through the user store and every loopback request
+  resolves to it without a token. The authenticated wrapper rejects non-loopback `Host` headers (DNS-rebinding guard).
+  OAuth routes are not mounted.
+- **GitHub** — the browser completes a **GitHub App** code + PKCE flow; the server maps the profile through
+  `GitHubAuthProvider` → `DatabaseUserStore` and issues an opaque session token (hashed at rest in `auth_sessions`).
+  Non-browser clients send `Authorization: Bearer <token>` (the CLI reads the token handed over to
+  `~/.relay/session.json` by a loopback login). Credentials are required in this mode.
 
-`createServices()` returns long-lived services **without** a user. `handleRequest` resolves the caller per request
-(`resolveRequestUser` in `identity.ts`, an Effect) and passes `RequestServices = ServerServices & { user }` to
-handlers. `/api/health` and `/api/auth/*` are public; every other `/api/*` route returns 401 when unauthenticated.
-GitHub identity mapping and the session store are the only new storage — sessions are already scoped by `ownerId`.
+`createServices()` returns long-lived services with `localUser` resolved in local mode (null in GitHub mode).
+`handleRequest` resolves the caller per request (`resolveRequestUser` in `identity.ts`) and passes
+`RequestServices = ServerServices & { user }` to handlers. `/api/health` and `/api/auth/*` are public; every other
+`/api/*` route returns 401 when unauthenticated.
 
 ### API key
 
@@ -165,16 +168,18 @@ Payload types live in `@vvtxn/client/protocol.ts` — never redeclare them here.
 ## Environment
 
 - `LLM_BASE_URL`, `LLM_MODEL`, `LLM_TEMPERATURE`, `LLM_MAX_TOKENS`, `LLM_MAX_COMPLETION_TOKENS`
-- `TURSO_DB_URL`, `TURSO_DB_TOKEN`
-- Required: `GITHUB_APP_CLIENT_ID`, `GITHUB_APP_CLIENT_SECRET` (`GITHUB_CLIENT_ID`/`GITHUB_CLIENT_SECRET` still
-  accepted); the server refuses to start without them
+- Mode: `RELAY_FLAVOR` (`local`/`cloud`, unset auto), `RELAY_DB` (`auto`/`local`/`turso`), `RELAY_DB_PATH`
+  (default `~/.relay/relay.db`), `RELAY_AUTH` (`auto`/`local`/`github`)
+- Shared mode: `TURSO_DB_URL`, `TURSO_DB_TOKEN`, `GITHUB_APP_CLIENT_ID`, `GITHUB_APP_CLIENT_SECRET`
+  (`GITHUB_CLIENT_ID`/`GITHUB_CLIENT_SECRET` still accepted); GitHub credentials are required only when GitHub auth is
+  enabled
 - `RELAY_PUBLIC_URL` (OAuth redirect base), `AUTH_SESSION_TTL_DAYS` (default 30)
 - Hardening: `AUTH_ALLOWED_GITHUB` (logins/ids allowed to sign in) and `RELAY_WORKSPACE_ROOTS` (allowed session cwd
   roots; defaults to the server user's home, `*` allows any directory); both required when binding a non-loopback
-  `RELAY_HOST`, and `*` is rejected there
+  `RELAY_HOST` with GitHub auth, and `*` is rejected there
 - `RELAY_PORT` (default 7433), `RELAY_HOST` (default 127.0.0.1), `RELAY_WORKSPACE`, `RELAY_STATIC_DIR`
-- `RELAY_MAX_SESSIONS_PER_WORKSPACE` (default 10): persisted sessions kept per owner/workspace; older sessions are
-  pruned automatically
+- `RELAY_MAX_SESSIONS_PER_WORKSPACE`: persisted sessions kept per owner/workspace; `0` = unlimited (local default),
+  Turso default is 10
 - Settings storage: `RELAY_SETTINGS_STORE` (`file` default, or `database`), `RELAY_DATA_DIR` (default `~/.relay`),
   `RELAY_SECRET_KEY` / `RELAY_SECRET_KEY_FILE` (master key; required with the database backend)
 

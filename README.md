@@ -10,9 +10,9 @@ over the same wire protocol. Tooling (format, lint, type-check, builds) runs thr
 > **Note — Project Transition**
 >
 > Relay is evolving from a local, terminal-only coding agent into a more advanced agent designed to run on both the
-> terminal and the web, sharing the same sessions between clients. Conversations are now persisted in a shared Turso
-> database instead of local JSONL files, keyed by a stable owner ID and workspace, so a session started in one client
-> can be continued in the other.
+> terminal and the web, sharing the same sessions between clients. Conversations persist in a local SQLite database by
+> default, keyed by a stable owner ID and workspace, so a session started in one client can be continued in the other.
+> A shared Turso database can be configured for multi-user deployments.
 >
 > **No new release will be published for this work yet.** The latest GitHub Release (`v0.8.0`) predates all web
 > extension related changes and still reflects the old local-only agent with filesystem session storage. Run the current
@@ -30,7 +30,7 @@ over the same wire protocol. Tooling (format, lint, type-check, builds) runs thr
 - **Streaming agent loop** — Async generator that yields events for real-time UI updates as the LLM thinks and uses
   tools
 - **Built-in tools** — Bash, file read/write/edit, and grep for filesystem interaction
-- **Shared session storage** — Conversations persist in a Turso database for shared session history
+- **Local-first session storage** — Conversations persist in SQLite by default; Turso is available for shared history
 - **Tool approval** — Side-effecting tools wait for an allow/deny decision
 - **Inline diffs** — File write and edit operations display colored unified diffs with line numbers
 - **Markdown rendering** — Inline markdown display in the terminal
@@ -48,8 +48,9 @@ pnpm install
 pnpm relay
 ```
 
-The server stores each user's LLM API key encrypted at rest (per-user local files by default, optionally the database);
-users paste theirs in the web app's Settings page.
+Local mode needs no GitHub App or database setup. The server creates `~/.relay/relay.db`, uses a local identity, and
+stores each user's LLM API key encrypted at rest in local files; users paste theirs in the web app's Settings page.
+Set `TURSO_DB_URL`/`TURSO_DB_TOKEN` and GitHub credentials when you want a shared, multi-user deployment.
 
 Server settings (`serverUrl` for the terminal client) are configured in `~/.relay/config.json`.
 
@@ -73,9 +74,12 @@ Environment is layered and mode-based (`RELAY_ENV=development|production`). Comm
 resolve from the working directory, falling back to the current and then the main git worktree root, so linked worktrees
 load the main checkout's gitignored files.
 
+A local run needs no `.env` at all. To use a shared Turso database and GitHub auth instead, copy the template and fill in
+the cloud credentials:
+
 ```bash
 cp .env.example .env.development.local
-# fill in TURSO_DB_URL / TURSO_DB_TOKEN (and GITHUB_APP_* when using GitHub auth)
+# fill in TURSO_DB_URL / TURSO_DB_TOKEN / GITHUB_APP_* for shared mode
 ```
 
 ### Run
@@ -118,10 +122,16 @@ pnpm web:dev             # Vite dev server with HMR
 
 ## Authentication
 
-Relay is GitHub-OAuth-only. Callers authenticate by completing a GitHub App user-authorization flow and receiving an
-opaque session cookie (browser) or, for the CLI, a bearer session token handed over locally. Each GitHub account gets
-its own user, sessions, and workspaces. GitHub App credentials are **required** — the server refuses to start without
-them.
+Relay supports two auth modes:
+
+- **Local (default)** — the server is bound to loopback and every request is the local user. No login is required.
+  The API is protected from DNS rebinding by accepting only loopback `Host` headers.
+- **GitHub** — callers complete a GitHub App user-authorization flow and receive an opaque session cookie (browser) or,
+  for the CLI, a bearer session token handed over locally. Each GitHub account gets its own user, sessions, and
+  workspaces. Enable this explicitly with `RELAY_AUTH=github` or by configuring GitHub credentials; non-loopback binds
+  require it.
+
+The rest of this section describes the shared/GitHub deployment.
 
 ### GitHub App setup
 
@@ -222,9 +232,10 @@ An HTTP + SSE server built on `effect/http` and `@effect/platform-node`:
 
 - **RunManager** — one active run per session; bridges agent events onto per-session SSE streams; gates side-effecting
   tools behind approval decisions that arrive over HTTP
-- **Sessions** — create/open/list against the shared Turso store; per-session workspace cwd (file tools are confined to
-  it)
-- **Auth** — GitHub App OAuth with per-request identity resolution, opaque hashed sessions, and an optional allowlist
+- **Sessions** — create/open/list against local SQLite (default) or Turso; per-session workspace cwd (file tools are
+  confined to it)
+- **Auth** — local loopback identity by default, or GitHub App OAuth with per-request identity resolution, opaque
+  hashed sessions, and an optional allowlist
 - **Static serving** — optional static file serving when `RELAY_STATIC_DIR` is set
 
 ### `packages/relay/api/` — LLM Provider Layer
@@ -259,15 +270,17 @@ The agent loop is an async generator (`run()`) that streams `AgentEvent`s:
 profiles are mapped through `GitHubAuthProvider` on first sign-in; every request then resolves the session token to that
 user.
 
-**Session persistence** — Conversations are stored in the shared Turso database and can be used by the terminal client.
-The server requires `TURSO_DB_URL`, `TURSO_DB_TOKEN`, `GITHUB_APP_CLIENT_ID`, and `GITHUB_APP_CLIENT_SECRET`:
+**Session persistence** — Conversations are stored in local SQLite by default (`~/.relay/relay.db`) and can be shared
+by the terminal and web clients. Set `TURSO_DB_URL` and `TURSO_DB_TOKEN` to use a shared Turso database instead; GitHub
+credentials are only required when `RELAY_AUTH=github` (or for a non-loopback bind).
 
 - **Create** — New sessions with unique IDs and timestamps
 - **Continue** — Resume the most recent session for a workspace
 - **Open** — Load a specific session by opaque session ID
 - **List** — Browse all sessions with summaries (first user message preview)
-- **Bounded** — Each workspace keeps the 10 most recently active sessions (configurable with
-  `RELAY_MAX_SESSIONS_PER_WORKSPACE`); older sessions and their entries are pruned automatically
+- **Bounded or unlimited** — Local mode keeps every session by default; Turso defaults to the 10 most recently active
+  sessions per workspace. Set `RELAY_MAX_SESSIONS_PER_WORKSPACE` to a positive number to enable pruning, or `0` to keep
+  everything. Pruned sessions and their entries are removed automatically
 - **Cross-client** — A session started in the terminal can be continued on another terminal, and vice versa
 - **Token tracking** — Per-session token and cost counts persisted in session metadata
 
@@ -382,10 +395,10 @@ Tag-based releases via GitHub Actions (`.github/workflows/release.yml`):
 3. `git tag v<version> && git push --tags`
 4. CI verifies checks and creates the GitHub Release (source-only — no binary artifact is published)
 
-Relay reads `TURSO_DB_URL`, `TURSO_DB_TOKEN`, `GITHUB_APP_CLIENT_ID`, and `GITHUB_APP_CLIENT_SECRET` from its runtime
-environment (loaded from the mode-aware `.env` files). The LLM API key is per user, encrypted at rest, and kept in
-local files by default (set via the web Settings page); `RELAY_SETTINGS_STORE=database` keeps it in the database
-instead.
+Relay reads its configuration from the runtime environment (loaded from the mode-aware `.env` files). Local mode needs
+no cloud variables; `TURSO_DB_URL`/`TURSO_DB_TOKEN` and `GITHUB_APP_CLIENT_ID`/`GITHUB_APP_CLIENT_SECRET` enable the
+shared Turso/GitHub deployment. The LLM API key is per user, encrypted at rest, and kept in local files by default (set
+via the web Settings page); `RELAY_SETTINGS_STORE=database` keeps it in the database instead.
 
 ## License
 

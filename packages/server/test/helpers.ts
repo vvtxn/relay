@@ -25,6 +25,7 @@ import type { ServerConfig } from "../config.ts";
 export function makeConfig(defaultCwd: string, overrides: Partial<ServerConfig> = {}): ServerConfig {
 	return {
 		relayEnv: "development",
+		flavor: null,
 		port: 0,
 		hostname: "127.0.0.1",
 		baseURL: "http://127.0.0.1:9",
@@ -33,8 +34,8 @@ export function makeConfig(defaultCwd: string, overrides: Partial<ServerConfig> 
 		maxTokens: 350_000,
 		preserveRecentTurns: 6,
 		maxCompletionTokens: 1024,
-		tursoUrl: "file::memory:",
-		tursoToken: "",
+		database: { kind: "turso", url: "file::memory:", authToken: "test-token" },
+		authMode: "github",
 		githubClientId: "fake-client-id",
 		githubClientSecret: "fake-client-secret",
 		publicUrl: "http://127.0.0.1:7433",

@@ -17,7 +17,7 @@ core/
 ├── context.ts            # Context trimming (token estimation, turn-based truncation)
 ├── effect.ts             # Shared Effect helpers: attempt, causeMessage, StoreError, storeEffect
 ├── env.ts                # scrubbedAgentEnv(): credential-free environment for tool subprocesses
-├── database.ts           # Shared Turso client factory + env credentials (used by session and user stores)
+├── database.ts           # Shared libSQL client factory (local file or Turso) used by every store
 ├── auth/                 # Identity + sessions
 │   ├── types.ts          # AuthIdentity, AuthenticatedUser, AuthProvider, UserStore, UserDirectory
 │   ├── github.ts         # GitHubAuthProvider (profile → identity)
@@ -201,8 +201,9 @@ actually wires (workspace tools + `delegate`), and `createDelegateTool` defaults
 
 - `DatabaseSessionStore` stores shared sessions and ordered messages in the database; `SessionHandle` operations
   (`append`, `flush`) are Effects that fail with `StoreError`, while synchronous in-memory reads stay synchronous.
-  Each owner/workspace is capped at `maxSessionsPerWorkspace` (default 10): persisting a user message atomically
-  deletes older sessions and their entries, and `pruneAll()` trims pre-existing overflow at startup.
+  Each owner/workspace is capped at `maxSessionsPerWorkspace` (`0` = unlimited; local default). With a finite limit,
+  persisting a user message atomically deletes older sessions and their entries, and `pruneAll()` trims pre-existing
+  overflow at startup.
 - `FileSessionStore` preserves the JSONL implementation for fallback tooling (also Effect-facing)
 - Session ownership and workspace are explicit in `SessionScope`
 - `authenticate()` and the auth store interfaces (`UserStore`, `UserDirectory`, `AuthSessionStore`, `UserSettingsStore`)
@@ -230,7 +231,7 @@ These remain promise-based IO helpers (wrapped with `attempt` at Effect call sit
 ## Dependencies
 
 - `effect` (v4) — the agent runtime (streams, retries, tool execution, store contracts)
-- `@tursodatabase/serverless` — database client for the stores
+- `@libsql/client` — one libSQL client for both embedded local files and remote Turso databases
 
 ## Testing
 

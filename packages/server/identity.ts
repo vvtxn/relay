@@ -32,6 +32,7 @@ export function resolveRequestUser(
 	services: ServerServices,
 	request: HttpServerRequest.HttpServerRequest,
 ): Effect.Effect<AuthenticatedUser | null, StoreError> {
+	if (services.config.authMode === "local") return Effect.succeed(services.localUser);
 	const token = readSessionToken(request);
 	if (!token) return Effect.succeed(null);
 	return Effect.gen(function* () {

@@ -1,22 +1,28 @@
-import { createClient } from "@tursodatabase/serverless/compat";
+/**
+ * Shared database client for local and remote storage.
+ *
+ * Both modes use the same libSQL driver: a local `file:` URL opens an embedded
+ * SQLite database, while a `libsql://` / `https://` URL talks to Turso. Keeping
+ * one client means the stores, schema, and queries are identical in both
+ * modes; only the URL (and optional auth token) differ.
+ */
 
-/** Minimal client surface shared by the session and user stores. */
-export type DatabaseClient = Pick<ReturnType<typeof createClient>, "execute" | "batch">;
+import { createClient, type Client } from "@libsql/client";
+
+/** Shared client surface used by the session, user, and settings stores. */
+export type DatabaseClient = Client;
 
 export interface DatabaseCredentials {
+	/** `file:` URL for local mode, or a libSQL/Turso URL for remote mode. */
 	url: string;
-	authToken: string;
+	/** Required for remote Turso databases; omitted for local files. */
+	authToken?: string;
 }
 
-/** Creates a Turso client. Share the result between stores to reuse one connection. */
+/** Creates a database client. Share the result between stores to reuse one connection. */
 export function createDatabaseClient(credentials: DatabaseCredentials): DatabaseClient {
-	return createClient(credentials);
-}
-
-/** Reads Turso credentials from the environment. */
-export function databaseCredentialsFromEnv(): DatabaseCredentials {
-	const url = process.env.TURSO_DB_URL;
-	const authToken = process.env.TURSO_DB_TOKEN;
-	if (!url || !authToken) throw new Error("TURSO_DB_URL and TURSO_DB_TOKEN are required");
-	return { url, authToken };
+	return createClient({
+		url: credentials.url,
+		...(credentials.authToken ? { authToken: credentials.authToken } : {}),
+	});
 }

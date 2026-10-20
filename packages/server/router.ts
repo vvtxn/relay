@@ -46,6 +46,7 @@ import {
 	handleWorkspace,
 } from "./workspace.ts";
 import { handleGetSettings, handleSetApiKey } from "./settings.ts";
+import { isLoopbackHost } from "./config.ts";
 
 /** Route handlers may read the request service (and matched route context). */
 type RouteEffect = Effect.Effect<
@@ -117,6 +118,11 @@ function authenticated(services: ServerServices, build: (services: RequestServic
 		services,
 		Effect.gen(function* () {
 			const request = yield* HttpServerRequest.HttpServerRequest;
+			// Local auth has no token; restrict it to loopback so a DNS-rebinding
+			// page cannot drive the agent through 127.0.0.1.
+			if (services.config.authMode === "local" && !isLoopbackHost(requestUrl(request).hostname)) {
+				return error(403, "Local mode only accepts loopback requests");
+			}
 			const user = yield* resolveRequestUser(services, request);
 			if (!user) return error(401, "Unauthorized");
 			return yield* build({ ...services, user });
@@ -177,38 +183,41 @@ export function createAppLayer(services: ServerServices) {
 				spa: true,
 			});
 
-			// Health and authentication (public routes)
+			// Health is always public. OAuth routes only exist in GitHub mode;
+			// local auth has no login or logout.
 			yield* router.add("GET", "/api/health", respond(Effect.succeed(health())));
-			yield* router.add(
-				"GET",
-				"/api/auth/login",
-				respond(
-					withCsrf(
-						services,
-						withRequest((request) => handleLogin(services, request)),
+			if (services.config.authMode === "github") {
+				yield* router.add(
+					"GET",
+					"/api/auth/login",
+					respond(
+						withCsrf(
+							services,
+							withRequest((request) => handleLogin(services, request)),
+						),
 					),
-				),
-			);
-			yield* router.add(
-				"GET",
-				"/api/auth/callback",
-				respond(
-					withCsrf(
-						services,
-						withRequest((request) => handleCallback(services, request)),
+				);
+				yield* router.add(
+					"GET",
+					"/api/auth/callback",
+					respond(
+						withCsrf(
+							services,
+							withRequest((request) => handleCallback(services, request)),
+						),
 					),
-				),
-			);
-			yield* router.add(
-				"POST",
-				"/api/auth/logout",
-				respond(
-					withCsrf(
-						services,
-						withRequest((request) => handleLogout(services, request)),
+				);
+				yield* router.add(
+					"POST",
+					"/api/auth/logout",
+					respond(
+						withCsrf(
+							services,
+							withRequest((request) => handleLogout(services, request)),
+						),
 					),
-				),
-			);
+				);
+			}
 
 			// Account and settings
 			yield* router.add("GET", "/api/me", respond(authenticated(services, (rs) => handleMe(rs))));

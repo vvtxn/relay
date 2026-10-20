@@ -103,8 +103,9 @@ ask. Switching sessions denies any pending ask server-side so runs never hang.
 
 `index.ts` parses `-c`/`--continue` and `--workspace <path>` (the default command's flags), ensures a server exists
 (see above), then sets `RELAY_SERVER_URL` before importing `app.tsx`. It then checks `/api/me` (using the token handed
-over by a browser login in `~/.relay/session.json`); if not signed in it opens the web client and waits for the sign-in
-to complete (`ensureAuthenticated`). `--workspace` is validated and registered server-side at this point; the server's
+over by a browser login in `~/.relay/session.json`). Local mode resolves the local identity without a token, so this
+passes immediately; GitHub mode opens the web client and waits for the sign-in to complete (`ensureAuthenticated`).
+`--workspace` is validated and registered server-side at this point; the server's
 canonical path becomes `RELAY_CLI_WORKSPACE`. It then checks `/api/settings` — if no LLM API key is configured it opens
 the web Settings page and waits (`ensureApiKey`), so the TUI never starts in an unusable state. `bootstrap()` then
 health-checks the server, fetches `/api/me` + `/api/config`, and resolves the initial session for the effective

@@ -1,6 +1,8 @@
 import { Context, Effect, Layer } from "effect";
-import { join } from "node:path";
-import type { AuthenticatedUser } from "@vvtxn/relay/core/index.ts";
+import { chmodSync, mkdirSync } from "node:fs";
+import { userInfo } from "node:os";
+import { dirname, join } from "node:path";
+import type { AuthenticatedUser, AuthIdentity } from "@vvtxn/relay/core/index.ts";
 import {
 	createSecretCipher,
 	DatabaseAuthSessionStore,
@@ -36,6 +38,8 @@ export interface ServerServices {
 	authSessions: DatabaseAuthSessionStore;
 	sessionStore: DatabaseSessionStore;
 	runs: RunManager;
+	/** The fixed identity used by local auth; null in GitHub mode. */
+	localUser: AuthenticatedUser | null;
 }
 
 /** Base services plus the caller resolved for this request. */
@@ -64,14 +68,20 @@ export class Runs extends Context.Service<Runs, RunManager>()("relay/server/Runs
 const configLayer = (config: ServerConfig) => Layer.succeed(Config, config);
 
 /**
- * The shared database client. The Turso client's surface is only `execute` /
- * `batch` (no close), so this layer is unscoped.
+ * The shared database client. Local mode opens an embedded SQLite file; cloud
+ * mode connects to Turso. The stores cannot tell the difference.
  */
 const databaseLayer = Layer.effect(
 	Database,
 	Effect.gen(function* () {
 		const config = yield* Config;
-		return createDatabaseClient({ url: config.tursoUrl, authToken: config.tursoToken });
+		if (config.database.kind === "local" && config.database.path !== ":memory:") {
+			mkdirSync(dirname(config.database.path), { recursive: true, mode: 0o700 });
+		}
+		return createDatabaseClient({
+			url: config.database.url,
+			...(config.database.kind === "turso" ? { authToken: config.database.authToken } : {}),
+		});
 	}),
 );
 
@@ -85,23 +95,26 @@ export const storesLayer = Layer.effectContext(
 		const db = yield* Database;
 		const config = yield* Config;
 
-		const userStore = new DatabaseUserStore({ url: config.tursoUrl, authToken: config.tursoToken, client: db });
+		const userStore = new DatabaseUserStore({ client: db });
 		yield* userStore.ready;
 		const userSettings = yield* createUserSettingsStore(config, db);
 		yield* userSettings.ready;
-		const authSessions = new DatabaseAuthSessionStore({
-			url: config.tursoUrl,
-			authToken: config.tursoToken,
-			client: db,
-		});
+		const authSessions = new DatabaseAuthSessionStore({ client: db });
 		yield* authSessions.ready;
 		const sessionStore = new DatabaseSessionStore({
-			url: config.tursoUrl,
-			authToken: config.tursoToken,
 			client: db,
 			maxSessionsPerWorkspace: config.maxSessionsPerWorkspace,
 		});
 		yield* sessionStore.ready;
+		// The stores have opened the file; tighten its permissions after SQLite
+		// creates it. The containing directory is also private.
+		if (config.database.kind === "local" && config.database.path !== ":memory:") {
+			try {
+				chmodSync(config.database.path, 0o600);
+			} catch {
+				// Best effort on platforms/filesystems without POSIX permissions.
+			}
+		}
 
 		return Context.empty()
 			.pipe(Context.add(UserStore, userStore))
@@ -130,23 +143,25 @@ function createUserSettingsStore(
 		});
 		const databaseStore = () =>
 			new DatabaseUserSettingsStore({
-				url: config.tursoUrl,
-				authToken: config.tursoToken,
 				client: db,
 				cipher,
 			});
 		if (config.settingsStore === "database") return databaseStore();
 
 		const fileStore = new FileUserSettingsStore({ dir: join(config.dataDir, "settings"), cipher });
-		const migration = yield* migrateApiKeysToFile(databaseStore(), fileStore);
-		if (migration.migrated > 0) {
-			console.log(`Migrated ${migration.migrated} API key(s) out of the database into ${config.dataDir}`);
-		}
-		if (migration.failed > 0) {
-			console.error(
-				`Failed to migrate ${migration.failed} API key(s); they remain in the database. ` +
-					`Set the previous RELAY_SECRET_KEY to recover them.`,
-			);
+		// Local databases never held cloud keys; only migrate when the database
+		// is remote (the previous default).
+		if (config.database.kind === "turso") {
+			const migration = yield* migrateApiKeysToFile(databaseStore(), fileStore);
+			if (migration.migrated > 0) {
+				console.log(`Migrated ${migration.migrated} API key(s) out of the database into ${config.dataDir}`);
+			}
+			if (migration.failed > 0) {
+				console.error(
+					`Failed to migrate ${migration.failed} API key(s); they remain in the database. ` +
+						`Set the previous RELAY_SECRET_KEY to recover them.`,
+				);
+			}
 		}
 		return fileStore;
 	});
@@ -170,6 +185,35 @@ const runsLayer = Layer.effect(
 		return new RunManager({ config, providerFor });
 	}),
 );
+
+/** The stable identity local mode uses for every request. */
+function localIdentity(): AuthIdentity {
+	let name: string | undefined;
+	try {
+		name = userInfo().username;
+	} catch {
+		// Some containers do not expose user info; the fallback is still stable.
+	}
+	return { provider: "local", subject: "local", ...(name ? { name } : {}) };
+}
+
+/**
+ * Seed and resolve the local user. Resolving through the normal user store
+ * creates a real `users` row, so database-backed settings and auth tables keep
+ * their foreign keys valid.
+ */
+function resolveLocalUser(userStore: DatabaseUserStore): Effect.Effect<AuthenticatedUser, StoreError> {
+	return Effect.gen(function* () {
+		const identity = localIdentity();
+		const user = yield* userStore.resolve(identity);
+		const name = user.name ?? identity.name;
+		return {
+			...user,
+			provider: "local",
+			...(name ? { name } : {}),
+		};
+	});
+}
 
 /**
  * The full server environment. The `provideMerge` chains keep acquisition
@@ -196,7 +240,8 @@ export async function createServices(config: ServerConfig): Promise<ServerServic
 			const authSessions = yield* AuthSessions;
 			const sessionStore = yield* SessionStore;
 			const runs = yield* Runs;
-			return { config: serverConfig, db, userStore, userSettings, authSessions, sessionStore, runs };
+			const localUser = serverConfig.authMode === "local" ? yield* resolveLocalUser(userStore) : null;
+			return { config: serverConfig, db, userStore, userSettings, authSessions, sessionStore, runs, localUser };
 		}).pipe(Effect.provide(serverLayer(config))),
 	);
 }

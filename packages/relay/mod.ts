@@ -148,7 +148,7 @@ export type {
 } from "./core/index.ts";
 
 // Database (shared Turso client for the session and user stores)
-export { createDatabaseClient, databaseCredentialsFromEnv } from "./core/database.ts";
+export { createDatabaseClient } from "./core/database.ts";
 export type { DatabaseClient, DatabaseCredentials } from "./core/database.ts";
 
 // Paths

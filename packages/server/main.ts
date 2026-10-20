@@ -82,8 +82,30 @@ export async function startServer(): Promise<void> {
 	console.log(
 		`Workspace roots: ${config.workspaceRoots.length > 0 ? config.workspaceRoots.join(", ") : "(any directory)"}`,
 	);
-	console.log(`OAuth callback: ${config.publicUrl}/api/auth/callback (must match a GitHub App callback URL exactly)`);
+	console.log(`Database: ${config.database.kind === "local" ? `local (${config.database.path})` : "turso"}`);
+	console.log(`Auth: ${config.authMode}`);
+	if (config.authMode === "github") {
+		console.log(
+			`OAuth callback: ${config.publicUrl}/api/auth/callback (must match a GitHub App callback URL exactly)`,
+		);
+	}
 	if (config.staticDir) console.log(`Serving web app from ${config.staticDir}`);
+
+	// Close the database before exiting so SQLite checkpoints its WAL. The
+	// process is stopped by `relay stop` (SIGTERM) or Ctrl-C.
+	let shuttingDown = false;
+	const shutdown = (): void => {
+		if (shuttingDown) return;
+		shuttingDown = true;
+		try {
+			services.db.close();
+		} catch (error) {
+			console.error("Failed to close the database:", error instanceof Error ? error.message : error);
+		}
+		process.exit(0);
+	};
+	process.once("SIGTERM", shutdown);
+	process.once("SIGINT", shutdown);
 
 	// Trim any pre-existing overflow before serving so every workspace starts
 	// within the configured cap. No runs exist yet, so nothing active is at risk.

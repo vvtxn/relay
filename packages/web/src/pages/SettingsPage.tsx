@@ -77,15 +77,21 @@ function SettingsPanel(props: { onBack: () => void }) {
 								<div class="settings-account-info">
 									<span class="settings-value">{user().name ?? user().id}</span>
 									<span class="settings-hint">
-										{user().provider ? `signed in via ${user().provider}` : "signed in"}
+										{user().provider === "local"
+											? "local mode"
+											: user().provider
+												? `signed in via ${user().provider}`
+												: "signed in"}
 									</span>
 								</div>
 							</div>
-							<div class="settings-actions">
-								<button type="button" class="btn" onClick={() => void signOut()}>
-									Sign out
-								</button>
-							</div>
+							<Show when={user().provider !== "local"}>
+								<div class="settings-actions">
+									<button type="button" class="btn" onClick={() => void signOut()}>
+										Sign out
+									</button>
+								</div>
+							</Show>
 						</section>
 
 						<section class="settings-section">

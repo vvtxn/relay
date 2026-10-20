@@ -1,5 +1,5 @@
 import type { Effect } from "effect";
-import { createDatabaseClient, type DatabaseClient, databaseCredentialsFromEnv } from "../database.ts";
+import type { DatabaseClient } from "../database.ts";
 import { storeEffect, type StoreError } from "../effect.ts";
 import type {
 	Entry,
@@ -56,10 +56,8 @@ type Statement = { sql: string; args?: QueryArgs };
 type Result = { rows: Record<string, unknown>[] };
 
 export interface DatabaseSessionStoreOptions {
-	url: string;
-	authToken: string;
-	client?: DatabaseClient;
-	/** Maximum persisted sessions kept per owner and workspace (default 10). */
+	client: DatabaseClient;
+	/** Maximum persisted sessions kept per owner and workspace. `0` = unlimited. */
 	maxSessionsPerWorkspace?: number;
 }
 
@@ -90,10 +88,10 @@ export class DatabaseSessionStore implements SessionStore {
 	private readonly maxSessionsPerWorkspace: number;
 
 	constructor(options: DatabaseSessionStoreOptions) {
-		this.client = options.client ?? createDatabaseClient({ url: options.url, authToken: options.authToken });
+		this.client = options.client;
 		const maxSessions = options.maxSessionsPerWorkspace ?? DEFAULT_MAX_SESSIONS_PER_WORKSPACE;
-		if (!Number.isInteger(maxSessions) || maxSessions < 1) {
-			throw new Error("maxSessionsPerWorkspace must be a positive integer");
+		if (!Number.isInteger(maxSessions) || maxSessions < 0) {
+			throw new Error("maxSessionsPerWorkspace must be a non-negative integer");
 		}
 		this.maxSessionsPerWorkspace = maxSessions;
 		this.schemaReady = this.initialize();
@@ -102,12 +100,6 @@ export class DatabaseSessionStore implements SessionStore {
 	/** Resolves once the store's schema has been initialized. */
 	get ready(): Effect.Effect<void, StoreError> {
 		return storeEffect(() => this.schemaReady);
-	}
-
-	static fromEnv(
-		options: Omit<DatabaseSessionStoreOptions, "url" | "authToken" | "client"> = {},
-	): DatabaseSessionStore {
-		return new DatabaseSessionStore({ ...databaseCredentialsFromEnv(), ...options });
 	}
 
 	create(scope: SessionScope): SessionHandle {
@@ -248,6 +240,7 @@ export class DatabaseSessionStore implements SessionStore {
 	}
 
 	private async pruneAllPromise(): Promise<number> {
+		if (this.maxSessionsPerWorkspace === 0) return 0;
 		const result = await this.execute({
 			// Count in a derived table so the engine never has to order by or
 			// filter an aggregate expression (Turso rejects some of those forms).
@@ -281,6 +274,7 @@ export class DatabaseSessionStore implements SessionStore {
 	 * that session is never deleted and counts against the configured limit.
 	 */
 	private pruneStatements(scope: SessionScope, keepId?: string): Statement[] {
+		if (this.maxSessionsPerWorkspace === 0) return [];
 		const offset = this.maxSessionsPerWorkspace - (keepId === undefined ? 0 : 1);
 		const exclude = keepId === undefined ? "" : " AND id <> ?";
 		const args: QueryArgs =
@@ -403,7 +397,7 @@ export class DatabaseSessionStore implements SessionStore {
 			args: [header.id, entries.length + 1, id, full.type, full.timestamp, JSON.stringify(full)],
 		});
 		// A user message is the point where a lazily-created session becomes a
-		// cloud row. Prune in the same atomic batch so a workspace never
+		// persisted row. Prune in the same atomic batch so a workspace never
 		// observably exceeds the configured limit.
 		if (full.type === "message" && full.role === "user") {
 			statements.push(...this.pruneStatements(scope, header.id));

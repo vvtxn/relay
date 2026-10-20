@@ -38,12 +38,7 @@ function fakeDatabase(rowsFor?: (sql: string) => Record<string, unknown>[]) {
 }
 
 function makeStore(client: DatabaseClient, maxSessionsPerWorkspace = 10): DatabaseSessionStore {
-	return new DatabaseSessionStore({
-		url: "file::memory:",
-		authToken: "",
-		client,
-		maxSessionsPerWorkspace,
-	});
+	return new DatabaseSessionStore({ client, maxSessionsPerWorkspace });
 }
 
 describe("DatabaseSessionStore session limit", () => {
@@ -103,6 +98,25 @@ describe("DatabaseSessionStore session limit", () => {
 		expect(batches).toHaveLength(2);
 		expect(batches[0]?.statements[1]?.args).toEqual(["user-1", "/repo", 3]);
 		expect(batches[1]?.statements[1]?.args).toEqual(["user-2", "/other", 3]);
+	});
+
+	it("does not prune when the limit is unlimited", async () => {
+		const { batches, client } = fakeDatabase();
+		const store = makeStore(client, 0);
+		const handle = store.create({ ownerId: "user-1", cwd: "/repo" });
+
+		await Effect.runPromise(handle.append({ type: "message", role: "user", content: "hello" }));
+
+		expect(batches).toHaveLength(1);
+		expect(batches[0]?.statements.some((statement) => statement.sql.startsWith("DELETE"))).toBe(false);
+	});
+
+	it("skips startup pruning when the limit is unlimited", async () => {
+		const { batches, client } = fakeDatabase();
+		const store = makeStore(client, 0);
+
+		expect(await Effect.runPromise(store.pruneAll())).toBe(0);
+		expect(batches).toHaveLength(0);
 	});
 
 	it("keeps only the current session when the limit is 1", async () => {
