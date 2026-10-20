@@ -186,7 +186,9 @@ All exported from `render/hooks/index.ts`:
 - **`useSignal(initialValue)`** - Persistent signal, cached per component/hook index
 - **`useSignalEffect(fn)`** - Reactive effect with cleanup support
 - **`useTextInput(options)`** - Text input state management with optional vim mode (`VimMode: "NORMAL" | "INSERT"`)
-- **`useScrollArea(options)`** - Scroll state management with keyboard input and auto-scroll
+- **`useScrollArea(options)`** - Scroll state management with keyboard input and auto-scroll. The input handler is
+  registered once but reads options through a live ref, so `focused`/`scrollStep` changes (e.g. focus moving to a
+  modal) take effect while the ScrollArea stays mounted.
 - **`useCommandPalette(options)`** - Command palette state (items, filtering, selection)
 - **`useApprovalPrompt()`** - Tool approval state; `ask(request)` returns a Promise resolving with the decision ("allow"
   | "always" | "deny"), `cancel()` denies any pending request. Register before other global key handlers so Esc denies a

@@ -16,9 +16,12 @@ agent/
 ├── app.tsx               # App component, signals, SSE event folding, command palettes
 ├── client.ts             # RelayClient singleton (server URL from config/env)
 ├── config.ts             # RelayConfig: serverUrl (env RELAY_SERVER_URL or ~/.relay/config.json)
+├── diffs.ts              # Session diff collection + preview/viewer row building (pure)
+├── tool-display.ts       # Shared tool-call colors and label column width
 ├── components/
 │   ├── boot-screen.tsx   # BootScreen (loading) and BootError shown while the server is resolved
-│   ├── chat.tsx          # MessageView (user/agent turns + tool-call summary); re-exports UIMessage
+│   ├── chat.tsx          # MessageView (user/agent turns, tool rows, inline diff previews)
+│   ├── diff.tsx          # Compact DiffPreview + full-screen DiffViewer overlay
 │   └── status-bar.tsx    # StatusBar (branch + accumulated cost)
 └── hooks/
     └── project-files.ts  # useProjectFiles hook (file listing from the server)
@@ -68,6 +71,27 @@ The agent runtime is NOT in this package. `runAgentLoop`, tools, providers, and 
    `tool_call_*` accumulate a draft, `turn_complete` flushes it into `uiMessages`, `run_finished` refetches the session
    so persisted entries are the source of truth. The reducer output is committed to a signal on a 50ms throttle.
 4. `message_complete` events carry authoritative token/cost totals
+
+### Diffs
+
+Edit/write tool results arrive with a unified diff on `UIToolCall.diff` (live from `tool_result` and from persisted
+`tool_result` entries), so the terminal needs no server or protocol changes to render changes.
+
+- Each grouped edit/write row shows a compact preview underneath: changed lines only, hunk separators, line numbers,
+  tabs expanded to four spaces, and `+`/`−` in the shared success/error tokens. Previews cap at 3 files per group and
+  8 changed lines per file; the remainder is summarized as `… N more changed lines · ctrl+o`.
+- `ctrl+o` opens `DiffViewer` for the most recent diff; `n`/`p` cycle every diff in the session, arrows/PgUp/PgDn/wheel
+  scroll, and Esc/`q` close it. `/` → **Review Changes** opens the same overlay. The overlay keeps full context and
+  `@@` headers, unlike the transcript preview.
+- The open diff list, position, and pre-built full-context rows live in an app-level signal **by value**, so streamed
+  deltas behind the overlay cannot close or re-parse it. `DiffBody` is memoized; the app re-renders on every stream
+  commit, but the diff rows themselves are not rebuilt.
+- Key registration order matters: approvals first, command palettes next (an open palette owns ctrl+o), the diff viewer
+  next (Escape closes it instead of priming cancellation), then the double-Esc cancel handler. While the overlay is
+  open the composer and chat `ScrollArea` are unfocused, and every non-navigation key is swallowed.
+- `diffs.ts` is pure: `collectSessionDiffs()` folds messages into reviewable diffs and `buildDiffRows()` produces
+  compact or full-context rows. Both are unit-tested; the shared `parseDiff()`/`diffStats()` live in
+  `@vvtxn/relay/core/display.ts`.
 
 ### Approvals
 
@@ -120,12 +144,15 @@ saved, so the TUI cannot start without one.
   running agent status (spinner + `Thinking…`/`Writing…`/`Running <tool>…`, plus the Esc-to-cancel hint), falling back
   to the input hints when idle
 - `StatusBar` — Branch and accumulated session cost
+- `DiffPreview` / `DiffViewer` (components/diff.tsx) — Compact changed-lines-only preview under edit/write groups, and
+  the full-context scrollable review overlay. Both render ANSI-styled rows from the pure helpers in `diffs.ts`; the
+  preview is memoized so streamed deltas skip unchanged diffs
 - `MessageView` (components/chat.tsx) — Shared display contract from `@vvtxn/relay/core/display.ts`; `UIMessage` is
   re-exported from there (single definition). User turns sit on a full-width `surfaceElevated` band, agent turns are
   marked with a `●` (brand), and turns are separated by the scroll gap. Tool calls
   are grouped per tool by `groupToolCalls()` into compact rows — per-tool accent on the name, the targets it touched,
-  and a right-aligned result stat — instead of a row per call. Wrapped in `memo()` (pure
-  function of props) so idle frames and streamed deltas skip re-rendering unchanged messages
+  and a right-aligned result stat — instead of a row per call, with inline diff previews under edit/write groups.
+  Wrapped in `memo()` (pure function of props) so idle frames and streamed deltas skip re-rendering unchanged messages
 
 ### Fonts (`fonts.ts`)
 
@@ -180,3 +207,7 @@ After concluding that a task is complete, always run these commands from the rep
 - `entriesToUIMessages` renders persisted sessions — do not duplicate the conversion locally
 - Keep chat views pure and `memo()`-wrapped; message objects keep identity across streamed deltas, which is what makes
   idle frames and deltas skip unchanged messages
+- Diff presentation is pure and testable (`diffs.ts`); render it through `DiffPreview`/`DiffViewer` instead of stuffing
+  raw patches into `Markdown` (which would show every context line and bypass the preview cap)
+- A global key handler that should win over run cancellation must be registered before the double-Esc handler; one that
+  should lose to an open palette must be registered after the palette hooks
