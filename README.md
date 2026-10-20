@@ -30,6 +30,8 @@ over the same wire protocol. Tooling (format, lint, type-check, builds) runs thr
 - **Streaming agent loop** — Async generator that yields events for real-time UI updates as the LLM thinks and uses
   tools
 - **Built-in tools** — Bash, file read/write/edit, and grep for filesystem interaction
+- **Per-session boxes (experimental)** — Optional Microsandbox microVMs with copy-on-write workspaces, idle stop/wake,
+  and VM-isolated bash
 - **Shared session storage** — Conversations persist in a Turso database for shared session history
 - **Tool approval** — Side-effecting tools wait for an allow/deny decision
 - **Inline diffs** — File write and edit operations display colored unified diffs with line numbers
@@ -177,6 +179,7 @@ canonical (symlink-resolved) path must sit within an allowed root.
 │   │   └── core/           # Agent loop, runner, tools, sessions, context, display
 │   ├── client/             # Wire protocol + RelayClient (@vvtxn/client)
 │   ├── server/             # HTTP + SSE server hosting the runtime (@vvtxn/server)
+│   ├── box/                # Per-session Microsandbox VMs (@vvtxn/box)
 │   ├── cli/                # TUI client + serve subcommand (@vvtxn/cli)
 │   │   ├── agent/          # App entry point, config, components, hooks
 │   │   └── tui/            # Terminal UI framework (JSX runtime, Yoga layout)
@@ -199,6 +202,8 @@ packages/relay  (leaf — no internal deps)
 packages/client  (protocol + transport + shared session-state reducer)
        ↑
 packages/server  (HTTP + SSE runtime host)
+       ↑
+packages/box  (Microsandbox runtime + workspace manifests)
        ↑
 packages/cli  (TUI client + serve subcommand)   packages/web  (Solid SPA client)
 ```
@@ -226,6 +231,20 @@ An HTTP + SSE server built on `effect/http` and `@effect/platform-node`:
   it)
 - **Auth** — GitHub App OAuth with per-request identity resolution, opaque hashed sessions, and an optional allowlist
 - **Static serving** — optional static file serving when `RELAY_STATIC_DIR` is set
+
+### `packages/box/` — Per-session Microsandbox VMs
+
+Optional isolated execution for a session. Each thread can get its own local Microsandbox microVM with a copy-on-write
+clone of the project working tree; file tools stay on the host clone, while `bash` runs inside the VM.
+
+- `manager.ts` — lazy creation, stopped/idle lifecycle, `maxRunning` LRU scheduling, leases, reconciliation
+- `workspace.ts` — reflink clone of the current working tree (including dirty/untracked state), linked-worktree handling
+- `sanitize.ts` — removes `.env*`, `.npmrc`, SSH/cloud credentials, and git URL credentials before the box starts
+- `manifest.ts` — versioned `box.json` per box under `RELAY_BOX_DATA_DIR`; no separate database
+- `microsandbox.ts` — the only module that imports the native Microsandbox SDK
+
+Enable with `RELAY_BOX=1` and see `.env.example` for image, memory, concurrency, and idle settings. A project can add
+`.relay/box.json` for its image and setup/resume hooks. Boxes require Linux KVM, macOS Apple Silicon, or Windows WHP.
 
 ### `packages/relay/api/` — LLM Provider Layer
 

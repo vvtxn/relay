@@ -1,8 +1,9 @@
 /** Server configuration — read once from the environment at startup. */
 
-import { resolve } from "node:path";
+import { join, resolve } from "node:path";
 import { homeDir, relayDir } from "@vvtxn/relay/core/paths.ts";
 import { validateWorkspacePathSync } from "@vvtxn/relay/core/workspace.ts";
+import type { BoxManagerConfig } from "@vvtxn/box/types.ts";
 
 /** Deployment mode selected by `RELAY_ENV`. */
 export type RelayEnv = "development" | "production";
@@ -59,6 +60,8 @@ export interface ServerConfig {
 	secretKeyFile: string | null;
 	/** Directory containing the built web app to serve statically, when present. */
 	staticDir: string | null;
+	/** Isolated box runtime configuration. Disabled by default. */
+	box: BoxManagerConfig;
 }
 
 const DEFAULT_PORT = 7433;
@@ -67,7 +70,6 @@ const DEFAULT_BASE_URL = "https://openrouter.ai/api/v1";
 const DEFAULT_MODEL = "deepseek/deepseek-v4.1-flash";
 const DEFAULT_SESSION_TTL_DAYS = 30;
 const DEFAULT_MAX_SESSIONS_PER_WORKSPACE = 10;
-
 function required(env: Record<string, string | undefined>, key: string): string {
 	const value = env[key];
 	if (!value) throw new Error(`${key} is required`);
@@ -91,6 +93,59 @@ function positiveInt(value: string | undefined, fallback: number, name: string, 
 		throw new Error(`${name} must be a positive integer <= ${max} (got "${value}")`);
 	}
 	return parsed;
+}
+
+/** Parse a boolean env var, throwing on malformed values. */
+function booleanEnv(value: string | undefined, fallback: boolean, name: string): boolean {
+	if (value === undefined || value === "") return fallback;
+	const normalized = value.toLowerCase();
+	if (["1", "true", "yes", "on"].includes(normalized)) return true;
+	if (["0", "false", "no", "off"].includes(normalized)) return false;
+	throw new Error(`${name} must be a boolean (got "${value}")`);
+}
+
+function expandHomePath(value: string): string {
+	if (value === "~" || value.startsWith("~/")) {
+		const home = homeDir();
+		if (home) return resolve(home, value.slice(2));
+	}
+	return resolve(value);
+}
+
+function boxConfigFromEnv(env: Record<string, string | undefined>): BoxManagerConfig {
+	const dataDir = expandHomePath(env.RELAY_BOX_DATA_DIR ?? join(relayDir(), "boxes"));
+	const cacheDir = expandHomePath(env.RELAY_BOX_CACHE_DIR ?? join(relayDir(), "box-cache"));
+	const setup = env.RELAY_BOX_SETUP?.trim();
+	const resume = env.RELAY_BOX_RESUME?.trim();
+	return {
+		enabled: booleanEnv(env.RELAY_BOX, false, "RELAY_BOX"),
+		dataDir,
+		cacheDir,
+		maxRunning: positiveInt(env.RELAY_BOX_MAX_RUNNING, 4, "RELAY_BOX_MAX_RUNNING", 64),
+		idleMs: positiveInt(env.RELAY_BOX_IDLE_MS, 5 * 60_000, "RELAY_BOX_IDLE_MS", 24 * 60 * 60_000),
+		acquireTimeoutMs: positiveInt(
+			env.RELAY_BOX_ACQUIRE_TIMEOUT_MS,
+			10 * 60_000,
+			"RELAY_BOX_ACQUIRE_TIMEOUT_MS",
+			60 * 60_000,
+		),
+		setupTimeoutMs: positiveInt(
+			env.RELAY_BOX_SETUP_TIMEOUT_MS,
+			20 * 60_000,
+			"RELAY_BOX_SETUP_TIMEOUT_MS",
+			24 * 60 * 60_000,
+		),
+		defaults: {
+			image: env.RELAY_BOX_IMAGE?.trim() || "node:26-bookworm",
+			cpus: positiveInt(env.RELAY_BOX_CPUS, 2, "RELAY_BOX_CPUS", 64),
+			memoryMiB: positiveInt(env.RELAY_BOX_MEMORY_MIB, 2048, "RELAY_BOX_MEMORY_MIB", 65_536),
+			rootDiskMiB: positiveInt(env.RELAY_BOX_ROOT_DISK_MIB, 8192, "RELAY_BOX_ROOT_DISK_MIB", 1_048_576),
+			...(setup ? { setup } : {}),
+			...(resume ? { resume } : {}),
+			env: {},
+			exclude: [],
+		},
+	};
 }
 
 /** True for hostnames that only accept local connections. */
@@ -186,6 +241,7 @@ export function serverConfigFromEnv(env: Record<string, string | undefined> = { 
 		secretKey,
 		secretKeyFile,
 		staticDir: env.RELAY_STATIC_DIR ?? null,
+		box: boxConfigFromEnv(env),
 	};
 }
 

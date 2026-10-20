@@ -1,0 +1,44 @@
+# Prepared box image.
+#
+# Build and load it into the local Microsandbox image cache:
+#   podman build -t relay-box:local -f packages/box/image/Containerfile packages/box/image
+#   podman save -o /tmp/relay-box.tar relay-box:local
+#   msb load /tmp/relay-box.tar
+#   RELAY_BOX_IMAGE=relay-box:local RELAY_BOX=1 pnpm relay
+#
+# The image intentionally runs as root inside the VM. Microsandbox maps guest
+# root writes on host mounts back to the invoking user, so host-side file tools
+# keep working.
+
+FROM node:26-bookworm
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    LANG=C.UTF-8 \
+    LC_ALL=C.UTF-8 \
+    PLAYWRIGHT_BROWSERS_PATH=/opt/playwright
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        ca-certificates \
+        curl \
+        git \
+        jq \
+        build-essential \
+        python3 \
+        python3-pip \
+        sqlite3 \
+        postgresql-client \
+        redis-tools \
+        tmux \
+        procps \
+        ripgrep \
+        less \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN corepack enable \
+    && npm install -g @playwright/test@1.61.0 \
+    && playwright install --with-deps chromium
+
+WORKDIR /workspace
+RUN mkdir -p /relay-cache
+CMD ["sleep", "infinity"]

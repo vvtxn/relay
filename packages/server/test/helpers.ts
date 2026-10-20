@@ -48,6 +48,23 @@ export function makeConfig(defaultCwd: string, overrides: Partial<ServerConfig> 
 		secretKey: null,
 		secretKeyFile: null,
 		staticDir: null,
+		box: {
+			enabled: false,
+			dataDir: join(tmpdir(), "relay-test-data", "boxes"),
+			cacheDir: join(tmpdir(), "relay-test-data", "box-cache"),
+			maxRunning: 4,
+			idleMs: 300_000,
+			acquireTimeoutMs: 600_000,
+			setupTimeoutMs: 1_200_000,
+			defaults: {
+				image: "node:26-bookworm",
+				cpus: 2,
+				memoryMiB: 2048,
+				rootDiskMiB: 8192,
+				env: {},
+				exclude: [],
+			},
+		},
 		...overrides,
 	};
 }

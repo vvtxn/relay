@@ -77,6 +77,29 @@ export async function startServer(): Promise<void> {
 	const config = serverConfigFromEnv();
 	const services = await createServices(config);
 
+	if (services.boxes.enabled) {
+		try {
+			await Effect.runPromise(services.boxes.reconcile());
+			console.log(`Boxes: enabled (${config.box.defaults.image}, max ${config.box.maxRunning} running)`);
+		} catch (error) {
+			console.error(
+				"Box reconcile failed:",
+				error instanceof Error ? error.message : error,
+				"— box runs will fail until the runtime is available.",
+			);
+		}
+	} else {
+		console.log("Boxes: disabled");
+	}
+
+	// Stop running VMs when the CLI asks the server to shut down. A crash still
+	// leaves them for `reconcile()` on the next start.
+	const shutdown = (): void => {
+		void Effect.runPromise(services.boxes.shutdown()).finally(() => process.exit(0));
+	};
+	process.once("SIGTERM", shutdown);
+	process.once("SIGINT", shutdown);
+
 	console.log(`Mode: ${config.relayEnv}`);
 	console.log(`Workspace: ${config.defaultCwd}`);
 	console.log(
@@ -99,6 +122,18 @@ export async function startServer(): Promise<void> {
 			"Failed to enforce the per-workspace session limit:",
 			error instanceof Error ? error.message : error,
 		);
+	}
+
+	if (services.boxes.enabled) {
+		try {
+			const active = await Effect.runPromise(services.sessionStore.allSessionIds());
+			const collected = await Effect.runPromise(services.boxes.gc(active));
+			if (collected.trashed > 0 || collected.removed > 0) {
+				console.log(`Box GC: trashed ${collected.trashed}, removed ${collected.removed} old workspace(s).`);
+			}
+		} catch (error) {
+			console.error("Box GC failed:", error instanceof Error ? error.message : error);
+		}
 	}
 
 	const app = createAppLayer(services);

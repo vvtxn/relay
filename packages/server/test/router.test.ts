@@ -6,6 +6,7 @@ import { mkdtemp, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vite-plus/test";
+import { DisabledBoxManager } from "@vvtxn/box/manager.ts";
 import type { AuthenticatedUser } from "@vvtxn/relay/core/index.ts";
 import type { LLMProvider } from "@vvtxn/relay/api/types.ts";
 import type { ServerConfig } from "../config.ts";
@@ -45,6 +46,7 @@ async function makeServices(provider: LLMProvider, overrides: Partial<ServerConf
 		authSessions: { resolve: (token: string) => Effect.succeed(token === TEST_TOKEN ? { userId: USER_ID } : null) },
 		sessionStore: store,
 		runs,
+		boxes: new DisabledBoxManager(),
 	} as unknown as ServerServices;
 
 	return { services, runs, cwd, user };
