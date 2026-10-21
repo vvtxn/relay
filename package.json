@@ -4,7 +4,7 @@
 	"type": "module",
 	"scripts": {
 		"relay": "RELAY_FLAVOR=local node scripts/relay.ts",
-		"relay:cloud": "RELAY_FLAVOR=cloud node scripts/relay.ts",
+		"relay:cloud": "RELAY_ENV=production RELAY_FLAVOR=cloud node scripts/relay.ts",
 		"web:dev": "vp -C packages/web dev",
 		"web:build": "vp -C packages/web build",
 		"build": "vp -C packages/web build && vp -C packages/cli pack",

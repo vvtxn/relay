@@ -508,7 +508,7 @@ export async function ensureApiKey(state: ServerState): Promise<void> {
 		);
 	}
 
-	// In development the web origin is Vite (e.g. localhost:5173); fall back to
+	// In development the web origin is Vite (e.g. 127.0.0.1:5173); fall back to
 	// the web app the server itself serves when that is not running, so the user
 	// is never sent to a dead page.
 	let webOrigin = state.webUrl || state.url;
@@ -616,7 +616,7 @@ export async function runWeb(args: string[]): Promise<void> {
 	const state = await ensureServer({ cwd: process.cwd() });
 	let webUrl = state.webUrl || state.url;
 
-	// In development the web origin is Vite (e.g. localhost:5173); if that is
+	// In development the web origin is Vite (e.g. 127.0.0.1:5173); if that is
 	// not running, fall back to the web app the server itself serves.
 	if (webUrl !== state.url && !(await isReachable(webUrl))) {
 		console.log(`Web client at ${webUrl} is not running; using the server's bundled web app.`);

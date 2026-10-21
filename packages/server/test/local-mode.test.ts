@@ -67,8 +67,8 @@ describe("local mode", () => {
 			const blocked = await handleRequest(services, apiRequest("GET", "/api/me", { host: "evil.example" }));
 			expect(blocked.status).toBe(403);
 
-			const localhost = await handleRequest(services, apiRequest("GET", "/api/me", { host: "localhost:5173" }));
-			expect(localhost.status).toBe(200);
+			const ipv4 = await handleRequest(services, apiRequest("GET", "/api/me", { host: "127.0.0.1:5173" }));
+			expect(ipv4.status).toBe(200);
 		} finally {
 			services.db.close();
 			await rm(dir, { recursive: true, force: true });

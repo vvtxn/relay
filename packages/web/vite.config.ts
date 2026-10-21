@@ -41,6 +41,7 @@ export default defineConfig({
 		],
 	},
 	server: {
+		host: "127.0.0.1",
 		fs: {
 			allow: [path.resolve(here, "..")],
 		},

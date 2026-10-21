@@ -121,9 +121,9 @@ The terminal and the browser use the same font. The browser loads it automatical
 `pnpm relay fonts install` and select the printed family in your terminal settings. `pnpm relay fonts status` reports
 whether it is installed.
 
-In development `relay web` opens Vite (`http://localhost:5173`) when it is running, otherwise the web app served by the
-server. In production (`RELAY_ENV=production`, e.g. `RELAY_ENV=production pnpm relay:cloud web`) the server serves the built SPA
-(`packages/web/dist`) itself.
+Local development can use Vite (`http://127.0.0.1:5173`): `relay web` opens it when running, otherwise the web app
+served by the server. Cloud mode runs with `RELAY_ENV=production` and always serves the built SPA (`packages/web/dist`)
+itself, so OAuth uses the stable server origin.
 
 With GitHub auth, the first `pnpm relay:cloud` opens the browser to sign in; the server hands the session to the CLI
 (loopback only), so the terminal and the browser act as the same user. Sign out only affects the current client.
@@ -158,9 +158,10 @@ The rest of this section describes the shared/GitHub deployment.
 ### GitHub App setup
 
 1. Create a **GitHub App** (Settings → Developer settings → GitHub Apps → New GitHub App).
-   - **Callback URLs** (up to 10 — add both):
-     - `http://localhost:5173/api/auth/callback` (development, via the Vite proxy)
-     - `http://127.0.0.1:7433/api/auth/callback` (production)
+   - **Callback URL**:
+     - `http://127.0.0.1:7433/api/auth/callback`
+
+     Cloud mode serves its own SPA on this origin. Vite (`127.0.0.1:5173`) is for local development, which has no OAuth.
    - Under **Permissions → Account permissions**, set **Email addresses** to _Read-only_ (used to resolve a verified
      email; the profile itself needs no permission).
    - Optionally enable **Request user authorization (OAuth) during installation**.
@@ -178,12 +179,11 @@ The rest of this section describes the shared/GitHub deployment.
    GITHUB_APP_CLIENT_SECRET="..."
    ```
 
-   `RELAY_PUBLIC_URL` already comes from `.env.development` / `.env.production`; `AUTH_SESSION_TTL_DAYS` defaults to 30
-   and can be overridden in a `.local` file.
+   Cloud mode uses `.env.production`, where `RELAY_PUBLIC_URL` is `http://127.0.0.1:7433` — the same origin as the
+   GitHub callback. `AUTH_SESSION_TTL_DAYS` defaults to 30 and can be overridden in a `.local` file.
 
-3. Start the matching mode (`pnpm relay:cloud` + `RELAY_FLAVOR=cloud pnpm web:dev`, or
-   `RELAY_ENV=production pnpm relay:cloud serve` after `pnpm web:build`) and sign in
-   with two accounts to verify isolation.
+3. Start cloud mode with `pnpm relay:cloud` (or `pnpm relay:cloud serve` for a foreground server) and sign in with two
+   accounts to verify isolation. The launcher builds the web app on first use when it is missing.
 
 The CLI authenticates with the bearer session token a loopback browser login hands over in `~/.relay/session.json`, so
 the terminal and the browser act as the same user without extra configuration.
@@ -402,7 +402,7 @@ pnpm relay workspace add <path>    # Register a project directory (default: cwd)
 pnpm relay workspace remove <path> # Hide a workspace (sessions are kept; re-add restores it)
 pnpm relay fonts status  # Check whether the shared terminal font is installed
 pnpm relay serve       # Run a foreground local server
-pnpm relay:cloud serve # Run a foreground cloud server (set RELAY_ENV=production for prod)
+pnpm relay:cloud serve # Run a foreground cloud server (production env)
 pnpm web:dev           # Run the web client with Vite (proxies /api to the local server)
                                  # prefix RELAY_FLAVOR=cloud to follow a cloud server
 pnpm web:build         # Build the web app to packages/web/dist

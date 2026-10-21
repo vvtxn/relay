@@ -76,8 +76,7 @@ modules stay Effect-free on purpose.
 - **Install the shared terminal font**: `pnpm relay fonts install|status` or `pnpm relay:cloud fonts …`
 - **Run local server (foreground)**: `pnpm relay serve`
 - **Run cloud server (foreground)**: `pnpm relay:cloud serve`
-- **Run web dev server**: `pnpm web:dev` (Vite; proxies `/api` to the local server; set `RELAY_FLAVOR=cloud` to follow
-  the cloud server)
+- **Run web dev server**: `pnpm web:dev` (Vite; proxies `/api` to the local server; cloud mode serves its own SPA)
 - **Build web app**: `pnpm web:build` (Vite → `packages/web/dist`; serve with `RELAY_STATIC_DIR`)
 - **Build web app + CLI bundle**: `pnpm build`
 - **Build Linux x64 single executable**: `pnpm build:sea` (outputs `dist/relay`)
