@@ -2,10 +2,12 @@
  * Supervises the background Relay server shared by the TUI and the browser.
  *
  * `relay` and `relay web` call {@link ensureServer}: they attach to a healthy
- * server (tracked in `~/.relay/server.json`) or start one detached, so a single
- * backend serves every client. The server binds its configured port, writes its
- * own state file (PID, port, web URL) once listening, and the CLI discovers the
- * actual URL from that file — it never assumes a port before the bind succeeds.
+ * server (tracked in `~/.relay/server-<flavor>.json`) or start one detached, so
+ * a single backend serves every client. The server binds its configured port,
+ * writes its own state file (PID, port, web URL) once listening, and the CLI
+ * discovers the actual URL from that file — it never assumes a port before the
+ * bind succeeds. Local and cloud state files are separate, so both modes can be
+ * stopped/status-checked independently.
  *
  * Porting rules: `RELAY_PORT` (default 7433) is the only source for the listen
  * port; `RELAY_PUBLIC_URL` is the browser-facing origin (Vite in development)
@@ -18,13 +20,13 @@
 import { type ChildProcess } from "node:child_process";
 import { closeSync, mkdirSync, openSync, readFileSync, readSync, rmSync, statSync } from "node:fs";
 import { createServer } from "node:net";
-import { dirname, join } from "node:path";
+import { dirname } from "node:path";
 import { isSea } from "node:sea";
 import { fileURLToPath } from "node:url";
 import { spawnDetached } from "@vvtxn/relay/core/command.ts";
 import type { SettingsResponse } from "@vvtxn/client/protocol.ts";
 import { readStoredSession } from "@vvtxn/relay/core/auth/session-file.ts";
-import { relayDir } from "@vvtxn/relay/core/paths.ts";
+import { serverLogPath, serverStatePath } from "@vvtxn/relay/core/server-state.ts";
 import { encodeWorkspaceToken } from "@vvtxn/relay/core/workspace-token.ts";
 import { resolveWorkspacePath } from "./config.ts";
 import { openBrowser } from "./open.ts";
@@ -55,11 +57,24 @@ export interface ServerState {
 }
 
 function statePath(): string {
-	return join(relayDir(), "server.json");
+	return serverStatePath();
 }
 
 function logPath(): string {
-	return join(relayDir(), "logs", "server.log");
+	return serverLogPath();
+}
+
+/** User-facing command for the current mode and packaging. */
+function relayCommand(subcommand?: string): string {
+	const cloud = process.env.RELAY_FLAVOR === "cloud";
+	const base = isSea()
+		? cloud
+			? "RELAY_FLAVOR=cloud ./relay"
+			: "./relay"
+		: cloud
+			? "pnpm relay:cloud"
+			: "pnpm relay";
+	return subcommand ? `${base} ${subcommand}` : base;
 }
 
 function delay(ms: number): Promise<void> {
@@ -93,15 +108,35 @@ function clearState(): void {
 	}
 }
 
-async function isHealthy(url: string): Promise<boolean> {
+interface HealthProbe {
+	ok: boolean;
+	flavor?: string;
+}
+
+async function probeHealth(url: string): Promise<HealthProbe> {
 	try {
 		const response = await fetch(`${url}/api/health`, { signal: AbortSignal.timeout(HEALTH_TIMEOUT_MS) });
-		if (!response.ok) return false;
-		const body = (await response.json()) as { status?: string };
-		return body.status === "ok";
+		if (!response.ok) return { ok: false };
+		const body = (await response.json()) as { status?: string; flavor?: string };
+		return { ok: body.status === "ok", ...(body.flavor ? { flavor: body.flavor } : {}) };
 	} catch {
-		return false;
+		return { ok: false };
 	}
+}
+
+/**
+ * Healthy and, when both sides advertise a flavor, the requested one. Older
+ * servers without a flavor field remain attachable.
+ */
+async function isHealthy(url: string, expectedFlavor: string | undefined = process.env.RELAY_FLAVOR): Promise<boolean> {
+	const health = await probeHealth(url);
+	if (!health.ok) return false;
+	return expectedFlavor === undefined || health.flavor === undefined || health.flavor === expectedFlavor;
+}
+
+function flavorMismatch(health: HealthProbe, expectedFlavor = process.env.RELAY_FLAVOR): string | null {
+	if (!expectedFlavor || !health.flavor || health.flavor === expectedFlavor) return null;
+	return `Relay at this URL is running in ${health.flavor} mode, but ${expectedFlavor} mode was requested.`;
 }
 
 /** Port the background server should use: explicit `RELAY_PORT`, else the default. */
@@ -289,7 +324,10 @@ export async function ensureServer(options: { cwd: string }): Promise<ServerStat
 	const explicit = process.env.RELAY_SERVER_URL;
 	if (explicit) {
 		const url = explicit.replace(/\/+$/, "");
-		if (!(await isHealthy(url))) throw new Error(`Cannot reach the Relay server at ${url}.`);
+		const health = await probeHealth(url);
+		if (!health.ok) throw new Error(`Cannot reach the Relay server at ${url}.`);
+		const mismatch = flavorMismatch(health);
+		if (mismatch) throw new Error(`${mismatch} Set RELAY_SERVER_URL to the matching mode or unset it.`);
 		return {
 			url,
 			port: new URL(url).port ? Number(new URL(url).port) : 0,
@@ -316,7 +354,9 @@ export async function ensureServer(options: { cwd: string }): Promise<ServerStat
 		if (outcome.kind === "started") return outcome.state;
 		if (outcome.kind === "exited") throw startupFailure(outcome.detail);
 		if (outcome.kind === "timeout") {
-			throw startupFailure(`${outcome.detail} (it may still be starting; run \`relay\` again to attach)`);
+			throw startupFailure(
+				`${outcome.detail} (it may still be starting; run \`${relayCommand()}\` again to attach)`,
+			);
 		}
 
 		// The port was taken from under us: another CLI may be bringing a server
@@ -377,7 +417,7 @@ export async function ensureAuthenticated(state: ServerState): Promise<void> {
 	if (status.status === "unreachable") {
 		throw new Error(
 			`Cannot reach the Relay server at ${state.url} (${status.detail}). ` +
-				`Check ${logPath()}, then run \`relay stop\` and \`relay\` again.`,
+				`Check ${logPath()}, then run \`${relayCommand("stop")}\` and \`${relayCommand()}\` again.`,
 		);
 	}
 
@@ -393,7 +433,7 @@ export async function ensureAuthenticated(state: ServerState): Promise<void> {
 			return;
 		}
 	}
-	throw new Error("Sign-in timed out. Open the web client, sign in, then run `relay` again.");
+	throw new Error(`Sign-in timed out. Open the web client, sign in, then run \`${relayCommand()}\` again.`);
 }
 
 export type ApiKeyStatus =
@@ -433,12 +473,12 @@ export async function ensureApiKey(state: ServerState): Promise<void> {
 	const status = await apiKeyStatus(state.url);
 	if (status.status === "configured") return;
 	if (status.status === "unauthenticated") {
-		throw new Error("Not signed in. Run `relay` again to sign in.");
+		throw new Error(`Not signed in. Run \`${relayCommand()}\` again to sign in.`);
 	}
 	if (status.status === "unreachable") {
 		throw new Error(
 			`Cannot reach the Relay server at ${state.url} (${status.detail}). ` +
-				`Check ${logPath()}, then run \`relay stop\` and \`relay\` again.`,
+				`Check ${logPath()}, then run \`${relayCommand("stop")}\` and \`${relayCommand()}\` again.`,
 		);
 	}
 
@@ -464,7 +504,7 @@ export async function ensureApiKey(state: ServerState): Promise<void> {
 			return;
 		}
 		if (current.status === "unauthenticated") {
-			throw new Error("Signed out while waiting for the API key. Run `relay` again.");
+			throw new Error(`Signed out while waiting for the API key. Run \`${relayCommand()}\` again.`);
 		}
 		if (current.status === "unreachable" && !warned) {
 			// A transient blip (server restart) should not abort the wait; the
@@ -473,7 +513,9 @@ export async function ensureApiKey(state: ServerState): Promise<void> {
 			console.log(`Lost contact with the server (${current.detail}); waiting for it to return…`);
 		}
 	}
-	throw new Error("Timed out waiting for an API key. Add one in the web Settings page, then run `relay` again.");
+	throw new Error(
+		`Timed out waiting for an API key. Add one in the web Settings page, then run \`${relayCommand()}\` again.`,
+	);
 }
 
 /** Stop the background server recorded in the state file. */ export async function stopServer(): Promise<void> {
@@ -511,6 +553,7 @@ export async function printStatus(): Promise<void> {
 		return;
 	}
 	const alive = await isHealthy(state.url);
+	console.log(`Mode:      ${process.env.RELAY_FLAVOR ?? "auto"}`);
 	console.log(`Server:    ${state.url} (${alive ? "running" : "not responding"})`);
 	console.log(`Workspace: ${state.cwd}`);
 	console.log(`Web:       ${state.webUrl}`);

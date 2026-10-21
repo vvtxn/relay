@@ -43,6 +43,10 @@ describe("local mode", () => {
 		try {
 			expect(services.localUser).not.toBeNull();
 
+			const health = await handleRequest(services, apiRequest("GET", "/api/health"));
+			expect(health.status).toBe(200);
+			expect(await health.json()).toMatchObject({ status: "ok", flavor: "local" });
+
 			const me = await handleRequest(services, apiRequest("GET", "/api/me"));
 			expect(me.status).toBe(200);
 			expect(await me.json()).toMatchObject({ id: services.localUser!.id, provider: "local" });

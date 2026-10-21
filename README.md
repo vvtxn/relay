@@ -49,7 +49,7 @@ pnpm build:sea
 ```
 
 The executable needs no Node.js installation. It extracts its web/font/libSQL assets to `~/.relay/runtime/<version>` on
-first launch. Tagged releases attach `relay` and `relay.sha256`; `pnpm smoke:sea` verifies a local build.
+first launch. Tagged releases attach `relay` and `relay.sha256`.
 
 ### From source
 
@@ -103,37 +103,42 @@ The CLI is the entry point: it starts (or reuses) a background server, then runs
 the CLI exits, so you can hop into the browser anytime.
 
 ```bash
-pnpm relay          # start/reuse the server + terminal UI
-pnpm relay web      # open the web client in the browser
-pnpm relay status   # show the background server
-pnpm relay stop     # stop the background server
+pnpm relay          # local mode: start/reuse the server + terminal UI
+pnpm relay:cloud    # cloud mode: Turso + GitHub
+pnpm relay web      # open the local web client in the browser
+pnpm relay:cloud web  # open the cloud web client
+pnpm relay stop     # stop the local background server
+pnpm relay:cloud stop # stop the cloud background server
 ```
 
-The server listens on `RELAY_PORT` (default `7433`). In development, if that port is taken by something that is not a
-healthy Relay server, the CLI starts one on a free port and records the actual URL in `~/.relay/server.json` (the Vite
-dev proxy follows it). In production — or whenever `RELAY_PORT` is set explicitly — a taken port is a startup error.
+Local and cloud track their servers separately (`~/.relay/server-local.json` and `~/.relay/server-cloud.json`), so
+`stop`, `status`, `web`, `serve`, `workspace`, and `fonts` work for both. The server listens on `RELAY_PORT` (default
+`7433`). In development, if that port is taken by something that is not a healthy Relay server, the CLI starts one on a
+free port and records the actual URL in the mode's state file (the Vite dev proxy follows it). In production — or
+whenever `RELAY_PORT` is set explicitly — a taken port is a startup error.
 
 The terminal and the browser use the same font. The browser loads it automatically; for the terminal run
 `pnpm relay fonts install` and select the printed family in your terminal settings. `pnpm relay fonts status` reports
 whether it is installed.
 
 In development `relay web` opens Vite (`http://localhost:5173`) when it is running, otherwise the web app served by the
-server. In production (`RELAY_ENV=production`, e.g. `pnpm relay:prod web`) the server serves the built SPA
+server. In production (`RELAY_ENV=production`, e.g. `RELAY_ENV=production pnpm relay:cloud web`) the server serves the built SPA
 (`packages/web/dist`) itself.
 
-With GitHub auth, the first `pnpm relay` opens the browser to sign in; the server hands the session to the CLI (loopback
-only), so the terminal and the browser act as the same user. Sign out only affects the current client.
+With GitHub auth, the first `pnpm relay:cloud` opens the browser to sign in; the server hands the session to the CLI
+(loopback only), so the terminal and the browser act as the same user. Sign out only affects the current client.
 
 Lower-level tasks remain for running a server in the foreground:
 
 ```bash
-pnpm serve:dev           # foreground server, development env
-pnpm serve:prod          # foreground server, production env
+pnpm relay serve         # foreground local server
+pnpm relay:cloud serve   # foreground cloud server
 pnpm web:dev             # Vite dev server with HMR
 ```
 
-`pnpm relay` builds the CLI bundle (`packages/cli/dist`) automatically and then runs the same commands as before:
-`relay`, `relay web`, `relay serve`, `relay stop`, `relay status`, `relay fonts`, `relay workspace`.
+Both entry points build the CLI bundle (`packages/cli/dist`) automatically and run the same subcommands. Use
+`pnpm relay <command>` for local mode and `pnpm relay:cloud <command>` for cloud mode:
+`web`, `serve`, `stop`, `status`, `fonts`, `workspace`, and `version`.
 
 ## Authentication
 
@@ -174,7 +179,8 @@ The rest of this section describes the shared/GitHub deployment.
    `RELAY_PUBLIC_URL` already comes from `.env.development` / `.env.production`; `AUTH_SESSION_TTL_DAYS` defaults to 30
    and can be overridden in a `.local` file.
 
-3. Start the matching mode (`pnpm serve:dev` + `pnpm web:dev`, or `pnpm serve:prod` after `pnpm web:build`) and sign in
+3. Start the matching mode (`pnpm relay:cloud` + `RELAY_FLAVOR=cloud pnpm web:dev`, or
+   `RELAY_ENV=production pnpm relay:cloud serve` after `pnpm web:build`) and sign in
    with two accounts to verify isolation.
 
 The CLI authenticates with the bearer session token a loopback browser login hands over in `~/.relay/session.json`, so
@@ -382,21 +388,24 @@ pnpm fmt               # Format code (Oxfmt via Vite+)
 pnpm fmt:check         # Check formatting
 pnpm lint              # Lint (Oxlint via Vite+)
 pnpm check             # Format, lint, and type-check (tsgo via Vite+)
-pnpm relay             # Build the CLI bundle, then start/reuse the server + terminal UI
-pnpm relay web         # Open the web client (server starts in the background)
-pnpm relay stop        # Stop the background server
-pnpm relay status      # Show the background server
+pnpm relay             # Local mode: build, then start/reuse the server + terminal UI
+pnpm relay:cloud       # Cloud mode: Turso + GitHub
+pnpm relay web         # Open the local web client (server starts in the background)
+pnpm relay:cloud web   # Open the cloud web client
+pnpm relay stop        # Stop the local background server
+pnpm relay:cloud stop  # Stop the cloud background server
+pnpm relay status      # Show the local background server
 pnpm relay workspace list          # List registered workspaces
 pnpm relay workspace add <path>    # Register a project directory (default: cwd)
 pnpm relay workspace remove <path> # Hide a workspace (sessions are kept; re-add restores it)
 pnpm relay fonts status  # Check whether the shared terminal font is installed
-pnpm serve:dev         # Run a foreground server with the development env
-pnpm serve:prod        # Run a foreground server with the production env
-pnpm web:dev           # Run the web client with Vite (proxies /api to the server)
+pnpm relay serve       # Run a foreground local server
+pnpm relay:cloud serve # Run a foreground cloud server (set RELAY_ENV=production for prod)
+pnpm web:dev           # Run the web client with Vite (proxies /api to the local server)
+                                 # prefix RELAY_FLAVOR=cloud to follow a cloud server
 pnpm web:build         # Build the web app to packages/web/dist
 pnpm build             # Build the web app and the CLI bundle
 pnpm build:sea         # Build the Linux x64 single executable (dist/relay)
-pnpm smoke:sea         # Smoke-test dist/relay with a temporary HOME
 pnpm run version         # Show current version
 pnpm run version:bump <patch|minor|major>  # Bump version
 ```

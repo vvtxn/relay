@@ -129,7 +129,8 @@ A missing key fails the run with a clear message, and `handleSendMessage` return
 
 ### Background state
 
-When the CLI supervisor starts the server it sets `RELAY_STATE_FILE`; once the listener is bound `main.ts` writes
+When the CLI supervisor starts the server it sets `RELAY_STATE_FILE` to the mode-specific path
+(`~/.relay/server-local.json` or `server-cloud.json`); once the listener is bound `main.ts` writes
 `{ url, port, pid, cwd, webUrl }` (mode `0600`, write-then-rename so readers never see a partial file) so
 `relay stop`/`relay status` can find it. A plain `relay serve` leaves no state behind.
 
@@ -142,7 +143,7 @@ chooses a random port.
 
 | Endpoint                     | Method | Purpose                                               |
 | ---------------------------- | ------ | ----------------------------------------------------- |
-| `/api/health`                | GET    | Liveness + version                                    |
+| `/api/health`                | GET    | Liveness + version + local/cloud flavor               |
 | `/api/auth/login`            | GET    | Begin GitHub OAuth (redirect)                         |
 | `/api/auth/callback`         | GET    | GitHub OAuth callback                                 |
 | `/api/auth/logout`           | POST   | Revoke the session + clear the cookie                 |
@@ -187,8 +188,8 @@ Payload types live in `@vvtxn/client/protocol.ts` — never redeclare them here.
 ## Running
 
 ```bash
-pnpm serve:dev      # from repo root, loads development env files
-pnpm serve:prod     # production env files
+pnpm relay serve        # foreground local server
+pnpm relay:cloud serve  # foreground cloud server
 ```
 
 ## Testing

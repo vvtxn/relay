@@ -32,7 +32,7 @@ agent/
 `relay` (default) and `relay web` call `ensureServer({ cwd })`:
 
 1. An explicit `RELAY_SERVER_URL` is attached to, never managed.
-2. A healthy server recorded in `~/.relay/server.json` is reused.
+2. A healthy server recorded in the mode's state file (`~/.relay/server-local.json` or `server-cloud.json`) is reused.
 3. A healthy server answering on the preferred port is adopted even without a state file (e.g. a foreground
    `relay serve`).
 4. Otherwise a detached server is spawned (`node packages/server/entry.ts`) with
@@ -174,13 +174,15 @@ the same typeface.
 ## Running
 
 ```bash
-pnpm relay           # start/reuse the server + TUI in the current directory
+pnpm relay           # local mode: start/reuse the server + TUI
+pnpm relay:cloud     # cloud mode: Turso + GitHub
 pnpm relay -c        # ...resuming the most recent thread for the directory
 pnpm relay --workspace ~/Code/foo  # ...scoped to another registered directory
-pnpm relay web       # open the browser client at the current workspace
-pnpm relay web --workspace ~/Code/foo  # ...at another directory's workspace
-pnpm relay stop      # stop the background server
-pnpm relay status    # show the background server
+pnpm relay web       # open the local browser client at the current workspace
+pnpm relay:cloud web # open the cloud browser client
+pnpm relay stop      # stop the local background server
+pnpm relay:cloud stop # stop the cloud background server
+pnpm relay status    # show the local background server
 pnpm relay workspace add ~/Code/foo  # register a workspace (no TUI)
 pnpm relay workspace list            # list registered workspaces
 pnpm relay fonts status  # check whether the shared font is installed

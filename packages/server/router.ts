@@ -46,7 +46,7 @@ import {
 	handleWorkspace,
 } from "./workspace.ts";
 import { handleGetSettings, handleSetApiKey } from "./settings.ts";
-import { isLoopbackHost } from "./config.ts";
+import { effectiveFlavor, isLoopbackHost } from "./config.ts";
 
 /** Route handlers may read the request service (and matched route context). */
 type RouteEffect = Effect.Effect<
@@ -76,8 +76,12 @@ function respond(effect: RouteEffect) {
 	);
 }
 
-function health(): HttpServerResponse.HttpServerResponse {
-	return json({ status: "ok", version: VERSION } satisfies HealthResponse);
+function health(services: ServerServices): HttpServerResponse.HttpServerResponse {
+	return json({
+		status: "ok",
+		version: VERSION,
+		flavor: effectiveFlavor(services.config),
+	} satisfies HealthResponse);
 }
 
 function isStateChanging(method: string): boolean {
@@ -185,7 +189,7 @@ export function createAppLayer(services: ServerServices) {
 
 			// Health is always public. OAuth routes only exist in GitHub mode;
 			// local auth has no login or logout.
-			yield* router.add("GET", "/api/health", respond(Effect.succeed(health())));
+			yield* router.add("GET", "/api/health", respond(Effect.succeed(health(services))));
 			if (services.config.authMode === "github") {
 				yield* router.add(
 					"GET",

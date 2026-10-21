@@ -66,19 +66,21 @@ modules stay Effect-free on purpose.
 - **Check formatting**: `pnpm fmt:check`
 - **Lint**: `pnpm lint`
 - **Type-check**: `pnpm check` (strict; checks every entrypoint)
-- **Run CLI**: `pnpm relay` (starts/reuses the background server, then the TUI; non-TUI subcommands run from source
-  without a bundle build — see `scripts/relay.ts`)
-- **Open web client**: `pnpm relay web` (ensures the server, opens the browser)
-- **Stop/status the background server**: `pnpm relay stop` / `pnpm relay status`
-- **Manage workspaces**: `pnpm relay workspace add|list|remove [path]` (no TUI; attaches to the running server)
-- **Install the shared terminal font**: `pnpm relay fonts install` / `pnpm relay fonts status`
-- **Run server (foreground)**: `pnpm serve` (dev alias; loads mode env files)
-- **Run server (prod)**: `pnpm serve:prod` (sets `RELAY_ENV=production`)
-- **Run web dev server**: `pnpm web:dev` (Vite; proxies `/api` to `127.0.0.1:7433`)
+- **Run CLI (local default)**: `pnpm relay` (starts/reuses the local background server, then the TUI; non-TUI
+  subcommands run from source without a bundle build — see `scripts/relay.ts`)
+- **Run CLI (cloud mode)**: `pnpm relay:cloud` (Turso + GitHub; same subcommands as `pnpm relay`)
+- **Open web client**: `pnpm relay web` / `pnpm relay:cloud web`
+- **Stop/status the background server**: `pnpm relay stop|status` / `pnpm relay:cloud stop|status` (mode-specific
+  state files)
+- **Manage workspaces**: `pnpm relay workspace add|list|remove [path]` or `pnpm relay:cloud workspace …`
+- **Install the shared terminal font**: `pnpm relay fonts install|status` or `pnpm relay:cloud fonts …`
+- **Run local server (foreground)**: `pnpm relay serve`
+- **Run cloud server (foreground)**: `pnpm relay:cloud serve`
+- **Run web dev server**: `pnpm web:dev` (Vite; proxies `/api` to the local server; set `RELAY_FLAVOR=cloud` to follow
+  the cloud server)
 - **Build web app**: `pnpm web:build` (Vite → `packages/web/dist`; serve with `RELAY_STATIC_DIR`)
 - **Build web app + CLI bundle**: `pnpm build`
 - **Build Linux x64 single executable**: `pnpm build:sea` (outputs `dist/relay`)
-- **Smoke-test the single executable**: `pnpm smoke:sea`
 
 ## Task Completion Checklist
 
@@ -118,7 +120,6 @@ worktrees.
 
 - **Build web app + CLI bundle**: `pnpm build`
 - **Build Linux x64 single executable**: `pnpm build:sea` (outputs `dist/relay`)
-- **Smoke-test the single executable**: `pnpm smoke:sea`
 - **Show version**: `pnpm run version`
 - **Bump version**: `pnpm run version:bump <patch|minor|major>`
 

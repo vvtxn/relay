@@ -18,6 +18,8 @@ import type { Usage } from "@vvtxn/relay/api/types.ts";
 export interface HealthResponse {
 	status: "ok";
 	version: string;
+	/** Product mode the server is running in. */
+	flavor: "local" | "cloud";
 }
 
 export interface MeResponse {

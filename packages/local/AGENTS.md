@@ -29,11 +29,10 @@ local/
 - Never statically import `@libsql/client` here; it has a native addon and is loaded from the extracted runtime.
 - Keep new runtime dependencies in the asset tree (the build script copies the dependency closure).
 - The target is Linux x64 only for now. macOS/Windows would need their own native platform package and SEA job.
-- Run `pnpm build:sea` and `pnpm smoke:sea` after changes.
+- Run `pnpm build:sea` after changes.
 
 ## Commands
 
 ```bash
 pnpm build:sea
-pnpm smoke:sea
 ```

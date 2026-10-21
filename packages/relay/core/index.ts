@@ -80,6 +80,7 @@ export type { AuthenticatedUser, AuthIdentity, AuthProvider, UserDirectory, User
 export { scrubbedAgentEnv } from "./env.ts";
 
 export { homeDir, relayDir } from "./paths.ts";
+export { serverLogPath, serverStatePath } from "./server-state.ts";
 
 export { buildSystemPrompt, SYSTEM_PROMPT } from "./system-prompt.ts";
 export type { BuildSystemPromptOptions, SystemPromptMode } from "./system-prompt.ts";

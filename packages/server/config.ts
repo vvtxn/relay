@@ -131,6 +131,16 @@ export function isLoopbackHost(host: string): boolean {
 	return host === "localhost" || host === "::1" || host === "[::1]" || host.startsWith("127.");
 }
 
+/**
+ * Effective product mode for health checks and client attachment. An explicit
+ * flavor wins; otherwise local SQLite + local auth means local, everything else
+ * is a shared/cloud deployment.
+ */
+export function effectiveFlavor(config: ServerConfig): RelayFlavor {
+	if (config.flavor) return config.flavor;
+	return config.database.kind === "local" && config.authMode === "local" ? "local" : "cloud";
+}
+
 function parseFlavor(env: Record<string, string | undefined>): RelayFlavor | null {
 	const value = envValue(env, "RELAY_FLAVOR");
 	if (!value) return null;

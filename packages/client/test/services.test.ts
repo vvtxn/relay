@@ -12,14 +12,14 @@ function fakeClient(methods: Record<string, unknown>): RelayClient {
 
 describe("client service layer", () => {
 	it("passes successful REST results through", async () => {
-		const client = fakeClient({ health: async () => ({ status: "ok", version: "9.9.9" }) });
+		const client = fakeClient({ health: async () => ({ status: "ok", version: "9.9.9", flavor: "local" }) });
 		const health = await Effect.runPromise(
 			Effect.gen(function* () {
 				const api = yield* Api;
 				return yield* api.health();
 			}).pipe(Effect.provide(ApiLive(client))),
 		);
-		expect(health).toEqual({ status: "ok", version: "9.9.9" });
+		expect(health).toEqual({ status: "ok", version: "9.9.9", flavor: "local" });
 	});
 
 	it("maps RelayApiError to a tagged RelayError with status", async () => {

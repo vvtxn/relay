@@ -11,6 +11,10 @@ import { fileURLToPath } from "node:url";
  * `vp pack`: its JSX cannot be type-stripped. Env merging and spawning live in
  * `run-env.ts`; this script only picks the entrypoint.
  *
+ * Product mode is selected by the package script (`pnpm relay` sets
+ * RELAY_FLAVOR=local, `pnpm relay:cloud` sets cloud). Arguments are forwarded
+ * unchanged, so every subcommand works in both modes.
+ *
  * Keep `SOURCE_COMMANDS` in sync with the command switch in
  * `packages/cli/agent/index.ts`.
  */

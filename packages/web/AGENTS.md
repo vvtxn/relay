@@ -191,9 +191,10 @@ until it is re-added or a new session is created in it, while its threads stay r
 ## Building & Running
 
 ```bash
-pnpm web:dev        # Vite dev server (proxies /api to 127.0.0.1:7433)
+pnpm web:dev        # Vite dev server (proxies /api to the local server, 127.0.0.1:7433 fallback)
+RELAY_FLAVOR=cloud pnpm web:dev  # follow the cloud server instead
 pnpm web:build      # vite build → packages/web/dist
-pnpm serve:prod     # serve the built SPA (production env; RELAY_STATIC_DIR set)
+RELAY_ENV=production pnpm relay:cloud serve  # serve the built SPA (RELAY_STATIC_DIR set)
 ```
 
 Server URL defaults to same-origin (`""`), so dev requests go through the Vite `/api` proxy and production requests hit

@@ -153,6 +153,7 @@ export type { DatabaseClient, DatabaseCredentials } from "./core/database.ts";
 
 // Paths
 export { homeDir, relayDir } from "./core/paths.ts";
+export { serverLogPath, serverStatePath } from "./core/server-state.ts";
 
 // System prompt (shared default + registry-aware builder)
 export { buildSystemPrompt, SYSTEM_PROMPT } from "./core/system-prompt.ts";
