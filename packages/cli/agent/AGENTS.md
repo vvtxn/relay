@@ -174,15 +174,15 @@ the same typeface.
 ## Running
 
 ```bash
-pnpm relay           # local mode: start/reuse the server + TUI
-pnpm relay:cloud     # cloud mode: Turso + GitHub
+pnpm relay           # cloud mode (primary): Turso + GitHub
+pnpm relay:local     # local self-host: SQLite + local auth
 pnpm relay -c        # ...resuming the most recent thread for the directory
 pnpm relay --workspace ~/Code/foo  # ...scoped to another registered directory
-pnpm relay web       # open the local browser client at the current workspace
-pnpm relay:cloud web # open the cloud browser client
-pnpm relay stop      # stop the local background server
-pnpm relay:cloud stop # stop the cloud background server
-pnpm relay status    # show the local background server
+pnpm relay web       # open the cloud browser client at the current workspace
+pnpm relay:local web # open the local browser client
+pnpm relay stop      # stop the cloud background server
+pnpm relay:local stop # stop the local background server
+pnpm relay status    # show the cloud background server
 pnpm relay workspace add ~/Code/foo  # register a workspace (no TUI)
 pnpm relay workspace list            # list registered workspaces
 pnpm relay fonts status  # check whether the shared font is installed

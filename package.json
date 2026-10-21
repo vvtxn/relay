@@ -3,9 +3,8 @@
 	"private": true,
 	"type": "module",
 	"scripts": {
-		"relay": "RELAY_FLAVOR=local node scripts/relay.ts",
-		"relay:cloud": "RELAY_ENV=production RELAY_FLAVOR=cloud node scripts/relay.ts",
-		"web:dev": "vp -C packages/web dev",
+		"relay": "RELAY_FLAVOR=cloud node scripts/relay.ts",
+		"relay:local": "RELAY_FLAVOR=local node scripts/relay.ts",
 		"web:build": "vp -C packages/web build",
 		"build": "vp -C packages/web build && vp -C packages/cli pack",
 		"build:sea": "node scripts/build-sea.ts",

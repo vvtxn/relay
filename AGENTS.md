@@ -66,18 +66,17 @@ modules stay Effect-free on purpose.
 - **Check formatting**: `pnpm fmt:check`
 - **Lint**: `pnpm lint`
 - **Type-check**: `pnpm check` (strict; checks every entrypoint)
-- **Run CLI (local default)**: `pnpm relay` (starts/reuses the local background server, then the TUI; non-TUI
-  subcommands run from source without a bundle build — see `scripts/relay.ts`)
-- **Run CLI (cloud mode)**: `pnpm relay:cloud` (Turso + GitHub; same subcommands as `pnpm relay`)
-- **Open web client**: `pnpm relay web` / `pnpm relay:cloud web`
-- **Stop/status the background server**: `pnpm relay stop|status` / `pnpm relay:cloud stop|status` (mode-specific
+- **Run CLI (cloud, primary)**: `pnpm relay` (builds the bundled web app + CLI, starts/reuses the cloud server, then
+  the TUI; non-TUI subcommands skip builds — see `scripts/relay.ts`)
+- **Run CLI (local self-host)**: `pnpm relay:local` (SQLite + local auth; same subcommands)
+- **Open web client**: `pnpm relay web` / `pnpm relay:local web`
+- **Stop/status the background server**: `pnpm relay stop|status` / `pnpm relay:local stop|status` (mode-specific
   state files)
-- **Manage workspaces**: `pnpm relay workspace add|list|remove [path]` or `pnpm relay:cloud workspace …`
-- **Install the shared terminal font**: `pnpm relay fonts install|status` or `pnpm relay:cloud fonts …`
-- **Run local server (foreground)**: `pnpm relay serve`
-- **Run cloud server (foreground)**: `pnpm relay:cloud serve`
-- **Run web dev server**: `pnpm web:dev` (Vite; proxies `/api` to the local server; cloud mode serves its own SPA)
-- **Build web app**: `pnpm web:build` (Vite → `packages/web/dist`; serve with `RELAY_STATIC_DIR`)
+- **Manage workspaces**: `pnpm relay workspace add|list|remove [path]` or `pnpm relay:local workspace …`
+- **Install the shared terminal font**: `pnpm relay fonts install|status` or `pnpm relay:local fonts …`
+- **Run cloud server (foreground)**: `pnpm relay serve`
+- **Run local server (foreground)**: `pnpm relay:local serve`
+- **Build web app**: `pnpm web:build` (Vite → `packages/web/dist`; served by the relay commands)
 - **Build web app + CLI bundle**: `pnpm build`
 - **Build Linux x64 single executable**: `pnpm build:sea` (outputs `dist/relay`)
 
@@ -101,19 +100,18 @@ TypeScript's defaults: `noUncheckedIndexedAccess`, `exactOptionalPropertyTypes`,
 Prefer real guards over `!`; use `!` only where an invariant is already guaranteed.
 
 Code must also run under Node's native TypeScript type stripping: no enums, namespaces, parameter properties, or other
-syntax that requires transformation. Only `packages/cli` is bundled (for JSX).
+syntax that requires transformation. The CLI and the single-executable entry are bundled (for JSX).
 
-### Environment & Modes
+### Environment
 
-`RELAY_ENV` selects `development` (default) or `production`. Tasks run through `scripts/run-env.ts`, which merges env
-files with explicit precedence — **process env > `.env.<mode>.local` > `.env.<mode>` > `.env.local` > `.env`** (Node has
-no multi-file "if exists" env loading, so the merge is explicit). Files resolve relative to the working directory,
-falling back to the current worktree root and then the main worktree root, so gitignored secrets also load in linked
-worktrees.
+Relay has one gitignored `.env`; process env wins. `scripts/run-env.ts` reads `.env` from the working directory, the
+current worktree root, then the main worktree root, so linked worktrees pick up the main checkout's secrets.
 
-- `.env.development` / `.env.production` — committed non-secret mode defaults.
-- `.env.local`, `.env.<mode>.local` — gitignored secrets (`TURSO_*`, `GITHUB_APP_*`).
+- `pnpm relay` — cloud (Turso + GitHub); requires those keys in `.env`.
+- `pnpm relay:local` — local (SQLite + local auth); ignores Turso/GitHub.
 - `.env.example` — template for every key.
+
+There are no development/production env files and no `RELAY_ENV` mode.
 
 ### Build & Version
 

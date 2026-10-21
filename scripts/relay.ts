@@ -1,5 +1,4 @@
 import { spawnSync } from "node:child_process";
-import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -13,9 +12,9 @@ import { fileURLToPath } from "node:url";
  * Env merging and spawning live in `run-env.ts`; this script only picks the
  * entrypoint and fills missing build artifacts.
  *
- * Product mode is selected by the package script (`pnpm relay` sets
- * RELAY_FLAVOR=local, `pnpm relay:cloud` sets cloud). Arguments are forwarded
- * unchanged, so every subcommand works in both modes.
+ * Product mode is selected by the package script (`pnpm relay` sets cloud,
+ * `pnpm relay:local` sets local). Arguments are forwarded unchanged, so every
+ * subcommand works in both modes.
  *
  * Keep `SOURCE_COMMANDS` in sync with the command switch in
  * `packages/cli/agent/index.ts`.
@@ -40,14 +39,13 @@ function runVp(packArgs: string[], label: string): void {
 	if (result.status !== 0) process.exit(result.status ?? 1);
 }
 
-// Production cloud mode serves the SPA itself; build it on first use if needed.
-const needsWeb =
-	process.env.RELAY_ENV === "production" && (command === undefined || command === "web" || command === "serve");
-if (needsWeb && !existsSync(join(root, "packages", "web", "dist", "index.html"))) {
+// The normal app path always runs the bundled SPA. Build both artifacts for
+// the commands that serve it, and skip builds for lifecycle-only commands.
+const needsBundles = command === undefined || command.startsWith("-") || command === "web" || command === "serve";
+if (needsBundles) {
 	runVp(["-C", join(root, "packages", "web"), "build"], "web build");
-}
-
-if (!fromSource) {
+	runVp(["-C", join(root, "packages", "cli"), "pack"], "CLI bundle");
+} else if (!fromSource) {
 	runVp(["-C", join(root, "packages", "cli"), "pack"], "CLI bundle");
 }
 

@@ -171,26 +171,25 @@ Payload types live in `@vvtxn/client/protocol.ts` — never redeclare them here.
 ## Environment
 
 - `LLM_BASE_URL`, `LLM_MODEL`, `LLM_TEMPERATURE`, `LLM_MAX_TOKENS`, `LLM_MAX_COMPLETION_TOKENS`
-- Mode: `RELAY_FLAVOR` (`local`/`cloud`, unset auto), `RELAY_DB` (`auto`/`local`/`turso`), `RELAY_DB_PATH`
-  (default `~/.relay/relay.db`), `RELAY_AUTH` (`auto`/`local`/`github`)
-- Shared mode: `TURSO_DB_URL`, `TURSO_DB_TOKEN`, `GITHUB_APP_CLIENT_ID`, `GITHUB_APP_CLIENT_SECRET`
-  (`GITHUB_CLIENT_ID`/`GITHUB_CLIENT_SECRET` still accepted); GitHub credentials are required only when GitHub auth is
-  enabled
-- `RELAY_PUBLIC_URL` (OAuth redirect base), `AUTH_SESSION_TTL_DAYS` (default 30)
-- Hardening: `AUTH_ALLOWED_GITHUB` (logins/ids allowed to sign in) and `RELAY_WORKSPACE_ROOTS` (allowed session cwd
-  roots; local mode allows any directory, GitHub mode defaults to the server user's home, `*` allows any directory);
-  both required when binding a non-loopback `RELAY_HOST` with GitHub auth, and `*` is rejected there
+- Flavor: `RELAY_FLAVOR=cloud|local` (default cloud; set by the package scripts). Cloud implies Turso + GitHub;
+  local implies SQLite + local auth.
+- Cloud required: `TURSO_DB_URL`, `TURSO_DB_TOKEN`, `GITHUB_APP_CLIENT_ID`, `GITHUB_APP_CLIENT_SECRET`
+  (`GITHUB_CLIENT_ID`/`GITHUB_CLIENT_SECRET` still accepted). Local mode ignores them.
+- Local: `RELAY_DB_PATH` (default `RELAY_DATA_DIR/relay.db`).
+- `RELAY_PUBLIC_URL` (OAuth callback base), `AUTH_SESSION_TTL_DAYS` (default 30)
+- Hardening: `AUTH_ALLOWED_GITHUB` and `RELAY_WORKSPACE_ROOTS`; local allows any directory, cloud defaults to the
+  server user's home, `*` allows any directory. Both are required for a non-loopback cloud host, and `*` is rejected.
 - `RELAY_PORT` (default 7433), `RELAY_HOST` (default 127.0.0.1), `RELAY_WORKSPACE`, `RELAY_STATIC_DIR`
 - `RELAY_MAX_SESSIONS_PER_WORKSPACE`: persisted sessions kept per owner/workspace; `0` = unlimited (local default),
-  Turso default is 10
+  cloud default is 10
 - Settings storage: `RELAY_SETTINGS_STORE` (`file` default, or `database`), `RELAY_DATA_DIR` (default `~/.relay`),
   `RELAY_SECRET_KEY` / `RELAY_SECRET_KEY_FILE` (master key; required with the database backend)
 
 ## Running
 
 ```bash
-pnpm relay serve        # foreground local server
-pnpm relay:cloud serve  # foreground cloud server
+pnpm relay serve        # foreground cloud server
+pnpm relay:local serve  # foreground local server
 ```
 
 ## Testing

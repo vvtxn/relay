@@ -4,56 +4,14 @@ import { join } from "node:path";
 import { parseEnv } from "node:util";
 
 /**
- * Mode-aware environment loader.
+ * Environment loader for source commands.
  *
- * The task runner has no reliable "load these env files if they exist" story
- * with explicit precedence, so this wrapper merges the env files itself and
- * then spawns the entrypoint with the merged environment.
+ * Relay uses one `.env` (gitignored) plus `.env.example`. Files are resolved
+ * from the main worktree, the current worktree root, and the working directory;
+ * the process environment always wins. Usage:
  *
- * Usage: `node scripts/run-env.ts <entrypoint> [args...]`
- * Mode:  `RELAY_ENV=development|production` (default: `development`)
+ *   node scripts/run-env.ts <entrypoint> [args...]
  */
-
-export const MODES = ["development", "production"] as const;
-export type Mode = (typeof MODES)[number];
-
-export function resolveMode(value: string | undefined): Mode {
-	return value === "production" ? "production" : "development";
-}
-
-/** Env files from most specific to least specific. */
-export function envFileCandidates(mode: Mode): string[] {
-	return [`.env.${mode}.local`, `.env.${mode}`, ".env.local", ".env"];
-}
-
-/**
- * Merge env files into one record with explicit precedence:
- * process env > `.env.<mode>.local` > `.env.<mode>` > `.env.local` > `.env`.
- *
- * `read` returns a file's parsed values, or `null` when it does not exist. It
- * may consult several directories (see {@link envRoots}); the most specific
- * location available for a given file wins.
- */
-export function resolveEnv(
-	mode: Mode,
-	read: (path: string) => Record<string, string | undefined> | null,
-	processEnv: Record<string, string | undefined>,
-): Record<string, string> {
-	const merged: Record<string, string> = {};
-	// Least specific first so later (more specific) files overwrite.
-	for (const path of envFileCandidates(mode).reverse()) {
-		const values = read(path);
-		if (!values) continue;
-		for (const [key, value] of Object.entries(values)) {
-			if (value !== undefined) merged[key] = value;
-		}
-	}
-	// The real process environment always wins.
-	for (const [key, value] of Object.entries(processEnv)) {
-		if (value !== undefined) merged[key] = value;
-	}
-	return merged;
-}
 
 function readEnvFile(path: string): Record<string, string | undefined> | null {
 	try {
@@ -76,12 +34,12 @@ function gitOutput(cwd: string, args: string[]): string | null {
 }
 
 /**
- * Directories to read env files from, least to most specific: the main
- * worktree, the current worktree root, then the working directory. Gitignored
- * env files are not copied into linked worktrees, so falling back to the main
- * checkout keeps tasks like `pnpm relay` working there.
+ * Directories to read `.env` from, least to most specific: the main worktree,
+ * the current worktree root, then the working directory. Gitignored env files
+ * are not copied into linked worktrees, so falling back to the main checkout
+ * keeps `pnpm relay` working there.
  */
-export function envRoots(cwd: string): string[] {
+function envRoots(cwd: string): string[] {
 	const current = gitOutput(cwd, ["rev-parse", "--show-toplevel"])?.trim();
 	const mainLine = gitOutput(cwd, ["worktree", "list", "--porcelain"])
 		?.split("\n")
@@ -91,38 +49,29 @@ export function envRoots(cwd: string): string[] {
 	return [...new Set(roots)];
 }
 
-/** Read a relative env file from the most specific root that has it. */
-function readEnvFromRoots(roots: string[], relative: string): Record<string, string | undefined> | null {
-	let found: Record<string, string | undefined> | null = null;
-	for (const root of roots) {
-		const values = readEnvFile(join(root, relative));
-		if (values) found = values;
+function loadEnv(processEnv: Record<string, string | undefined>): Record<string, string> {
+	const merged: Record<string, string> = {};
+	for (const root of envRoots(process.cwd())) {
+		const values = readEnvFile(join(root, ".env"));
+		if (!values) continue;
+		for (const [key, value] of Object.entries(values)) {
+			if (value !== undefined) merged[key] = value;
+		}
 	}
-	return found;
-}
-
-/** Merge only the env files for a mode (no process environment). */
-export function loadEnvFiles(mode: Mode): Record<string, string> {
-	const roots = envRoots(process.cwd());
-	return resolveEnv(mode, (path) => readEnvFromRoots(roots, path), {});
+	for (const [key, value] of Object.entries(processEnv)) {
+		if (value !== undefined) merged[key] = value;
+	}
+	return merged;
 }
 
 function main(): void {
-	const mode = resolveMode(process.env.RELAY_ENV);
-	const roots = envRoots(process.cwd());
-	const merged = resolveEnv(mode, (path) => readEnvFromRoots(roots, path), process.env);
-
-	const env: Record<string, string> = {};
-	for (const [key, value] of Object.entries(merged)) env[key] = value;
-	env.RELAY_ENV = mode;
-
 	const args = process.argv.slice(2);
 	if (args.length === 0) {
 		console.error("Usage: node scripts/run-env.ts <entrypoint> [args...]");
 		process.exit(2);
 	}
 
-	const result = spawnSync(process.execPath, args, { env, stdio: "inherit" });
+	const result = spawnSync(process.execPath, args, { env: loadEnv(process.env), stdio: "inherit" });
 	process.exit(result.status ?? 1);
 }
 

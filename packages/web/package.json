@@ -7,9 +7,7 @@
 		"#/*": "./src/*"
 	},
 	"scripts": {
-		"dev": "vp dev",
-		"build": "vp build",
-		"preview": "vp preview"
+		"build": "vp build"
 	},
 	"dependencies": {
 		"@pierre/diffs": "^1.5.2",

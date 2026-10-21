@@ -24,8 +24,7 @@ import type { ServerConfig } from "../config.ts";
 
 export function makeConfig(defaultCwd: string, overrides: Partial<ServerConfig> = {}): ServerConfig {
 	return {
-		relayEnv: "development",
-		flavor: null,
+		flavor: "cloud",
 		port: 0,
 		hostname: "127.0.0.1",
 		baseURL: "http://127.0.0.1:9",

@@ -5,10 +5,7 @@ import { pathToFileURL } from "node:url";
 import { homeDir, relayDir } from "@vvtxn/relay/core/paths.ts";
 import { validateWorkspacePathSync } from "@vvtxn/relay/core/workspace.ts";
 
-/** Deployment mode selected by `RELAY_ENV`. */
-export type RelayEnv = "development" | "production";
-
-/** Product defaults. `local` is the single-user desktop mode. */
+/** Product mode. Cloud is the primary deployment; local is the self-hosted desktop mode. */
 export type RelayFlavor = "local" | "cloud";
 
 /** Authentication transport. Local mode is loopback-only. */
@@ -23,13 +20,11 @@ export type DatabaseBackend =
 	| { kind: "turso"; url: string; authToken: string };
 
 export interface ServerConfig {
-	/** Deployment mode (informational; `development` by default). */
-	relayEnv: RelayEnv;
-	/** Product flavor. Unset means infer from the environment. */
-	flavor: RelayFlavor | null;
+	/** Product mode. */
+	flavor: RelayFlavor;
 	/** Port to listen on. */
 	port: number;
-	/** Hostname to bind. Localhost-only by default (single-user local server). */
+	/** Hostname to bind. Localhost-only by default. */
 	hostname: string;
 	/** Base URL for the LLM provider. */
 	baseURL: string;
@@ -47,9 +42,9 @@ export interface ServerConfig {
 	database: DatabaseBackend;
 	/** Authentication transport. */
 	authMode: AuthMode;
-	/** GitHub App client id (empty in local auth mode). */
+	/** GitHub App client id (empty in local mode). */
 	githubClientId: string;
-	/** GitHub App client secret (empty in local auth mode). */
+	/** GitHub App client secret (empty in local mode). */
 	githubClientSecret: string;
 	/** Public base URL of this server, used to build the OAuth redirect URI. */
 	publicUrl: string;
@@ -80,7 +75,7 @@ const DEFAULT_HOSTNAME = "127.0.0.1";
 const DEFAULT_BASE_URL = "https://openrouter.ai/api/v1";
 const DEFAULT_MODEL = "deepseek/deepseek-v4.1-flash";
 const DEFAULT_SESSION_TTL_DAYS = 30;
-const DEFAULT_MAX_SESSIONS_PER_WORKSPACE = 10;
+const DEFAULT_CLOUD_SESSION_LIMIT = 10;
 
 /** Trimmed, non-empty env value. Empty values count as unset. */
 function envValue(env: Record<string, string | undefined>, key: string): string | undefined {
@@ -131,87 +126,35 @@ export function isLoopbackHost(host: string): boolean {
 	return host === "localhost" || host === "::1" || host === "[::1]" || host.startsWith("127.");
 }
 
-/**
- * Effective product mode for health checks and client attachment. An explicit
- * flavor wins; otherwise local SQLite + local auth means local, everything else
- * is a shared/cloud deployment.
- */
-export function effectiveFlavor(config: ServerConfig): RelayFlavor {
-	if (config.flavor) return config.flavor;
-	return config.database.kind === "local" && config.authMode === "local" ? "local" : "cloud";
-}
-
-function parseFlavor(env: Record<string, string | undefined>): RelayFlavor | null {
+function parseFlavor(env: Record<string, string | undefined>): RelayFlavor {
 	const value = envValue(env, "RELAY_FLAVOR");
-	if (!value) return null;
+	if (!value) return "cloud";
 	if (value !== "local" && value !== "cloud") {
 		throw new Error(`RELAY_FLAVOR must be "local" or "cloud" (got "${value}")`);
 	}
 	return value;
 }
 
-/**
- * Resolve the database backend. Local mode writes a SQLite file; cloud mode
- * talks to Turso. `auto` keeps existing deployments working: a configured
- * Turso URL selects remote, otherwise the local file is used.
- */
-function parseDatabaseBackend(
+function resolveDatabase(
+	flavor: RelayFlavor,
 	env: Record<string, string | undefined>,
-	flavor: RelayFlavor | null,
 	dataDir: string,
 ): DatabaseBackend {
-	const configured = envValue(env, "RELAY_DB") ?? "auto";
-	if (configured !== "auto" && configured !== "local" && configured !== "turso") {
-		throw new Error(`RELAY_DB must be "auto", "local", or "turso" (got "${configured}")`);
+	if (flavor === "local") {
+		const rawPath = envValue(env, "RELAY_DB_PATH") ?? join(dataDir, "relay.db");
+		const path = rawPath === ":memory:" ? rawPath : expandHomePath(rawPath);
+		return {
+			kind: "local",
+			path,
+			url: path === ":memory:" ? "file::memory:" : pathToFileURL(path).href,
+		};
 	}
 
-	const tursoUrl = envValue(env, "TURSO_DB_URL");
-	const tursoToken = envValue(env, "TURSO_DB_TOKEN");
-	const useTurso =
-		configured === "turso" ||
-		(configured === "auto" && (flavor === "cloud" || (flavor !== "local" && tursoUrl !== undefined)));
-
-	if (useTurso) {
-		if (!tursoUrl) throw new Error("TURSO_DB_URL is required when using the Turso database");
-		if (!tursoToken) throw new Error("TURSO_DB_TOKEN is required when using the Turso database");
-		return { kind: "turso", url: tursoUrl, authToken: tursoToken };
-	}
-
-	const rawPath = envValue(env, "RELAY_DB_PATH") ?? join(dataDir, "relay.db");
-	const path = rawPath === ":memory:" ? rawPath : expandHomePath(rawPath);
-	return {
-		kind: "local",
-		path,
-		url: path === ":memory:" ? "file::memory:" : pathToFileURL(path).href,
-	};
-}
-
-/**
- * Resolve the auth transport. Local auth is loopback-only; any non-loopback
- * bind must use GitHub (or an explicit future token mode).
- */
-function parseAuthMode(
-	env: Record<string, string | undefined>,
-	flavor: RelayFlavor | null,
-	hasGithubCredentials: boolean,
-	hostname: string,
-): AuthMode {
-	const configured = envValue(env, "RELAY_AUTH") ?? "auto";
-	if (configured !== "auto" && configured !== "local" && configured !== "github") {
-		throw new Error(`RELAY_AUTH must be "auto", "local", or "github" (got "${configured}")`);
-	}
-
-	const useGithub =
-		configured === "github" ||
-		(configured === "auto" && (flavor === "cloud" || (flavor !== "local" && hasGithubCredentials)));
-	if (useGithub) return "github";
-
-	if (!isLoopbackHost(hostname)) {
-		throw new Error(
-			"Local auth is loopback-only. Bind RELAY_HOST=127.0.0.1 or configure GitHub auth with RELAY_AUTH=github",
-		);
-	}
-	return "local";
+	const url = envValue(env, "TURSO_DB_URL");
+	const authToken = envValue(env, "TURSO_DB_TOKEN");
+	if (!url) throw new Error("TURSO_DB_URL is required in cloud mode");
+	if (!authToken) throw new Error("TURSO_DB_TOKEN is required in cloud mode");
+	return { kind: "turso", url, authToken };
 }
 
 export function serverConfigFromEnv(env: Record<string, string | undefined> = { ...process.env }): ServerConfig {
@@ -220,33 +163,35 @@ export function serverConfigFromEnv(env: Record<string, string | undefined> = { 
 	const flavor = parseFlavor(env);
 
 	const dataDir = expandHomePath(env.RELAY_DATA_DIR ?? relayDir());
-	const database = parseDatabaseBackend(env, flavor, dataDir);
+	const database = resolveDatabase(flavor, env, dataDir);
 
-	// GitHub App credentials. `GITHUB_CLIENT_ID`/`GITHUB_CLIENT_SECRET` are
-	// accepted as fallbacks for setups configured before the App switch.
+	// GitHub App credentials are required in cloud mode. Local mode ignores
+	// them even if they happen to be present in the same `.env`.
 	const githubClientId = env.GITHUB_APP_CLIENT_ID ?? env.GITHUB_CLIENT_ID ?? "";
 	const githubClientSecret = env.GITHUB_APP_CLIENT_SECRET ?? env.GITHUB_CLIENT_SECRET ?? "";
 	const hasGithubCredentials = githubClientId !== "" && githubClientSecret !== "";
+	if (flavor === "cloud" && !hasGithubCredentials) {
+		throw new Error("GITHUB_APP_CLIENT_ID and GITHUB_APP_CLIENT_SECRET are required in cloud mode");
+	}
 
-	const authMode = parseAuthMode(env, flavor, hasGithubCredentials, hostname);
-	if (authMode === "github" && !hasGithubCredentials) {
-		throw new Error("GITHUB_APP_CLIENT_ID and GITHUB_APP_CLIENT_SECRET are required when GitHub auth is enabled");
+	const authMode: AuthMode = flavor === "cloud" ? "github" : "local";
+	if (authMode === "local" && !isLoopbackHost(hostname)) {
+		throw new Error(
+			"Local auth is loopback-only. Bind RELAY_HOST=127.0.0.1 or use RELAY_FLAVOR=cloud with GitHub auth",
+		);
 	}
 
 	const rawRoots = parseList(env.RELAY_WORKSPACE_ROOTS);
-	// A workspace must sit within one of these canonical roots. `*` allows any
-	// directory (empty list). Local mode allows any directory by default: the
-	// agent runs as the user on their own machine, and the workspace is a scope
-	// rather than a security boundary. GitHub/shared mode defaults to the
-	// server user's home so a remote server cannot browse arbitrary paths.
-	const defaultRoots = authMode === "local" ? [] : homeRoots();
+	// Local mode allows any directory by default: the agent runs as the user on
+	// their own machine. Cloud mode defaults to the server user's home so a
+	// remote deployment cannot browse arbitrary paths without an explicit root.
+	const defaultRoots = flavor === "local" ? [] : homeRoots();
 	const workspaceRoots = rawRoots.includes("*")
 		? []
 		: (rawRoots.length > 0 ? rawRoots : defaultRoots).map((root) => resolve(root));
 	const allowedGithub = parseList(env.AUTH_ALLOWED_GITHUB).map((entry) => entry.toLowerCase());
 
-	// Exposing the server beyond loopback with GitHub auth requires explicit
-	// allowlists, so an unrestricted agent can never be reachable by accident.
+	// Exposing a cloud server beyond loopback requires explicit allowlists.
 	if (authMode === "github" && !isLoopbackHost(hostname)) {
 		if (allowedGithub.length === 0) {
 			throw new Error("AUTH_ALLOWED_GITHUB is required when binding a non-loopback host");
@@ -284,10 +229,7 @@ export function serverConfigFromEnv(env: Record<string, string | undefined> = { 
 		);
 	}
 
-	const defaultSessionLimit = database.kind === "local" ? 0 : DEFAULT_MAX_SESSIONS_PER_WORKSPACE;
-
 	return {
-		relayEnv: env.RELAY_ENV === "production" ? "production" : "development",
 		flavor,
 		port,
 		hostname,
@@ -307,7 +249,7 @@ export function serverConfigFromEnv(env: Record<string, string | undefined> = { 
 		workspaceRoots,
 		maxSessionsPerWorkspace: nonNegativeInt(
 			env.RELAY_MAX_SESSIONS_PER_WORKSPACE,
-			defaultSessionLimit,
+			flavor === "local" ? 0 : DEFAULT_CLOUD_SESSION_LIMIT,
 			"RELAY_MAX_SESSIONS_PER_WORKSPACE",
 			10_000,
 		),

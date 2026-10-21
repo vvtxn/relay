@@ -9,10 +9,9 @@ over the same wire protocol. Tooling (format, lint, type-check, builds) runs thr
 
 > **Note — Project Transition**
 >
-> Relay is evolving from a local, terminal-only coding agent into a more advanced agent designed to run on both the
-> terminal and the web, sharing the same sessions between clients. Conversations persist in a local SQLite database by
-> default, keyed by a stable owner ID and workspace, so a session started in one client can be continued in the other.
-> A shared Turso database can be configured for multi-user deployments.
+> Relay is a cloud-first, terminal-and-web coding agent. The primary deployment uses Turso for shared sessions and
+> GitHub for identity, with the bundled web app served on port 7433. A local self-hosted mode (SQLite + local auth) is
+> available for running the same runtime on your own machine.
 >
 > **No new release will be published for this work yet.** The latest GitHub Release (`v0.8.0`) predates all web
 > extension related changes and still reflects the old local-only agent with filesystem session storage. Run the current
@@ -30,7 +29,7 @@ over the same wire protocol. Tooling (format, lint, type-check, builds) runs thr
 - **Streaming agent loop** — Async generator that yields events for real-time UI updates as the LLM thinks and uses
   tools
 - **Built-in tools** — Bash, file read/write/edit, and grep for filesystem interaction
-- **Local-first session storage** — Conversations persist in SQLite by default; Turso is available for shared history
+- **Shared cloud sessions** — Conversations persist in Turso behind GitHub auth; local self-hosting uses SQLite
 - **Tool approval** — Side-effecting tools wait for an allow/deny decision
 - **Inline diffs** — File write and edit operations display colored unified diffs with line numbers
 - **Markdown rendering** — Inline markdown display in the terminal
@@ -38,9 +37,25 @@ over the same wire protocol. Tooling (format, lint, type-check, builds) runs thr
 
 ## Install
 
-### Single executable (Linux x64)
+### From source (cloud, primary)
 
-The local build packages the server, TUI, web app, fonts, and libSQL runtime into one executable:
+Clone the repository, install dependencies, configure the single `.env`, and run the cloud build:
+
+```bash
+git clone https://github.com/vvtxn/relay.git
+cd relay
+pnpm install
+cp .env.example .env
+# fill in TURSO_DB_URL / TURSO_DB_TOKEN / GITHUB_APP_*
+pnpm relay
+```
+
+`pnpm relay` builds the bundled web app and CLI, starts the server on `127.0.0.1:7433`, and serves the SPA itself.
+Cloud mode requires Turso and a GitHub App.
+
+### Single executable (local, secondary)
+
+The self-hosted build packages the server, TUI, web app, fonts, and libSQL runtime into one executable:
 
 ```bash
 pnpm install
@@ -50,22 +65,6 @@ pnpm build:sea
 
 The executable needs no Node.js installation. It extracts its web/font/libSQL assets to `~/.relay/runtime/<version>` on
 first launch. Tagged releases attach `relay` and `relay.sha256`.
-
-### From source
-
-Clone the repository, install dependencies, and run it with Node.js (see [Development](#development) for the full task
-list):
-
-```bash
-git clone https://github.com/vvtxn/relay.git
-cd relay
-pnpm install
-pnpm relay
-```
-
-Local mode needs no GitHub App or database setup. The server creates `~/.relay/relay.db`, uses a local identity, and
-stores each user's LLM API key encrypted at rest in local files; users paste theirs in the web app's Settings page.
-Set `TURSO_DB_URL`/`TURSO_DB_TOKEN` and GitHub credentials when you want a shared, multi-user deployment.
 
 Server settings (`serverUrl` for the terminal client) are configured in `~/.relay/config.json`.
 
@@ -83,77 +82,65 @@ git clone https://github.com/vvtxn/relay.git
 cd relay
 ```
 
-Environment is layered and mode-based (`RELAY_ENV=development|production`). Committed non-secret defaults live in
-`.env.development` / `.env.production`; put secrets in the gitignored `.env.development.local` / `.env.production.local`
-(see `.env.example`). Precedence: process env > `.env.<mode>.local` > `.env.<mode>` > `.env.local` > `.env`. Files
-resolve from the working directory, falling back to the current and then the main git worktree root, so linked worktrees
-load the main checkout's gitignored files.
+Relay uses one gitignored `.env`; `.env.example` documents every key. Process environment values win, and linked
+worktrees fall back to the main checkout's `.env`. There are no development/production env files.
 
-A local run needs no `.env` at all. To use a shared Turso database and GitHub auth instead, copy the template and fill in
-the cloud credentials:
+Cloud mode needs the Turso and GitHub credentials in `.env`:
 
 ```bash
-cp .env.example .env.development.local
-# fill in TURSO_DB_URL / TURSO_DB_TOKEN / GITHUB_APP_* for shared mode
+cp .env.example .env
+# fill in TURSO_DB_URL / TURSO_DB_TOKEN / GITHUB_APP_*
 ```
+
+Local mode needs no cloud credentials.
 
 ### Run
 
-The CLI is the entry point: it starts (or reuses) a background server, then runs the TUI. The server keeps running after
-the CLI exits, so you can hop into the browser anytime.
+The CLI is the entry point: it builds the bundled web app and CLI, starts (or reuses) a background server, then runs
+the TUI. The server keeps running after the CLI exits, so you can hop into the browser anytime.
 
 ```bash
-pnpm relay          # local mode: start/reuse the server + terminal UI
-pnpm relay:cloud    # cloud mode: Turso + GitHub
-pnpm relay web      # open the local web client in the browser
-pnpm relay:cloud web  # open the cloud web client
-pnpm relay stop     # stop the local background server
-pnpm relay:cloud stop # stop the cloud background server
+pnpm relay           # cloud: Turso + GitHub, bundled SPA on 127.0.0.1:7433
+pnpm relay:local     # local: SQLite + local auth, same port
+pnpm relay web       # open the cloud web client
+pnpm relay:local web # open the local web client
+pnpm relay stop      # stop the cloud background server
+pnpm relay:local stop # stop the local background server
 ```
 
 Local and cloud track their servers separately (`~/.relay/server-local.json` and `~/.relay/server-cloud.json`), so
 `stop`, `status`, `web`, `serve`, `workspace`, and `fonts` work for both. The server listens on `RELAY_PORT` (default
-`7433`). In development, if that port is taken by something that is not a healthy Relay server, the CLI starts one on a
-free port and records the actual URL in the mode's state file (the Vite dev proxy follows it). In production — or
-whenever `RELAY_PORT` is set explicitly — a taken port is a startup error.
+`7433`); a taken port is a startup error unless you set a different `RELAY_PORT` explicitly.
 
 The terminal and the browser use the same font. The browser loads it automatically; for the terminal run
 `pnpm relay fonts install` and select the printed family in your terminal settings. `pnpm relay fonts status` reports
 whether it is installed.
 
-Local development can use Vite (`http://127.0.0.1:5173`): `relay web` opens it when running, otherwise the web app
-served by the server. Cloud mode runs with `RELAY_ENV=production` and always serves the built SPA (`packages/web/dist`)
-itself, so OAuth uses the stable server origin.
-
-With GitHub auth, the first `pnpm relay:cloud` opens the browser to sign in; the server hands the session to the CLI
-(loopback only), so the terminal and the browser act as the same user. Sign out only affects the current client.
+The GitHub login runs on the server origin (`127.0.0.1:7433`), not a separate Vite dev server. After the first
+`pnpm relay`, the server hands the CLI session token over locally, so the terminal and browser act as the same user.
+Sign out only affects the current client.
 
 Lower-level tasks remain for running a server in the foreground:
 
 ```bash
-pnpm relay serve         # foreground local server
-pnpm relay:cloud serve   # foreground cloud server
-pnpm web:dev             # Vite dev server with HMR
+pnpm relay serve         # foreground cloud server
+pnpm relay:local serve   # foreground local server
 ```
 
-Both entry points build the CLI bundle (`packages/cli/dist`) automatically and run the same subcommands. Use
-`pnpm relay <command>` for local mode and `pnpm relay:cloud <command>` for cloud mode:
+Both entry points build the bundled web app + CLI for `relay`, `web`, and `serve`, then run the same subcommands.
+Use `pnpm relay <command>` for cloud mode and `pnpm relay:local <command>` for local mode:
 `web`, `serve`, `stop`, `status`, `fonts`, `workspace`, and `version`.
 
 ## Authentication
 
-Relay supports two auth modes:
+Relay has two flavors:
 
-- **Local (default)** — the server is bound to loopback and every request is the local user. No login is required.
-  The API is protected from DNS rebinding by accepting only loopback `Host` headers. Local mode uses no auth cookie,
-  retires the legacy pre-split cookie, and removes the CLI token handoff file on startup; cloud sessions use a separate
-  `relay_cloud_session` cookie.
-- **GitHub** — callers complete a GitHub App user-authorization flow and receive an opaque session cookie (browser) or,
-  for the CLI, a bearer session token handed over locally. Each GitHub account gets its own user, sessions, and
-  workspaces. Enable this explicitly with `RELAY_AUTH=github` or by configuring GitHub credentials; non-loopback binds
-  require it.
+- **Cloud (primary)** — GitHub App OAuth. Callers receive an opaque `relay_cloud_session` cookie (browser) or a bearer
+  session token handed over locally (CLI). Each GitHub account gets its own user, sessions, and workspaces.
+- **Local (secondary)** — SQLite and a fixed loopback identity. No login, no auth cookie. The authenticated wrapper
+  rejects non-loopback `Host` headers (DNS-rebinding guard) and retires the legacy pre-split cookie.
 
-The rest of this section describes the shared/GitHub deployment.
+The rest of this section describes the cloud/GitHub deployment.
 
 ### GitHub App setup
 
@@ -161,37 +148,30 @@ The rest of this section describes the shared/GitHub deployment.
    - **Callback URL**:
      - `http://127.0.0.1:7433/api/auth/callback`
 
-     Cloud mode serves its own SPA on this origin. Vite (`127.0.0.1:5173`) is for local development, which has no OAuth.
+     Set `RELAY_PUBLIC_URL` to the same origin when deploying behind a hostname.
    - Under **Permissions → Account permissions**, set **Email addresses** to _Read-only_ (used to resolve a verified
      email; the profile itself needs no permission).
    - Optionally enable **Request user authorization (OAuth) during installation**.
    - GitHub Apps use fine-grained permissions, so no OAuth `scope` is requested.
-2. Put the App's **client ID** and **client secret** (not the App ID or private key) in the gitignored secrets file for
-   each environment:
+2. Put the App's **client ID** and **client secret** (not the App ID or private key) in the single gitignored `.env`:
 
    ```dotenv
-   # .env.development.local  (dev GitHub App)
-   GITHUB_APP_CLIENT_ID="..."
-   GITHUB_APP_CLIENT_SECRET="..."
-
-   # .env.production.local   (prod GitHub App)
    GITHUB_APP_CLIENT_ID="..."
    GITHUB_APP_CLIENT_SECRET="..."
    ```
 
-   Cloud mode uses `.env.production`, where `RELAY_PUBLIC_URL` is `http://127.0.0.1:7433` — the same origin as the
-   GitHub callback. `AUTH_SESSION_TTL_DAYS` defaults to 30 and can be overridden in a `.local` file.
+   `AUTH_SESSION_TTL_DAYS` defaults to 30.
 
-3. Start cloud mode with `pnpm relay:cloud` (or `pnpm relay:cloud serve` for a foreground server) and sign in with two
-   accounts to verify isolation. The launcher builds the web app on first use when it is missing.
+3. Start cloud mode with `pnpm relay` (or `pnpm relay serve` for a foreground server) and sign in with two accounts to
+   verify isolation.
 
 The CLI authenticates with the bearer session token a loopback browser login hands over in `~/.relay/session.json`, so
 the terminal and the browser act as the same user without extra configuration.
 
 ### Hardening
 
-These are user-specific, so put them in the gitignored `.env.<mode>.local` file. When the server binds a non-loopback
-`RELAY_HOST`, **it refuses to start unless both are set**; on loopback they are optional.
+These are user-specific, so put them in the gitignored `.env` file. When the server binds a non-loopback `RELAY_HOST`,
+**it refuses to start unless both are set**; on loopback they are optional.
 
 - `AUTH_ALLOWED_GITHUB` — comma-separated GitHub logins or numeric ids allowed to sign in (empty = any GitHub account).
 - `RELAY_WORKSPACE_ROOTS` — comma-separated absolute directories a session workspace may use. Local auth allows any
@@ -297,9 +277,8 @@ The agent loop is an async generator (`run()`) that streams `AgentEvent`s:
 profiles are mapped through `GitHubAuthProvider` on first sign-in; every request then resolves the session token to that
 user.
 
-**Session persistence** — Conversations are stored in local SQLite by default (`~/.relay/relay.db`) and can be shared
-by the terminal and web clients. Set `TURSO_DB_URL` and `TURSO_DB_TOKEN` to use a shared Turso database instead; GitHub
-credentials are only required when `RELAY_AUTH=github` (or for a non-loopback bind).
+**Session persistence** — Cloud mode stores conversations in Turso behind GitHub auth. Local mode uses
+`~/.relay/relay.db` and needs no cloud credentials. Both are shared by the terminal and web clients.
 
 - **Create** — New sessions with unique IDs and timestamps
 - **Continue** — Resume the most recent session for a workspace
@@ -390,21 +369,19 @@ pnpm fmt               # Format code (Oxfmt via Vite+)
 pnpm fmt:check         # Check formatting
 pnpm lint              # Lint (Oxlint via Vite+)
 pnpm check             # Format, lint, and type-check (tsgo via Vite+)
-pnpm relay             # Local mode: build, then start/reuse the server + terminal UI
-pnpm relay:cloud       # Cloud mode: Turso + GitHub
-pnpm relay web         # Open the local web client (server starts in the background)
-pnpm relay:cloud web   # Open the cloud web client
-pnpm relay stop        # Stop the local background server
-pnpm relay:cloud stop  # Stop the cloud background server
-pnpm relay status      # Show the local background server
+pnpm relay             # Cloud: build bundles, then start/reuse the server + terminal UI
+pnpm relay:local       # Local self-host: SQLite + local auth
+pnpm relay web         # Open the cloud web client (server starts in the background)
+pnpm relay:local web   # Open the local web client
+pnpm relay stop        # Stop the cloud background server
+pnpm relay:local stop  # Stop the local background server
+pnpm relay status      # Show the cloud background server
 pnpm relay workspace list          # List registered workspaces
 pnpm relay workspace add <path>    # Register a project directory (default: cwd)
 pnpm relay workspace remove <path> # Hide a workspace (sessions are kept; re-add restores it)
 pnpm relay fonts status  # Check whether the shared terminal font is installed
-pnpm relay serve       # Run a foreground local server
-pnpm relay:cloud serve # Run a foreground cloud server (production env)
-pnpm web:dev           # Run the web client with Vite (proxies /api to the local server)
-                                 # prefix RELAY_FLAVOR=cloud to follow a cloud server
+pnpm relay serve       # Run a foreground cloud server
+pnpm relay:local serve # Run a foreground local server
 pnpm web:build         # Build the web app to packages/web/dist
 pnpm build             # Build the web app and the CLI bundle
 pnpm build:sea         # Build the Linux x64 single executable (dist/relay)
@@ -425,12 +402,12 @@ Tag-based releases via GitHub Actions (`.github/workflows/release.yml`):
 1. `pnpm run version:bump <patch|minor|major>`
 2. Commit and push to `main`
 3. `git tag v<version> && git push --tags`
-4. CI verifies checks and creates the GitHub Release (source-only — no binary artifact is published)
+4. CI verifies checks, builds `dist/relay`, and attaches the executable + checksum to the GitHub Release
 
-Relay reads its configuration from the runtime environment (loaded from the mode-aware `.env` files). Local mode needs
-no cloud variables; `TURSO_DB_URL`/`TURSO_DB_TOKEN` and `GITHUB_APP_CLIENT_ID`/`GITHUB_APP_CLIENT_SECRET` enable the
-shared Turso/GitHub deployment. The LLM API key is per user, encrypted at rest, and kept in local files by default (set
-via the web Settings page); `RELAY_SETTINGS_STORE=database` keeps it in the database instead.
+Relay reads its configuration from the runtime environment (loaded from the single `.env`). Cloud mode requires
+`TURSO_DB_URL`/`TURSO_DB_TOKEN` and `GITHUB_APP_CLIENT_ID`/`GITHUB_APP_CLIENT_SECRET`; local mode needs no cloud
+variables. The LLM API key is per user, encrypted at rest, and kept in local files by default (set via the web Settings
+page); `RELAY_SETTINGS_STORE=database` keeps it in the database instead.
 
 ## License
 

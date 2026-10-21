@@ -18,16 +18,9 @@ logs
 _.log
 report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 
-# dotenv environment variable files
+# dotenv environment: one local `.env` plus the committed template
 .env
-.env.development.local
-.env.test.local
-.env.production.local
-.env.local
 .env.*
-# committed non-secret mode defaults + template
-!.env.development
-!.env.production
 !.env.example
 .ampignore
 

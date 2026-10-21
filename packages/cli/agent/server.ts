@@ -10,8 +10,8 @@
  * stopped/status-checked independently.
  *
  * Porting rules: `RELAY_PORT` (default 7433) is the only source for the listen
- * port; `RELAY_PUBLIC_URL` is the browser-facing origin (Vite in development)
- * and must never influence it. When the preferred port is taken by something
+ * port; `RELAY_PUBLIC_URL` is the browser-facing origin (a reverse proxy in
+ * deployment) and must never influence it. When the preferred port is taken by something
  * that is not a healthy Relay server, development falls back to a free
  * ephemeral port; production (or an explicit `RELAY_PORT`) fails with the
  * server log so the conflict is fixed rather than hidden.
@@ -19,7 +19,6 @@
 
 import { type ChildProcess } from "node:child_process";
 import { closeSync, mkdirSync, openSync, readFileSync, readSync, rmSync, statSync } from "node:fs";
-import { createServer } from "node:net";
 import { dirname } from "node:path";
 import { isSea } from "node:sea";
 import { fileURLToPath } from "node:url";
@@ -41,8 +40,6 @@ const API_KEY_TIMEOUT_MS = 10 * 60_000;
 const POLL_INTERVAL_MS = 100;
 /** How long to look for a server another process may be starting after a port conflict. */
 const CONFLICT_GRACE_MS = 3_000;
-/** Preferred port plus two fallback ports (fallback is development-only). */
-const MAX_START_ATTEMPTS = 3;
 /** Exit code the server uses when its port is taken (`EX_TEMPFAIL` from sysexits). */
 const EXIT_ADDR_IN_USE = 75;
 
@@ -66,13 +63,13 @@ function logPath(): string {
 
 /** User-facing command for an explicit flavor and packaging. */
 function relayCommandFor(flavor: string | undefined, subcommand?: string): string {
-	const cloud = flavor === "cloud";
+	const local = flavor === "local";
 	const base = isSea()
-		? cloud
-			? "RELAY_FLAVOR=cloud ./relay"
+		? local
+			? "RELAY_FLAVOR=local ./relay"
 			: "./relay"
-		: cloud
-			? "pnpm relay:cloud"
+		: local
+			? "pnpm relay:local"
 			: "pnpm relay";
 	return subcommand ? `${base} ${subcommand}` : base;
 }
@@ -158,18 +155,6 @@ function preferredPort(): number {
 	return DEFAULT_PORT;
 }
 
-/**
- * Whether the CLI may start the server on a fallback ephemeral port when the
- * preferred one is taken by something other than a healthy Relay server.
- * Development convenience only: an explicit `RELAY_PORT` is always respected,
- * and production deployments must surface a port conflict instead of hiding it.
- */
-function portFallbackAllowed(): boolean {
-	const explicit = Number(process.env.RELAY_PORT);
-	if (Number.isInteger(explicit) && explicit > 0) return false;
-	return process.env.RELAY_ENV !== "production" || process.env.RELAY_FLAVOR === "local";
-}
-
 function startTimeoutMs(): number {
 	const raw = Number(process.env.RELAY_START_TIMEOUT_MS);
 	return Number.isFinite(raw) && raw > 0 ? raw : DEFAULT_START_TIMEOUT_MS;
@@ -189,16 +174,6 @@ function adoptedState(url: string, port: number, cwd: string): ServerState {
 		cwd,
 		webUrl: (process.env.RELAY_PUBLIC_URL ?? url).replace(/\/+$/, ""),
 	};
-}
-
-/** Bind an ephemeral port, release it, and return the number. */
-async function pickFreePort(): Promise<number> {
-	const server = createServer();
-	await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-	const address = server.address();
-	const port = typeof address === "object" && address ? address.port : 0;
-	await new Promise<void>((resolve) => server.close(() => resolve()));
-	return port;
 }
 
 /** Arguments that re-launch this program as a foreground server. */
@@ -373,30 +348,21 @@ export async function ensureServer(options: { cwd: string }): Promise<ServerStat
 		return adoptedState(preferredUrl, preferred, options.cwd);
 	}
 
-	const fallbackAllowed = portFallbackAllowed();
-	let port = preferred;
-	for (let attempt = 1; ; attempt++) {
-		const outcome = await awaitStart(spawnServer(port, options.cwd), port, options.cwd);
-		if (outcome.kind === "started") return outcome.state;
-		if (outcome.kind === "exited") throw startupFailure(outcome.detail);
-		if (outcome.kind === "timeout") {
-			throw startupFailure(
-				`${outcome.detail} (it may still be starting; run \`${relayCommand()}\` again to attach)`,
-			);
-		}
-
-		// The port was taken from under us: another CLI may be bringing a server
-		// up on it right now, so look before falling back.
-		const winner = await waitForRunningServer(preferred, options.cwd);
-		if (winner) return winner;
-		if (!fallbackAllowed || attempt >= MAX_START_ATTEMPTS) {
-			throw startupFailure(
-				`port ${port} is already in use and is not answering as a Relay server. ` +
-					`Stop the process holding it, or set RELAY_PORT to a free port.`,
-			);
-		}
-		port = await pickFreePort();
+	const outcome = await awaitStart(spawnServer(preferred, options.cwd), preferred, options.cwd);
+	if (outcome.kind === "started") return outcome.state;
+	if (outcome.kind === "exited") throw startupFailure(outcome.detail);
+	if (outcome.kind === "timeout") {
+		throw startupFailure(`${outcome.detail} (it may still be starting; run \`${relayCommand()}\` again to attach)`);
 	}
+
+	// The port was taken from under us: another CLI may be bringing the same
+	// mode up on it right now. Adopt it if so; otherwise surface the bind error.
+	const winner = await waitForRunningServer(preferred, options.cwd);
+	if (winner) return winner;
+	throw startupFailure(
+		`port ${preferred} is already in use and is not answering as a Relay server. ` +
+			`Stop the process holding it, or set RELAY_PORT to a different port.`,
+	);
 }
 
 /** True when this CLI currently has valid credentials for the server. */
@@ -508,15 +474,7 @@ export async function ensureApiKey(state: ServerState): Promise<void> {
 		);
 	}
 
-	// In development the web origin is Vite (e.g. 127.0.0.1:5173); fall back to
-	// the web app the server itself serves when that is not running, so the user
-	// is never sent to a dead page.
-	let webOrigin = state.webUrl || state.url;
-	if (webOrigin !== state.url && !(await isReachable(webOrigin))) {
-		webOrigin = state.url;
-	}
-
-	const settingsUrl = new URL("/settings", webOrigin).toString();
+	const settingsUrl = new URL("/settings", state.webUrl || state.url).toString();
 	console.log(`No API key configured. Opening ${settingsUrl} — add one to continue.`);
 	openBrowser(settingsUrl);
 
@@ -586,15 +544,6 @@ export async function printStatus(): Promise<void> {
 	if (state.pid > 0) console.log(`PID:       ${state.pid}`);
 }
 
-async function isReachable(url: string): Promise<boolean> {
-	try {
-		await fetch(url, { signal: AbortSignal.timeout(HEALTH_TIMEOUT_MS) });
-		return true;
-	} catch {
-		return false;
-	}
-}
-
 /** `relay web`: ensure a server, open the browser at the workspace, then return (or stay watching). */
 export async function runWeb(args: string[]): Promise<void> {
 	let foreground = false;
@@ -614,14 +563,7 @@ export async function runWeb(args: string[]): Promise<void> {
 	}
 
 	const state = await ensureServer({ cwd: process.cwd() });
-	let webUrl = state.webUrl || state.url;
-
-	// In development the web origin is Vite (e.g. 127.0.0.1:5173); if that is
-	// not running, fall back to the web app the server itself serves.
-	if (webUrl !== state.url && !(await isReachable(webUrl))) {
-		console.log(`Web client at ${webUrl} is not running; using the server's bundled web app.`);
-		webUrl = state.url;
-	}
+	const webUrl = state.webUrl || state.url;
 
 	// Deep-link into the workspace pane; an unregistered directory shows the
 	// "add workspace" flow rather than failing.

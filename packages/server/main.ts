@@ -81,7 +81,7 @@ export async function startServer(): Promise<void> {
 	if (config.authMode === "local") clearStoredSession();
 	const services = await createServices(config);
 
-	console.log(`Mode: ${config.relayEnv}`);
+	console.log(`Flavor: ${config.flavor}`);
 	console.log(`Workspace: ${config.defaultCwd}`);
 	console.log(
 		`Workspace roots: ${config.workspaceRoots.length > 0 ? config.workspaceRoots.join(", ") : "(any directory)"}`,

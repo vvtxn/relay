@@ -71,13 +71,9 @@ function ensureRuntime(): void {
 
 function loadEnvFiles(): void {
 	if (!isSea()) return;
-	// The binary is a production artifact. Load simple `.env` files rather than
-	// the source checkout's mode files, which can point at dev-only paths such
-	// as `packages/web/dist`.
-	const files = [".env.local", ".env"];
-	// Most specific first: project cwd, then the home data dir. Files are also
-	// ordered most-specific first, and values are only filled when absent, so
-	// process env > cwd .env.local > cwd .env > home .env.local > home .env.
+	const files = [".env"];
+	// Most specific first: project cwd, then the home data dir. Values are only
+	// filled when absent, so process env > cwd .env > home .env.
 	const roots = [process.cwd(), relayDir()];
 	for (const file of files) {
 		for (const root of roots) {
@@ -96,7 +92,6 @@ function loadEnvFiles(): void {
 function applyLocalDefaults(): void {
 	if (!isSea()) return;
 	process.env.RELAY_FLAVOR ??= "local";
-	process.env.RELAY_ENV ??= "production";
 }
 
 loadEnvFiles();

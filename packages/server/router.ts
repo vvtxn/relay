@@ -47,7 +47,7 @@ import {
 	handleWorkspace,
 } from "./workspace.ts";
 import { handleGetSettings, handleSetApiKey } from "./settings.ts";
-import { effectiveFlavor, isLoopbackHost } from "./config.ts";
+import { isLoopbackHost } from "./config.ts";
 
 /** Route handlers may read the request service (and matched route context). */
 type RouteEffect = Effect.Effect<
@@ -81,7 +81,7 @@ function health(services: ServerServices): HttpServerResponse.HttpServerResponse
 	return json({
 		status: "ok",
 		version: VERSION,
-		flavor: effectiveFlavor(services.config),
+		flavor: services.config.flavor,
 	} satisfies HealthResponse);
 }
 

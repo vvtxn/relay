@@ -17,6 +17,7 @@ async function localServices(): Promise<{ services: ServerServices; dir: string 
 	const dir = await mkdtemp(join(tmpdir(), "relay-local-mode-"));
 	const databasePath = join(dir, "relay.db");
 	const config = makeConfig(dir, {
+		flavor: "local",
 		database: { kind: "local", path: databasePath, url: pathToFileURL(databasePath).href },
 		authMode: "local",
 		maxSessionsPerWorkspace: 0,
