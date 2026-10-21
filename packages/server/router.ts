@@ -15,7 +15,6 @@ import { VERSION } from "@vvtxn/relay/version.ts";
 import { causeMessage } from "@vvtxn/relay/core/effect.ts";
 import type { HealthResponse } from "@vvtxn/client/protocol.ts";
 import { handleCallback, handleLogin, handleLogout } from "./auth-routes.ts";
-import { clearCookie } from "./cookies.ts";
 import { LEGACY_SESSION_COOKIE, resolveRequestUser } from "./identity.ts";
 import {
 	BadRequestError,
@@ -134,8 +133,10 @@ function authenticated(services: ServerServices, build: (services: RequestServic
 			if (services.config.authMode !== "local") return response;
 			// A browser that previously signed into cloud mode may still hold the
 			// OAuth session cookie. Local mode has its own identity, so retire it.
-			return HttpServerResponse.setHeaders(response, {
-				"set-cookie": clearCookie(LEGACY_SESSION_COOKIE),
+			return HttpServerResponse.expireCookieUnsafe(response, LEGACY_SESSION_COOKIE, {
+				httpOnly: true,
+				sameSite: "lax",
+				path: "/",
 			});
 		}),
 	);
