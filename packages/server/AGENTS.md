@@ -105,8 +105,9 @@ one. `RunManager` re-validates the cwd before every run.
 Two transports:
 
 - **Local (default)** — the server seeds a stable `local` identity through the user store and every loopback request
-  resolves to it without a token. The authenticated wrapper rejects non-loopback `Host` headers (DNS-rebinding guard).
-  OAuth routes are not mounted.
+  resolves to it without a token. The authenticated wrapper rejects non-loopback `Host` headers (DNS-rebinding guard),
+  clears the legacy pre-split cookie, and does not mount OAuth routes. Startup removes the CLI token handoff file.
+  Cloud/GitHub mode uses the separate `relay_cloud_session` cookie.
 - **GitHub** — the browser completes a **GitHub App** code + PKCE flow; the server maps the profile through
   `GitHubAuthProvider` → `DatabaseUserStore` and issues an opaque session token (hashed at rest in `auth_sessions`).
   Non-browser clients send `Authorization: Bearer <token>` (the CLI reads the token handed over to

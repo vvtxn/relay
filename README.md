@@ -145,7 +145,9 @@ Both entry points build the CLI bundle (`packages/cli/dist`) automatically and r
 Relay supports two auth modes:
 
 - **Local (default)** — the server is bound to loopback and every request is the local user. No login is required.
-  The API is protected from DNS rebinding by accepting only loopback `Host` headers.
+  The API is protected from DNS rebinding by accepting only loopback `Host` headers. Local mode uses no auth cookie,
+  retires the legacy pre-split cookie, and removes the CLI token handoff file on startup; cloud sessions use a separate
+  `relay_cloud_session` cookie.
 - **GitHub** — callers complete a GitHub App user-authorization flow and receive an opaque session cookie (browser) or,
   for the CLI, a bearer session token handed over locally. Each GitHub account gets its own user, sessions, and
   workspaces. Enable this explicitly with `RELAY_AUTH=github` or by configuring GitHub credentials; non-loopback binds

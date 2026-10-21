@@ -50,6 +50,7 @@ describe("local mode", () => {
 			const me = await handleRequest(services, apiRequest("GET", "/api/me"));
 			expect(me.status).toBe(200);
 			expect(await me.json()).toMatchObject({ id: services.localUser!.id, provider: "local" });
+			expect(me.headers.getSetCookie().some((cookie) => cookie.startsWith("relay_session="))).toBe(true);
 
 			const config = await handleRequest(services, apiRequest("GET", "/api/config"));
 			expect(config.status).toBe(200);

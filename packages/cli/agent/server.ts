@@ -64,9 +64,9 @@ function logPath(): string {
 	return serverLogPath();
 }
 
-/** User-facing command for the current mode and packaging. */
-function relayCommand(subcommand?: string): string {
-	const cloud = process.env.RELAY_FLAVOR === "cloud";
+/** User-facing command for an explicit flavor and packaging. */
+function relayCommandFor(flavor: string | undefined, subcommand?: string): string {
+	const cloud = flavor === "cloud";
 	const base = isSea()
 		? cloud
 			? "RELAY_FLAVOR=cloud ./relay"
@@ -75,6 +75,11 @@ function relayCommand(subcommand?: string): string {
 			? "pnpm relay:cloud"
 			: "pnpm relay";
 	return subcommand ? `${base} ${subcommand}` : base;
+}
+
+/** User-facing command for the current mode and packaging. */
+function relayCommand(subcommand?: string): string {
+	return relayCommandFor(process.env.RELAY_FLAVOR, subcommand);
 }
 
 function delay(ms: number): Promise<void> {
@@ -137,6 +142,13 @@ async function isHealthy(url: string, expectedFlavor: string | undefined = proce
 function flavorMismatch(health: HealthProbe, expectedFlavor = process.env.RELAY_FLAVOR): string | null {
 	if (!expectedFlavor || !health.flavor || health.flavor === expectedFlavor) return null;
 	return `Relay at this URL is running in ${health.flavor} mode, but ${expectedFlavor} mode was requested.`;
+}
+
+function foreignModeError(health: HealthProbe): Error | null {
+	const mismatch = flavorMismatch(health);
+	if (!mismatch) return null;
+	const stopCommand = relayCommandFor(health.flavor, "stop");
+	return new Error(`${mismatch} Stop it with \`${stopCommand}\`, or set RELAY_PORT to run both modes side by side.`);
 }
 
 /** Port the background server should use: explicit `RELAY_PORT`, else the default. */
@@ -308,7 +320,12 @@ async function waitForRunningServer(preferred: number, cwd: string): Promise<Ser
 		const state = readState();
 		if (state && state.pid > 0 && (await isHealthy(state.url))) return state;
 		const url = loopbackUrl(preferred);
-		if (await isHealthy(url)) return adoptedState(url, preferred, cwd);
+		const health = await probeHealth(url);
+		if (health.ok) {
+			const foreign = foreignModeError(health);
+			if (foreign) throw foreign;
+			return adoptedState(url, preferred, cwd);
+		}
 		await delay(150);
 	}
 	return null;
@@ -343,9 +360,18 @@ export async function ensureServer(options: { cwd: string }): Promise<ServerStat
 	if (existing) clearState();
 
 	// Adopt a healthy server on the preferred port even without a state file —
-	// for example a foreground `relay serve` started outside the supervisor.
+	// for example a foreground `relay serve` started outside the supervisor. A
+	// healthy server for the *other* mode is a conflict, not a fallback: silently
+	// moving to another port would leave the open browser pointing at the old
+	// mode.
 	const preferred = preferredPort();
-	if (await isHealthy(loopbackUrl(preferred))) return adoptedState(loopbackUrl(preferred), preferred, options.cwd);
+	const preferredUrl = loopbackUrl(preferred);
+	const preferredHealth = await probeHealth(preferredUrl);
+	if (preferredHealth.ok) {
+		const foreign = foreignModeError(preferredHealth);
+		if (foreign) throw foreign;
+		return adoptedState(preferredUrl, preferred, options.cwd);
+	}
 
 	const fallbackAllowed = portFallbackAllowed();
 	let port = preferred;

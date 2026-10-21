@@ -4,8 +4,10 @@ import type { AuthenticatedUser } from "@vvtxn/relay/core/index.ts";
 import type { StoreError } from "@vvtxn/relay/core/effect.ts";
 import type { ServerServices } from "./services.ts";
 
-/** Session cookie name; the value is the opaque session token. */
-export const SESSION_COOKIE = "relay_session";
+/** GitHub-mode session cookie; local mode never uses cookies. */
+export const SESSION_COOKIE = "relay_cloud_session";
+/** Cookie issued by versions before the local/cloud split; local mode retires it. */
+export const LEGACY_SESSION_COOKIE = "relay_session";
 /** Short-lived OAuth handshake cookies. */
 export const OAUTH_STATE_COOKIE = "relay_oauth_state";
 export const OAUTH_VERIFIER_COOKIE = "relay_oauth_verifier";
