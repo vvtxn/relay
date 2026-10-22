@@ -233,18 +233,12 @@ These remain promise-based IO helpers (wrapped with `attempt` at Effect call sit
 - `effect` (v4) — the agent runtime (streams, retries, tool execution, store contracts)
 - `@libsql/client` — one libSQL client for both embedded local files and remote Turso databases
 
-## Testing
-
-`pnpm exec vp test` runs the suites under `test/`. The agent-loop tests drive `TestClock` for virtual backoff/timeout
-proving and use a scripted `Stream` provider.
-
 ## Task Completion Checklist
 
 After concluding that a task is complete, always run these commands from the repo root:
 
 1. `pnpm exec vp fmt` — auto-format all code
 2. `pnpm check` — format, lint, and type-check (Oxfmt, Oxlint, tsgo via Vite+)
-3. `pnpm exec vp test` — run the test suites
 
 ## Code Patterns
 

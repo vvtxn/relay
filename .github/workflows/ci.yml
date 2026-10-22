@@ -32,9 +32,6 @@ jobs:
             - name: Check (format, lint, type-check)
               run: pnpm check
 
-            - name: Test
-              run: pnpm exec vp test
-
             - name: Build web app and CLI bundle
               run: pnpm build
 

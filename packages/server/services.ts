@@ -88,7 +88,7 @@ const databaseLayer = Layer.effect(
 /**
  * All database stores, acquired in sequence on the shared client: `users`
  * backs the `auth_sessions` foreign key and concurrent DDL is best avoided.
- * Exported so layer tests can drive it with a recording client.
+ * Exported for advanced composition.
  */
 export const storesLayer = Layer.effectContext(
 	Effect.gen(function* () {

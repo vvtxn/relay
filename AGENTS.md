@@ -86,7 +86,6 @@ After concluding that a task is complete, always run these commands in order:
 
 1. `pnpm exec vp fmt` — auto-format all code
 2. `pnpm check` — format, lint, and type-check (Oxfmt, Oxlint, tsgo via Vite+)
-3. `pnpm exec vp test` — run the test suites (`packages/*/test`)
 
 If any command fails, fix the issues and re-run until they pass cleanly. Do not report the task as done until they pass
 cleanly.

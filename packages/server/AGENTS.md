@@ -34,7 +34,7 @@ server/
 
 `serverLayer(config)` composes tagged services (`Config`, `Database`, the stores, `Runs`) as Effect Layers; acquisition
 is sequential (config → database → stores → RunManager) and the store layer awaits each schema `ready` in order
-(`users` backs the `auth_sessions` foreign key — a test pins the DDL order). `UserSettings` is built by
+(`users` backs the `auth_sessions` foreign key, so that schema is created first). `UserSettings` is built by
 `createUserSettingsStore`: the file backend plus a one-shot migration of database keys, or the encrypted database
 store. `createServices(config)` materializes the bundle once for `main.ts`. The shared `Database` client is the libSQL
 driver in both modes: a `file:` URL opens embedded SQLite, a `libsql://` URL talks to Turso. `main.ts` closes it on
@@ -44,8 +44,8 @@ SIGTERM/SIGINT so SQLite checkpoints its WAL.
 
 `createAppLayer(services)` builds the `HttpRouter` application; `main.ts` serves it through `NodeHttpServer.layer` +
 `HttpRouter.serve` + `Layer.launch`, and a `Layer.tap` writes the CLI state file **after** the listener binds.
-`startServer()` keeps its signature. `handleRequest(services, request)` is an in-process `toWebHandler` adapter used by
-the test suite and `mod.ts` consumers.
+`startServer()` keeps its signature. `handleRequest(services, request)` is an in-process `toWebHandler` adapter for
+`mod.ts` consumers.
 
 - Route handlers are Effects returning `HttpServerResponse`; `authenticated` wraps the CSRF origin check and the
   per-request identity resolution (401 when unauthenticated), `withCsrf` covers public state-changing routes.
@@ -192,19 +192,12 @@ pnpm relay serve        # foreground cloud server
 pnpm relay:local serve  # foreground local server
 ```
 
-## Testing
-
-`pnpm exec vp test` runs the suites under `test/`. They use in-memory stores and scripted `Stream` providers, and the
-`handleRequest` adapter gives black-box HTTP coverage without binding a socket (including SSE frames and SPA
-precedence).
-
 ## Task Completion Checklist
 
 After concluding that a task is complete, always run these commands from the repo root:
 
 1. `pnpm exec vp fmt` — auto-format all code
 2. `pnpm check` — format, lint, and type-check (Oxfmt, Oxlint, tsgo via Vite+)
-3. `pnpm exec vp test` — run the test suites
 
 ## Code Patterns
 

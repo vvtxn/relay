@@ -184,7 +184,7 @@ const platformLive = Layer.mergeAll(NodeServices.layer, NodeHttpPlatform.layer, 
  * and the static SPA fallback for non-API GET requests.
  *
  * Composed as a Layer so the same definition serves production
- * (`HttpRouter.serve`) and in-process tests (`HttpRouter.toWebHandler`).
+ * (`HttpRouter.serve`) and in-process (`HttpRouter.toWebHandler`) consumers.
  */
 export function createAppLayer(services: ServerServices) {
 	return HttpRouter.use((router) =>
@@ -355,7 +355,7 @@ export function createAppLayer(services: ServerServices) {
 }
 
 // ---------------------------------------------------------------------------
-// In-process adapter (tests and internal callers)
+// In-process adapter (mod.ts consumers)
 // ---------------------------------------------------------------------------
 
 type WebHandler = (request: Request) => Promise<Response>;
@@ -363,9 +363,8 @@ type WebHandler = (request: Request) => Promise<Response>;
 const webHandlers = new WeakMap<ServerServices, WebHandler>();
 
 /**
- * Runs a request through the app without binding a socket — the shape the
- * characterization tests and `mod.ts` consumers use. The web handler is built
- * once per services instance.
+ * Runs a request through the app without binding a socket for `mod.ts`
+ * consumers. The web handler is built once per services instance.
  */
 export async function handleRequest(services: ServerServices, request: Request): Promise<Response> {
 	let handler = webHandlers.get(services);

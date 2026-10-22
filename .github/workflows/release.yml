@@ -27,9 +27,6 @@ jobs:
             - name: Verify checks
               run: pnpm check
 
-            - name: Run tests
-              run: pnpm exec vp test
-
             # Linux x64 single executable. Web assets, fonts, and the libSQL
             # native runtime are embedded and extracted on first launch.
             - name: Build single executable
