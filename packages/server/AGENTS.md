@@ -9,8 +9,9 @@ HTTP + SSE server hosting the Relay agent runtime, built on `effect/http` and
 server/
 ├── package.json     # @vvtxn/server; exports "./main" for the CLI serve subcommand
 ├── mod.ts           # Public exports (startServer, createServices, handleRequest, RunManager)
-├── main.ts          # Entry: config from env → createServices → HttpRouter.serve + Layer.launch
-├── config.ts        # serverConfigFromEnv: port, host, LLM key/model, Turso, auth, static dir
+├── main.ts          # startServer(): config from env → createServices → HttpRouter.serve + Layer.launch
+├── entry.ts         # Direct executable entry; imports main.ts so importing it has no side effects
+├── config.ts        # serverConfigFromEnv: port, host, LLM key/model, local/Turso DB, auth, static dir
 ├── services.ts      # ServerServices + serverLayer — the composition seam
 ├── router.ts        # HttpRouter app: routes, CSRF/auth guards, error mapping, SPA fallback, handleRequest
 ├── identity.ts      # Per-request user resolution (cookie/bearer session)
@@ -33,17 +34,18 @@ server/
 
 `serverLayer(config)` composes tagged services (`Config`, `Database`, the stores, `Runs`) as Effect Layers; acquisition
 is sequential (config → database → stores → RunManager) and the store layer awaits each schema `ready` in order
-(`users` backs the `auth_sessions` foreign key — a test pins the DDL order). `UserSettings` is built by
+(`users` backs the `auth_sessions` foreign key, so that schema is created first). `UserSettings` is built by
 `createUserSettingsStore`: the file backend plus a one-shot migration of database keys, or the encrypted database
-store. `createServices(config)` materializes the bundle once for `main.ts`. The Turso client exposes only
-`execute`/`batch` (no close), so the layers are unscoped.
+store. `createServices(config)` materializes the bundle once for `main.ts`. The shared `Database` client is the libSQL
+driver in both modes: a `file:` URL opens embedded SQLite, a `libsql://` URL talks to Turso. `main.ts` closes it on
+SIGTERM/SIGINT so SQLite checkpoints its WAL.
 
 ### HTTP (`router.ts`, `main.ts`)
 
 `createAppLayer(services)` builds the `HttpRouter` application; `main.ts` serves it through `NodeHttpServer.layer` +
 `HttpRouter.serve` + `Layer.launch`, and a `Layer.tap` writes the CLI state file **after** the listener binds.
-`startServer()` keeps its signature. `handleRequest(services, request)` is an in-process `toWebHandler` adapter used by
-the test suite and `mod.ts` consumers.
+`startServer()` keeps its signature. `handleRequest(services, request)` is an in-process `toWebHandler` adapter for
+`mod.ts` consumers.
 
 - Route handlers are Effects returning `HttpServerResponse`; `authenticated` wraps the CSRF origin check and the
   per-request identity resolution (401 when unauthenticated), `withCsrf` covers public state-changing routes.
@@ -81,9 +83,10 @@ Store contracts are Effect-native (`SessionHandle`/`SessionStore`, `StoreError`)
 sessions created in-process are not yet visible to `store.open()`; all session routes go through `openSessionHandle()`
 (sessions.ts), which falls back to the live RunManager handle.
 
-The database store keeps at most `RELAY_MAX_SESSIONS_PER_WORKSPACE` (default 10) sessions per owner/workspace. When a
-user message is persisted, the insert/update and the delete of older sessions plus their entries run in one atomic
-batch. `pruneAll()` trims pre-existing overflow on startup, before any runs are active.
+The database store keeps at most `RELAY_MAX_SESSIONS_PER_WORKSPACE` sessions per owner/workspace. `0` means unlimited
+(the local default); Turso deployments default to 10. When a user message is persisted with a finite limit, the
+insert/update and the delete of older sessions plus their entries run in one atomic batch. `pruneAll()` trims
+pre-existing overflow on startup, before any runs are active.
 
 The per-session workspace cwd comes from the client (CLI sends its terminal cwd). File tools are confined to that cwd;
 bash is not (documented in relay core AGENTS.md).
@@ -99,19 +102,21 @@ one. `RunManager` re-validates the cwd before every run.
 
 ### Auth
 
-GitHub OAuth is the only auth transport:
+Two transports:
 
-- The browser completes a **GitHub App** user-authorization code + PKCE flow (permissions live on the App, so no `scope`
-  is sent); the server maps the GitHub profile through `GitHubAuthProvider` → `DatabaseUserStore` and issues an **opaque
-  session token** (hashed at rest in `auth_sessions`), set as an `HttpOnly; SameSite=Lax` cookie.
-- Non-browser clients authenticate with `Authorization: Bearer <token>` (the CLI reads the token handed over to
-  `~/.relay/session.json` by a loopback login).
-- `GITHUB_APP_CLIENT_ID`/`GITHUB_APP_CLIENT_SECRET` are required at startup; there is no local/no-auth fallback.
+- **Local (secondary)** — the server seeds a stable `local` identity through the user store and every loopback request
+  resolves to it without a token. The authenticated wrapper rejects non-loopback `Host` headers (DNS-rebinding guard),
+  clears the legacy pre-split cookie, and does not mount OAuth routes. Startup removes the CLI token handoff file.
+  Cloud/GitHub mode uses the separate `relay_cloud_session` cookie.
+- **GitHub** — the browser completes a **GitHub App** code + PKCE flow; the server maps the profile through
+  `GitHubAuthProvider` → `DatabaseUserStore` and issues an opaque session token (hashed at rest in `auth_sessions`).
+  Non-browser clients send `Authorization: Bearer <token>` (the CLI reads the token handed over to
+  `~/.relay/session.json` by a loopback login). Credentials are required in this mode.
 
-`createServices()` returns long-lived services **without** a user. `handleRequest` resolves the caller per request
-(`resolveRequestUser` in `identity.ts`, an Effect) and passes `RequestServices = ServerServices & { user }` to
-handlers. `/api/health` and `/api/auth/*` are public; every other `/api/*` route returns 401 when unauthenticated.
-GitHub identity mapping and the session store are the only new storage — sessions are already scoped by `ownerId`.
+`createServices()` returns long-lived services with `localUser` resolved in local mode (null in GitHub mode).
+`handleRequest` resolves the caller per request (`resolveRequestUser` in `identity.ts`) and passes
+`RequestServices = ServerServices & { user }` to handlers. `/api/health` and `/api/auth/*` are public; every other
+`/api/*` route returns 401 when unauthenticated.
 
 ### API key
 
@@ -125,20 +130,20 @@ A missing key fails the run with a clear message, and `handleSendMessage` return
 
 ### Background state
 
-When the CLI supervisor starts the server it sets `RELAY_STATE_FILE`; once the listener is bound `main.ts` writes
+When the CLI supervisor starts the server it sets `RELAY_STATE_FILE` to the mode-specific path
+(`~/.relay/server-local.json` or `server-cloud.json`); once the listener is bound `main.ts` writes
 `{ url, port, pid, cwd, webUrl }` (mode `0600`, write-then-rename so readers never see a partial file) so
 `relay stop`/`relay status` can find it. A plain `relay serve` leaves no state behind.
 
 The configured port is bound strictly: when it is taken the server prints the conflict (stale server, `relay stop`,
 `RELAY_PORT`) and exits with code 75 (`EX_TEMPFAIL`). The CLI supervisor treats that as "another server may be
-starting": it adopts a healthy winner, or falls back to an ephemeral port in development. The server itself never
-chooses a random port.
+starting": it adopts a healthy winner, otherwise it reports the bind error. The server never chooses a random port.
 
 ## API Surface
 
 | Endpoint                     | Method | Purpose                                               |
 | ---------------------------- | ------ | ----------------------------------------------------- |
-| `/api/health`                | GET    | Liveness + version                                    |
+| `/api/health`                | GET    | Liveness + version + local/cloud flavor               |
 | `/api/auth/login`            | GET    | Begin GitHub OAuth (redirect)                         |
 | `/api/auth/callback`         | GET    | GitHub OAuth callback                                 |
 | `/api/auth/logout`           | POST   | Revoke the session + clear the cookie                 |
@@ -165,31 +170,27 @@ Payload types live in `@vvtxn/client/protocol.ts` — never redeclare them here.
 ## Environment
 
 - `LLM_BASE_URL`, `LLM_MODEL`, `LLM_TEMPERATURE`, `LLM_MAX_TOKENS`, `LLM_MAX_COMPLETION_TOKENS`
-- `TURSO_DB_URL`, `TURSO_DB_TOKEN`
-- Required: `GITHUB_APP_CLIENT_ID`, `GITHUB_APP_CLIENT_SECRET` (`GITHUB_CLIENT_ID`/`GITHUB_CLIENT_SECRET` still
-  accepted); the server refuses to start without them
-- `RELAY_PUBLIC_URL` (OAuth redirect base), `AUTH_SESSION_TTL_DAYS` (default 30)
-- Hardening: `AUTH_ALLOWED_GITHUB` (logins/ids allowed to sign in) and `RELAY_WORKSPACE_ROOTS` (allowed session cwd
-  roots; defaults to the server user's home, `*` allows any directory); both required when binding a non-loopback
-  `RELAY_HOST`, and `*` is rejected there
+- Flavor: `RELAY_FLAVOR=cloud|local` (default cloud; set by the package scripts). Cloud implies Turso + GitHub;
+  local implies SQLite + local auth.
+- Cloud required: `TURSO_DB_URL`, `TURSO_DB_TOKEN`, `GITHUB_APP_CLIENT_ID`, `GITHUB_APP_CLIENT_SECRET`
+  (`GITHUB_CLIENT_ID`/`GITHUB_CLIENT_SECRET` still accepted). Local mode ignores them.
+- Local: `RELAY_DB_PATH` (default `RELAY_DATA_DIR/relay.db`).
+- `RELAY_PUBLIC_URL` (OAuth callback base), `AUTH_SESSION_TTL_DAYS` (default 30)
+- Hardening: `RELAY_PUBLIC_URL` (HTTPS), `AUTH_ALLOWED_GITHUB`, and `RELAY_WORKSPACE_ROOTS`; local allows any
+  directory, cloud defaults to the server user's home, `*` allows any directory. All three are required for a
+  non-loopback cloud host, and `*` is rejected.
 - `RELAY_PORT` (default 7433), `RELAY_HOST` (default 127.0.0.1), `RELAY_WORKSPACE`, `RELAY_STATIC_DIR`
-- `RELAY_MAX_SESSIONS_PER_WORKSPACE` (default 10): persisted sessions kept per owner/workspace; older sessions are
-  pruned automatically
+- `RELAY_MAX_SESSIONS_PER_WORKSPACE`: persisted sessions kept per owner/workspace; `0` = unlimited (local default),
+  cloud default is 10
 - Settings storage: `RELAY_SETTINGS_STORE` (`file` default, or `database`), `RELAY_DATA_DIR` (default `~/.relay`),
   `RELAY_SECRET_KEY` / `RELAY_SECRET_KEY_FILE` (master key; required with the database backend)
 
 ## Running
 
 ```bash
-pnpm serve:dev      # from repo root, loads development env files
-pnpm serve:prod     # production env files
+pnpm relay serve        # foreground cloud server
+pnpm relay:local serve  # foreground local server
 ```
-
-## Testing
-
-`pnpm exec vp test` runs the suites under `test/`. They use in-memory stores and scripted `Stream` providers, and the
-`handleRequest` adapter gives black-box HTTP coverage without binding a socket (including SSE frames and SPA
-precedence).
 
 ## Task Completion Checklist
 
@@ -197,7 +198,6 @@ After concluding that a task is complete, always run these commands from the rep
 
 1. `pnpm exec vp fmt` — auto-format all code
 2. `pnpm check` — format, lint, and type-check (Oxfmt, Oxlint, tsgo via Vite+)
-3. `pnpm exec vp test` — run the test suites
 
 ## Code Patterns
 

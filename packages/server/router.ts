@@ -15,7 +15,7 @@ import { VERSION } from "@vvtxn/relay/version.ts";
 import { causeMessage } from "@vvtxn/relay/core/effect.ts";
 import type { HealthResponse } from "@vvtxn/client/protocol.ts";
 import { handleCallback, handleLogin, handleLogout } from "./auth-routes.ts";
-import { resolveRequestUser } from "./identity.ts";
+import { LEGACY_SESSION_COOKIE, resolveRequestUser } from "./identity.ts";
 import {
 	BadRequestError,
 	error,
@@ -46,6 +46,7 @@ import {
 	handleWorkspace,
 } from "./workspace.ts";
 import { handleGetSettings, handleSetApiKey } from "./settings.ts";
+import { isLoopbackHost } from "./config.ts";
 
 /** Route handlers may read the request service (and matched route context). */
 type RouteEffect = Effect.Effect<
@@ -75,8 +76,12 @@ function respond(effect: RouteEffect) {
 	);
 }
 
-function health(): HttpServerResponse.HttpServerResponse {
-	return json({ status: "ok", version: VERSION } satisfies HealthResponse);
+function health(services: ServerServices): HttpServerResponse.HttpServerResponse {
+	return json({
+		status: "ok",
+		version: VERSION,
+		flavor: services.config.flavor,
+	} satisfies HealthResponse);
 }
 
 function isStateChanging(method: string): boolean {
@@ -117,9 +122,22 @@ function authenticated(services: ServerServices, build: (services: RequestServic
 		services,
 		Effect.gen(function* () {
 			const request = yield* HttpServerRequest.HttpServerRequest;
+			// Local auth has no token; restrict it to loopback so a DNS-rebinding
+			// page cannot drive the agent through 127.0.0.1.
+			if (services.config.authMode === "local" && !isLoopbackHost(requestUrl(request).hostname)) {
+				return error(403, "Local mode only accepts loopback requests");
+			}
 			const user = yield* resolveRequestUser(services, request);
 			if (!user) return error(401, "Unauthorized");
-			return yield* build({ ...services, user });
+			const response = yield* build({ ...services, user });
+			if (services.config.authMode !== "local") return response;
+			// A browser that previously signed into cloud mode may still hold the
+			// OAuth session cookie. Local mode has its own identity, so retire it.
+			return HttpServerResponse.expireCookieUnsafe(response, LEGACY_SESSION_COOKIE, {
+				httpOnly: true,
+				sameSite: "lax",
+				path: "/",
+			});
 		}),
 	);
 }
@@ -166,7 +184,7 @@ const platformLive = Layer.mergeAll(NodeServices.layer, NodeHttpPlatform.layer, 
  * and the static SPA fallback for non-API GET requests.
  *
  * Composed as a Layer so the same definition serves production
- * (`HttpRouter.serve`) and in-process tests (`HttpRouter.toWebHandler`).
+ * (`HttpRouter.serve`) and in-process (`HttpRouter.toWebHandler`) consumers.
  */
 export function createAppLayer(services: ServerServices) {
 	return HttpRouter.use((router) =>
@@ -177,38 +195,41 @@ export function createAppLayer(services: ServerServices) {
 				spa: true,
 			});
 
-			// Health and authentication (public routes)
-			yield* router.add("GET", "/api/health", respond(Effect.succeed(health())));
-			yield* router.add(
-				"GET",
-				"/api/auth/login",
-				respond(
-					withCsrf(
-						services,
-						withRequest((request) => handleLogin(services, request)),
+			// Health is always public. OAuth routes only exist in GitHub mode;
+			// local auth has no login or logout.
+			yield* router.add("GET", "/api/health", respond(Effect.succeed(health(services))));
+			if (services.config.authMode === "github") {
+				yield* router.add(
+					"GET",
+					"/api/auth/login",
+					respond(
+						withCsrf(
+							services,
+							withRequest((request) => handleLogin(services, request)),
+						),
 					),
-				),
-			);
-			yield* router.add(
-				"GET",
-				"/api/auth/callback",
-				respond(
-					withCsrf(
-						services,
-						withRequest((request) => handleCallback(services, request)),
+				);
+				yield* router.add(
+					"GET",
+					"/api/auth/callback",
+					respond(
+						withCsrf(
+							services,
+							withRequest((request) => handleCallback(services, request)),
+						),
 					),
-				),
-			);
-			yield* router.add(
-				"POST",
-				"/api/auth/logout",
-				respond(
-					withCsrf(
-						services,
-						withRequest((request) => handleLogout(services, request)),
+				);
+				yield* router.add(
+					"POST",
+					"/api/auth/logout",
+					respond(
+						withCsrf(
+							services,
+							withRequest((request) => handleLogout(services, request)),
+						),
 					),
-				),
-			);
+				);
+			}
 
 			// Account and settings
 			yield* router.add("GET", "/api/me", respond(authenticated(services, (rs) => handleMe(rs))));
@@ -334,7 +355,7 @@ export function createAppLayer(services: ServerServices) {
 }
 
 // ---------------------------------------------------------------------------
-// In-process adapter (tests and internal callers)
+// In-process adapter (mod.ts consumers)
 // ---------------------------------------------------------------------------
 
 type WebHandler = (request: Request) => Promise<Response>;
@@ -342,9 +363,8 @@ type WebHandler = (request: Request) => Promise<Response>;
 const webHandlers = new WeakMap<ServerServices, WebHandler>();
 
 /**
- * Runs a request through the app without binding a socket — the shape the
- * characterization tests and `mod.ts` consumers use. The web handler is built
- * once per services instance.
+ * Runs a request through the app without binding a socket for `mod.ts`
+ * consumers. The web handler is built once per services instance.
  */
 export async function handleRequest(services: ServerServices, request: Request): Promise<Response> {
 	let handler = webHandlers.get(services);

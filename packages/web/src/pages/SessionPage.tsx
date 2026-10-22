@@ -95,6 +95,7 @@ export function SessionPage() {
 						userName={me.data!.name}
 						avatarUrl={me.data!.avatarUrl}
 						contextWindow={config.data!.contextTokens}
+						canSignOut={me.data!.provider !== "local"}
 						onSignOut={() => void signOut()}
 					/>
 					<ChatView model={config.data!.model} version={VERSION} />

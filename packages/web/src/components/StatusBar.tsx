@@ -23,6 +23,7 @@ export function StatusBar(props: {
 	userName?: string | undefined;
 	avatarUrl?: string | undefined;
 	contextWindow: number;
+	canSignOut: boolean;
 	onSignOut: () => void;
 }) {
 	return (
@@ -53,10 +54,12 @@ export function StatusBar(props: {
 					<span class="status-stat-key">cost</span>
 					<span class="status-stat-value">${streamState().cost.toFixed(2)}</span>
 				</div>
-				<span class="status-sep" />
-				<button type="button" class="status-action" onClick={props.onSignOut}>
-					sign out
-				</button>
+				<Show when={props.canSignOut}>
+					<span class="status-sep" />
+					<button type="button" class="status-action" onClick={props.onSignOut}>
+						sign out
+					</button>
+				</Show>
 			</div>
 		</header>
 	);

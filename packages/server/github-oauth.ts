@@ -64,19 +64,33 @@ export async function exchangeCode(options: {
 	redirectUri: string;
 	verifier: string;
 }): Promise<string> {
+	// GitHub's token endpoint expects form-encoded parameters (the docs call
+	// them query parameters) while `Accept: application/json` selects a JSON
+	// response. Sending a JSON request body returns an OAuth error.
+	const body = new URLSearchParams({
+		client_id: options.clientId,
+		client_secret: options.clientSecret,
+		code: options.code,
+		redirect_uri: options.redirectUri,
+		code_verifier: options.verifier,
+	});
 	const response = await fetch(TOKEN_URL, {
 		method: "POST",
-		headers: { Accept: "application/json", "Content-Type": "application/json" },
-		body: JSON.stringify({
-			client_id: options.clientId,
-			client_secret: options.clientSecret,
-			code: options.code,
-			redirect_uri: options.redirectUri,
-			code_verifier: options.verifier,
-		}),
+		headers: {
+			Accept: "application/json",
+			"Content-Type": "application/x-www-form-urlencoded",
+		},
+		body: body.toString(),
 		signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
 	});
-	const data = (await response.json()) as { access_token?: string; error?: string; error_description?: string };
+	const text = await response.text();
+	let data: { access_token?: string; error?: string; error_description?: string };
+	try {
+		data = JSON.parse(text) as typeof data;
+	} catch {
+		// GitHub returns form-encoded data when it ignores the JSON Accept header.
+		data = Object.fromEntries(new URLSearchParams(text)) as typeof data;
+	}
 	if (!response.ok || !data.access_token) {
 		throw new Error(data.error_description ?? data.error ?? `GitHub token exchange failed (${response.status})`);
 	}

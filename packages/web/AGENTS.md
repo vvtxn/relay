@@ -9,7 +9,7 @@ Router; the SSE stream and domain fold via Effect; shared tokens and display hel
 web/
 ├── package.json     # @vvtxn/web; deps + #/ imports (JSX/lib config lives in tsconfig.json)
 ├── tsconfig.json    # solid JSX settings, DOM libs
-├── vite.config.ts   # solid plugin, @vvtxn/* aliases, /api dev proxy, fs.allow for sibling packages
+├── vite.config.ts   # solid plugin and @vvtxn/* aliases
 ├── index.html       # Vite entry
 ├── dist/            # Build output (gitignored) — served by the server in production
 └── src/
@@ -191,14 +191,14 @@ until it is re-added or a new session is created in it, while its threads stay r
 ## Building & Running
 
 ```bash
-pnpm web:dev        # Vite dev server (proxies /api to 127.0.0.1:7433)
-pnpm web:build      # vite build → packages/web/dist
-pnpm serve:prod     # serve the built SPA (production env; RELAY_STATIC_DIR set)
+pnpm web:build   # vite build → packages/web/dist
+pnpm relay       # cloud server serves the bundled SPA on 127.0.0.1:7433
+pnpm relay:local # local server serves the same bundled SPA
 ```
 
-Server URL defaults to same-origin (`""`), so dev requests go through the Vite `/api` proxy and production requests hit
-the server that serves the SPA. Override it per browser via the localStorage key `relay.serverUrl` to point at a
-different server (which must then allow this browser origin). The legacy absolute default is treated as unset.
+Server URL defaults to same-origin (`""`), because the relay commands build and serve the SPA themselves. Override it
+per browser via the localStorage key `relay.serverUrl` to point at a different server (which must then allow this
+browser origin). The legacy absolute default is treated as unset.
 
 ## Dependencies
 

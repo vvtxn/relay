@@ -8,11 +8,6 @@ import { defineConfig } from "vite-plus";
  *   double quotes, semicolons.
  */
 export default defineConfig({
-	// Vitest runs through the Vite+ toolchain; suites live in packages/*/test.
-	test: {
-		include: ["packages/*/test/**/*.test.ts"],
-		environment: "node",
-	},
 	fmt: {
 		useTabs: true,
 		tabWidth: 4,

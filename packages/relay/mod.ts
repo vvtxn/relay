@@ -148,11 +148,12 @@ export type {
 } from "./core/index.ts";
 
 // Database (shared Turso client for the session and user stores)
-export { createDatabaseClient, databaseCredentialsFromEnv } from "./core/database.ts";
+export { createDatabaseClient, normalizeDatabaseUrl } from "./core/database.ts";
 export type { DatabaseClient, DatabaseCredentials } from "./core/database.ts";
 
 // Paths
 export { homeDir, relayDir } from "./core/paths.ts";
+export { serverLogPath, serverStatePath } from "./core/server-state.ts";
 
 // System prompt (shared default + registry-aware builder)
 export { buildSystemPrompt, SYSTEM_PROMPT } from "./core/system-prompt.ts";

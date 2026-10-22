@@ -4,6 +4,7 @@ import { dirname } from "node:path";
 import { Effect, Layer } from "effect";
 import { HttpRouter } from "effect/http";
 import * as NodeHttpServer from "@effect/platform-node/NodeHttpServer";
+import { clearStoredSession } from "@vvtxn/relay/core/index.ts";
 import { type ServerConfig, serverConfigFromEnv } from "./config.ts";
 import { createServices } from "./services.ts";
 import { createAppLayer } from "./router.ts";
@@ -11,8 +12,8 @@ import { createAppLayer } from "./router.ts";
 /**
  * Exit code used when the configured port is taken (`EX_TEMPFAIL` from
  * sysexits). The CLI supervisor treats it as a port conflict: it attaches to a
- * healthy server that won the race, or falls back to a free port in
- * development, instead of reporting a generic startup failure.
+ * healthy server that won the race, or reports the bind error instead of
+ * hiding the conflict behind a random port.
  */
 const EXIT_ADDR_IN_USE = 75;
 
@@ -72,18 +73,43 @@ function writeServerState(config: ServerConfig): void {
 	}
 }
 
-/** Entry point for `relay serve`. */
+/** Starts the HTTP/SSE server. `entry.ts` is the direct executable wrapper. */
 export async function startServer(): Promise<void> {
 	const config = serverConfigFromEnv();
+	// Cloud mode may have handed the CLI a bearer token; local mode has no
+	// session, so drop the stale handoff file when switching modes.
+	if (config.authMode === "local") clearStoredSession();
 	const services = await createServices(config);
 
-	console.log(`Mode: ${config.relayEnv}`);
+	console.log(`Flavor: ${config.flavor}`);
 	console.log(`Workspace: ${config.defaultCwd}`);
 	console.log(
 		`Workspace roots: ${config.workspaceRoots.length > 0 ? config.workspaceRoots.join(", ") : "(any directory)"}`,
 	);
-	console.log(`OAuth callback: ${config.publicUrl}/api/auth/callback (must match a GitHub App callback URL exactly)`);
+	console.log(`Database: ${config.database.kind === "local" ? `local (${config.database.path})` : "turso"}`);
+	console.log(`Auth: ${config.authMode}`);
+	if (config.authMode === "github") {
+		console.log(
+			`OAuth callback: ${config.publicUrl}/api/auth/callback (must match a GitHub App callback URL exactly)`,
+		);
+	}
 	if (config.staticDir) console.log(`Serving web app from ${config.staticDir}`);
+
+	// Close the database before exiting so SQLite checkpoints its WAL. The
+	// process is stopped by `relay stop` (SIGTERM) or Ctrl-C.
+	let shuttingDown = false;
+	const shutdown = (): void => {
+		if (shuttingDown) return;
+		shuttingDown = true;
+		try {
+			services.db.close();
+		} catch (error) {
+			console.error("Failed to close the database:", error instanceof Error ? error.message : error);
+		}
+		process.exit(0);
+	};
+	process.once("SIGTERM", shutdown);
+	process.once("SIGINT", shutdown);
 
 	// Trim any pre-existing overflow before serving so every workspace starts
 	// within the configured cap. No runs exist yet, so nothing active is at risk.
@@ -124,9 +150,4 @@ export async function startServer(): Promise<void> {
 		}
 		throw error;
 	}
-}
-
-// Run when executed directly (node packages/server/main.ts)
-if (import.meta.main) {
-	await startServer();
 }

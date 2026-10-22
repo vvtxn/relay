@@ -1,5 +1,5 @@
 import type { Effect } from "effect";
-import { createDatabaseClient, type DatabaseClient, databaseCredentialsFromEnv } from "../database.ts";
+import type { DatabaseClient } from "../database.ts";
 import { storeEffect, type StoreError } from "../effect.ts";
 import type { AuthenticatedUser, AuthIdentity, UserDirectory, UserStore } from "./types.ts";
 
@@ -38,9 +38,7 @@ function isDuplicateColumn(error: unknown): boolean {
 }
 
 export interface DatabaseUserStoreOptions {
-	url: string;
-	authToken: string;
-	client?: DatabaseClient;
+	client: DatabaseClient;
 }
 
 function newId(): string {
@@ -67,23 +65,19 @@ function userFromRow(row: Record<string, unknown>): AuthenticatedUser {
 	return user;
 }
 
-/** Turso-backed mapping from provider identities to internal user IDs. */
+/** Database-backed mapping from provider identities to internal user IDs. */
 export class DatabaseUserStore implements UserStore, UserDirectory {
 	private readonly client: DatabaseClient;
 	private readonly schemaReady: Promise<void>;
 
 	constructor(options: DatabaseUserStoreOptions) {
-		this.client = options.client ?? createDatabaseClient({ url: options.url, authToken: options.authToken });
+		this.client = options.client;
 		this.schemaReady = this.initialize();
 	}
 
 	/** Resolves once the store's schema has been initialized. */
 	get ready(): Effect.Effect<void, StoreError> {
 		return storeEffect(() => this.schemaReady);
-	}
-
-	static fromEnv(options: Omit<DatabaseUserStoreOptions, "url" | "authToken" | "client"> = {}): DatabaseUserStore {
-		return new DatabaseUserStore({ ...databaseCredentialsFromEnv(), ...options });
 	}
 
 	resolve(identity: AuthIdentity): Effect.Effect<AuthenticatedUser, StoreError> {
@@ -101,8 +95,8 @@ export class DatabaseUserStore implements UserStore, UserDirectory {
 		});
 		const row = existing.rows[0];
 		if (row) {
-			// Read columns directly: the Turso client returns rows as arrays with
-			// non-enumerable named properties, so spreading would drop them.
+			// Read columns directly rather than spreading the row: the row shape is
+			// driver-specific, and named access works for both local and remote.
 			const userId = rowString(row, "user_id");
 			await this.refreshProfile(userId, identity);
 			return userFromRow({
