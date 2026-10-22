@@ -13,9 +13,9 @@ over the same wire protocol. Tooling (format, lint, type-check, builds) runs thr
 > GitHub for identity, with the bundled web app served on port 7433. A local self-hosted mode (SQLite + local auth) is
 > available for running the same runtime on your own machine.
 >
-> **No new release will be published for this work yet.** The latest GitHub Release (`v0.8.0`) predates all web
-> extension related changes and still reflects the old local-only agent with filesystem session storage. Run the current
-> version from source as described below.
+> **No new release will be published for this work yet.** The latest GitHub Release (`v0.8.0`) predates the shared
+> database session and cloud/local split changes and still reflects the old local-only agent with filesystem session
+> storage. Run the current version from source as described below.
 
 ## Features
 
@@ -53,9 +53,9 @@ pnpm relay
 `pnpm relay` builds the bundled web app and CLI, starts the server on `127.0.0.1:7433`, and serves the SPA itself.
 Cloud mode requires Turso and a GitHub App.
 
-### Single executable (local, secondary)
+### Single executable (local, secondary, Linux x64)
 
-The self-hosted build packages the server, TUI, web app, fonts, and libSQL runtime into one executable:
+The self-hosted build packages the server, TUI, web app, fonts, and libSQL runtime into one Linux x64 executable:
 
 ```bash
 pnpm install
@@ -64,7 +64,8 @@ pnpm build:sea
 ```
 
 The executable needs no Node.js installation. It extracts its web/font/libSQL assets to `~/.relay/runtime/<version>` on
-first launch. Tagged releases attach `relay` and `relay.sha256`.
+first launch. Tagged releases attach `relay` and `relay.sha256`. Set `RELAY_FLAVOR=cloud` in `.env` to run the same
+executable against Turso and GitHub.
 
 Server settings (`serverUrl` for the terminal client) are configured in `~/.relay/config.json`.
 
@@ -116,7 +117,7 @@ The terminal and the browser use the same font. The browser loads it automatical
 `pnpm relay fonts install` and select the printed family in your terminal settings. `pnpm relay fonts status` reports
 whether it is installed.
 
-The GitHub login runs on the server origin (`127.0.0.1:7433`), not a separate Vite dev server. After the first
+The GitHub login runs on the server origin (`127.0.0.1:7433`); there is no separate dev server. After the first
 `pnpm relay`, the server hands the CLI session token over locally, so the terminal and browser act as the same user.
 Sign out only affects the current client.
 
@@ -171,8 +172,9 @@ the terminal and the browser act as the same user without extra configuration.
 ### Hardening
 
 These are user-specific, so put them in the gitignored `.env` file. When the server binds a non-loopback `RELAY_HOST`,
-**it refuses to start unless both are set**; on loopback they are optional.
+**it refuses to start unless all three are set**; on loopback they are optional.
 
+- `RELAY_PUBLIC_URL` — the HTTPS origin GitHub redirects back to (must match the GitHub App callback URL).
 - `AUTH_ALLOWED_GITHUB` — comma-separated GitHub logins or numeric ids allowed to sign in (empty = any GitHub account).
 - `RELAY_WORKSPACE_ROOTS` — comma-separated absolute directories a session workspace may use. Local auth allows any
   directory by default; GitHub/shared mode defaults to the server user's home directory. Set it to `*` to allow any
@@ -239,11 +241,11 @@ An HTTP + SSE server built on `effect/http` and `@effect/platform-node`:
 
 - **RunManager** — one active run per session; bridges agent events onto per-session SSE streams; gates side-effecting
   tools behind approval decisions that arrive over HTTP
-- **Sessions** — create/open/list against local SQLite (default) or Turso; per-session workspace cwd (file tools are
-  confined to it)
-- **Auth** — local loopback identity by default, or GitHub App OAuth with per-request identity resolution, opaque
-  hashed sessions, and an optional allowlist
-- **Static serving** — optional static file serving when `RELAY_STATIC_DIR` is set
+- **Sessions** — create/open/list against Turso (cloud, primary) or local SQLite (self-hosted); per-session workspace
+  cwd (file tools are confined to it)
+- **Auth** — GitHub App OAuth in cloud mode, or a fixed loopback identity in local mode, with per-request identity
+  resolution, opaque hashed sessions, and an optional GitHub allowlist
+- **Static serving** — serves the bundled web app by default; `RELAY_STATIC_DIR` overrides its location
 
 ### `packages/relay/api/` — LLM Provider Layer
 
@@ -394,8 +396,8 @@ project-local `vite-plus` dev dependency; run it directly as `pnpm exec vp …` 
 
 ## Releasing
 
-> **Current status:** no new release is planned while the web extension work is in progress. `v0.8.0` remains the latest
-> published release and predates the shared database session changes. The steps below apply once releases resume.
+> **Current status:** the cloud-first and local self-host changes are not in a tagged release yet. `v0.8.0` remains the
+> latest published release and predates the shared database session changes. The steps below apply once releases resume.
 
 Tag-based releases via GitHub Actions (`.github/workflows/release.yml`):
 

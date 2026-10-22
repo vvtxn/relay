@@ -104,7 +104,7 @@ one. `RunManager` re-validates the cwd before every run.
 
 Two transports:
 
-- **Local (default)** — the server seeds a stable `local` identity through the user store and every loopback request
+- **Local (secondary)** — the server seeds a stable `local` identity through the user store and every loopback request
   resolves to it without a token. The authenticated wrapper rejects non-loopback `Host` headers (DNS-rebinding guard),
   clears the legacy pre-split cookie, and does not mount OAuth routes. Startup removes the CLI token handoff file.
   Cloud/GitHub mode uses the separate `relay_cloud_session` cookie.
@@ -137,8 +137,7 @@ When the CLI supervisor starts the server it sets `RELAY_STATE_FILE` to the mode
 
 The configured port is bound strictly: when it is taken the server prints the conflict (stale server, `relay stop`,
 `RELAY_PORT`) and exits with code 75 (`EX_TEMPFAIL`). The CLI supervisor treats that as "another server may be
-starting": it adopts a healthy winner, or falls back to an ephemeral port in development. The server itself never
-chooses a random port.
+starting": it adopts a healthy winner, otherwise it reports the bind error. The server never chooses a random port.
 
 ## API Surface
 
@@ -177,8 +176,9 @@ Payload types live in `@vvtxn/client/protocol.ts` — never redeclare them here.
   (`GITHUB_CLIENT_ID`/`GITHUB_CLIENT_SECRET` still accepted). Local mode ignores them.
 - Local: `RELAY_DB_PATH` (default `RELAY_DATA_DIR/relay.db`).
 - `RELAY_PUBLIC_URL` (OAuth callback base), `AUTH_SESSION_TTL_DAYS` (default 30)
-- Hardening: `AUTH_ALLOWED_GITHUB` and `RELAY_WORKSPACE_ROOTS`; local allows any directory, cloud defaults to the
-  server user's home, `*` allows any directory. Both are required for a non-loopback cloud host, and `*` is rejected.
+- Hardening: `RELAY_PUBLIC_URL` (HTTPS), `AUTH_ALLOWED_GITHUB`, and `RELAY_WORKSPACE_ROOTS`; local allows any
+  directory, cloud defaults to the server user's home, `*` allows any directory. All three are required for a
+  non-loopback cloud host, and `*` is rejected.
 - `RELAY_PORT` (default 7433), `RELAY_HOST` (default 127.0.0.1), `RELAY_WORKSPACE`, `RELAY_STATIC_DIR`
 - `RELAY_MAX_SESSIONS_PER_WORKSPACE`: persisted sessions kept per owner/workspace; `0` = unlimited (local default),
   cloud default is 10

@@ -80,7 +80,8 @@ function loadEnvFiles(): void {
 			try {
 				const values = parseEnv(readFileSync(join(root, file), "utf8"));
 				for (const [key, value] of Object.entries(values)) {
-					if (value !== undefined && process.env[key] === undefined) process.env[key] = value;
+					// Empty values count as unset, matching server config parsing.
+					if (value && (process.env[key] === undefined || process.env[key] === "")) process.env[key] = value;
 				}
 			} catch {
 				// Missing or malformed env files are ignored; explicit env still works.
@@ -91,7 +92,7 @@ function loadEnvFiles(): void {
 
 function applyLocalDefaults(): void {
 	if (!isSea()) return;
-	process.env.RELAY_FLAVOR ??= "local";
+	if (!process.env.RELAY_FLAVOR) process.env.RELAY_FLAVOR = "local";
 }
 
 loadEnvFiles();

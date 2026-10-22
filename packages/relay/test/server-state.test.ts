@@ -20,8 +20,11 @@ describe("server state paths", () => {
 		expect(serverLogPath("cloud")).toBe(join(tmpdir(), "relay-state-home", ".relay", "logs", "server-cloud.log"));
 	});
 
-	it("keeps the legacy names when no flavor is set", () => {
+	it("defaults to cloud and keeps explicit legacy names", () => {
 		process.env.HOME = join(tmpdir(), "relay-state-home");
+		delete process.env.RELAY_FLAVOR;
+		expect(serverStatePath()).toBe(join(tmpdir(), "relay-state-home", ".relay", "server-cloud.json"));
+		expect(serverLogPath()).toBe(join(tmpdir(), "relay-state-home", ".relay", "logs", "server-cloud.log"));
 		expect(serverStatePath(null)).toBe(join(tmpdir(), "relay-state-home", ".relay", "server.json"));
 		expect(serverLogPath(null)).toBe(join(tmpdir(), "relay-state-home", ".relay", "logs", "server.log"));
 	});

@@ -9,7 +9,7 @@ Router; the SSE stream and domain fold via Effect; shared tokens and display hel
 web/
 ├── package.json     # @vvtxn/web; deps + #/ imports (JSX/lib config lives in tsconfig.json)
 ├── tsconfig.json    # solid JSX settings, DOM libs
-├── vite.config.ts   # solid plugin, @vvtxn/* aliases, /api dev proxy, fs.allow for sibling packages
+├── vite.config.ts   # solid plugin and @vvtxn/* aliases
 ├── index.html       # Vite entry
 ├── dist/            # Build output (gitignored) — served by the server in production
 └── src/

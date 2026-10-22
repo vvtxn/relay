@@ -55,11 +55,12 @@ function loadEnv(processEnv: Record<string, string | undefined>): Record<string,
 		const values = readEnvFile(join(root, ".env"));
 		if (!values) continue;
 		for (const [key, value] of Object.entries(values)) {
-			if (value !== undefined) merged[key] = value;
+			// Empty values count as unset, matching server config parsing.
+			if (value) merged[key] = value;
 		}
 	}
 	for (const [key, value] of Object.entries(processEnv)) {
-		if (value !== undefined) merged[key] = value;
+		if (value) merged[key] = value;
 	}
 	return merged;
 }

@@ -40,13 +40,13 @@ agent/
 
 The state file is the source of truth for the actual URL: the server writes it after binding, and the CLI discovers the
 port from it instead of assuming its own choice. The CLI waits until the server is healthy, the child exits (the error
-includes the server-log tail), or the timeout (120s, `RELAY_START_TIMEOUT_MS`) elapses. When the port is taken by
-something that is not a healthy Relay server, development starts a fallback server on a free port; production or an
-explicit `RELAY_PORT` fails with the bind error. `relay stop` reads the state file and signals the recorded process;
-`relay status` prints it. The server survives the CLI, so the browser stays available.
+includes the server-log tail), or the timeout (120s, `RELAY_START_TIMEOUT_MS`) elapses. The configured port is strict:
+when it is taken by something that is not a healthy Relay server, startup fails with the bind error instead of moving to
+a random port. `relay stop` reads the state file and signals the recorded process; `relay status` prints it. The server
+survives the CLI, so the browser stays available.
 
-`relay web` opens the browser at the current (or `--workspace`) directory's workspace route (Vite origin in dev when
-reachable, else the server's bundled SPA) and returns unless `--foreground` is passed.
+`relay web` builds the bundled SPA, opens the browser at the current (or `--workspace`) directory's workspace route on
+the server origin, and returns unless `--foreground` is passed.
 
 ## Key Concepts
 
@@ -188,11 +188,12 @@ pnpm relay workspace list            # list registered workspaces
 pnpm relay fonts status  # check whether the shared font is installed
 ```
 
-`scripts/relay.ts` decides the entrypoint: non-TUI subcommands (`serve`, `web`, `stop`, `status`, `workspace`,
-`fonts`) run `packages/cli/agent/index.ts` straight from source under Node's native TypeScript support — no bundle
-build — while the TUI command packs `packages/cli` (`vp pack`, JSX needs compilation) and runs
-`packages/cli/dist/index.mjs`. Both paths use the same commands: `relay [-c|--workspace]`, `relay web`, `relay serve`,
-`relay stop`, `relay status`, `relay workspace add|list|remove`, `relay fonts`.
+`scripts/relay.ts` decides the entrypoint: subcommands (`serve`, `web`, `stop`, `status`, `workspace`, `fonts`,
+`version`) run `packages/cli/agent/index.ts` straight from source under Node's native TypeScript support, while the TUI
+command packs `packages/cli` (`vp pack`, JSX needs compilation) and runs `packages/cli/dist/index.mjs`. Commands that
+serve the app (`relay`, `relay web`, `relay serve`) also build the bundled web app first; lifecycle-only commands skip
+both builds. Both paths use the same commands: `relay [-c|--workspace]`, `relay web`, `relay serve`, `relay stop`,
+`relay status`, `relay workspace add|list|remove`, `relay fonts`.
 
 ## Task Completion Checklist
 

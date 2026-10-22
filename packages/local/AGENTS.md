@@ -21,6 +21,8 @@ local/
 - The libSQL native addon cannot be loaded from SEA assets. `runtime/` contains the JS packages plus
   `@libsql/linux-x64-gnu`; `RELAY_DB_MODULE` points `createRequire` at the extracted runtime.
 - `RELAY_STATIC_DIR` points at the extracted web build; `RELAY_FONT_DIR` points at the extracted fonts.
+- The binary defaults to local mode; `RELAY_FLAVOR=cloud` in the environment or `.env` runs the same executable against
+  Turso and GitHub.
 - The binary re-executes itself with `serve` for the background server, so source entry paths are never used in SEA.
 
 ## Rules

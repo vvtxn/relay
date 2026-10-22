@@ -67,7 +67,7 @@ modules stay Effect-free on purpose.
 - **Lint**: `pnpm lint`
 - **Type-check**: `pnpm check` (strict; checks every entrypoint)
 - **Run CLI (cloud, primary)**: `pnpm relay` (builds the bundled web app + CLI, starts/reuses the cloud server, then
-  the TUI; non-TUI subcommands skip builds — see `scripts/relay.ts`)
+  the TUI; lifecycle-only subcommands skip builds — see `scripts/relay.ts`)
 - **Run CLI (local self-host)**: `pnpm relay:local` (SQLite + local auth; same subcommands)
 - **Open web client**: `pnpm relay web` / `pnpm relay:local web`
 - **Stop/status the background server**: `pnpm relay stop|status` / `pnpm relay:local stop|status` (mode-specific
@@ -127,7 +127,8 @@ Tag-based releases via GitHub Actions (`.github/workflows/release.yml`):
 1. `pnpm run version:bump <patch|minor|major>`
 2. Commit and push to `main`
 3. `git tag v<version> && git push --tags`
-4. CI verifies checks and creates the GitHub Release (source-only — no binary is published)
+4. CI verifies checks, builds `dist/relay`, and creates the GitHub Release with the Linux x64 executable and its
+   checksum
 
 ## Import Aliases
 

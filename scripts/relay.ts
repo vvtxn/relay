@@ -5,10 +5,10 @@ import { fileURLToPath } from "node:url";
 /**
  * `pnpm relay` launcher.
  *
- * Non-TUI subcommands (see `SOURCE_COMMANDS`) run straight from source — Node
- * executes the TS entrypoint natively, so `relay stop`, `relay status`, and
- * friends skip the bundle build entirely. The default TUI needs `vp pack` (JSX
- * cannot be type-stripped), and production cloud mode needs the built web app.
+ * Subcommands (see `SOURCE_COMMANDS`) run straight from source — Node executes
+ * the TS entrypoint natively, while the TUI needs `vp pack` because JSX cannot
+ * be type-stripped. Commands that serve the app (`relay`, `relay web`,
+ * `relay serve`) also build the web app; lifecycle-only commands skip builds.
  * Env merging and spawning live in `run-env.ts`; this script only picks the
  * entrypoint and fills missing build artifacts.
  *
@@ -21,11 +21,12 @@ import { fileURLToPath } from "node:url";
  */
 
 const SOURCE_COMMANDS = new Set(["serve", "web", "stop", "status", "fonts", "workspace", "version"]);
+const VERSION_COMMANDS = new Set(["version", "--version", "-v"]);
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 const args = process.argv.slice(2);
 const command = args[0];
-const fromSource = command !== undefined && SOURCE_COMMANDS.has(command);
+const fromSource = command !== undefined && (SOURCE_COMMANDS.has(command) || VERSION_COMMANDS.has(command));
 // Resolve the local bin rather than PATH: the launcher also works when run
 // directly (`node scripts/relay.ts`) or from a linked worktree.
 const vp = join(root, "node_modules", ".bin", process.platform === "win32" ? "vp.cmd" : "vp");
@@ -41,7 +42,11 @@ function runVp(packArgs: string[], label: string): void {
 
 // The normal app path always runs the bundled SPA. Build both artifacts for
 // the commands that serve it, and skip builds for lifecycle-only commands.
-const needsBundles = command === undefined || command.startsWith("-") || command === "web" || command === "serve";
+const needsBundles =
+	command === undefined ||
+	(command.startsWith("-") && !VERSION_COMMANDS.has(command)) ||
+	command === "web" ||
+	command === "serve";
 if (needsBundles) {
 	runVp(["-C", join(root, "packages", "web"), "build"], "web build");
 	runVp(["-C", join(root, "packages", "cli"), "pack"], "CLI bundle");

@@ -11,10 +11,9 @@
  *
  * Porting rules: `RELAY_PORT` (default 7433) is the only source for the listen
  * port; `RELAY_PUBLIC_URL` is the browser-facing origin (a reverse proxy in
- * deployment) and must never influence it. When the preferred port is taken by something
- * that is not a healthy Relay server, development falls back to a free
- * ephemeral port; production (or an explicit `RELAY_PORT`) fails with the
- * server log so the conflict is fixed rather than hidden.
+ * deployment) and must never influence it. When the preferred port is taken by
+ * something that is not a healthy Relay server, startup fails with the server
+ * log so the conflict is fixed rather than hidden.
  */
 
 import { type ChildProcess } from "node:child_process";
@@ -63,12 +62,10 @@ function logPath(): string {
 
 /** User-facing command for an explicit flavor and packaging. */
 function relayCommandFor(flavor: string | undefined, subcommand?: string): string {
-	const local = flavor === "local";
+	const effective = flavor === "local" ? "local" : "cloud";
 	const base = isSea()
-		? local
-			? "RELAY_FLAVOR=local ./relay"
-			: "./relay"
-		: local
+		? `RELAY_FLAVOR=${effective} ./relay`
+		: effective === "local"
 			? "pnpm relay:local"
 			: "pnpm relay";
 	return subcommand ? `${base} ${subcommand}` : base;
@@ -537,7 +534,7 @@ export async function printStatus(): Promise<void> {
 		return;
 	}
 	const alive = await isHealthy(state.url);
-	console.log(`Mode:      ${process.env.RELAY_FLAVOR ?? "auto"}`);
+	console.log(`Mode:      ${process.env.RELAY_FLAVOR === "local" ? "local" : "cloud"}`);
 	console.log(`Server:    ${state.url} (${alive ? "running" : "not responding"})`);
 	console.log(`Workspace: ${state.cwd}`);
 	console.log(`Web:       ${state.webUrl}`);

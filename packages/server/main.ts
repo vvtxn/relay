@@ -12,8 +12,8 @@ import { createAppLayer } from "./router.ts";
 /**
  * Exit code used when the configured port is taken (`EX_TEMPFAIL` from
  * sysexits). The CLI supervisor treats it as a port conflict: it attaches to a
- * healthy server that won the race, or falls back to a free port in
- * development, instead of reporting a generic startup failure.
+ * healthy server that won the race, or reports the bind error instead of
+ * hiding the conflict behind a random port.
  */
 const EXIT_ADDR_IN_USE = 75;
 

@@ -74,9 +74,30 @@ describe("handleRequest", () => {
 		const response = await handleRequest(services, apiRequest("GET", "/api/health"));
 
 		expect(response.status).toBe(200);
-		const body = (await response.json()) as { status: string; version: string };
+		const body = (await response.json()) as { status: string; version: string; flavor: string };
 		expect(body.status).toBe("ok");
 		expect(typeof body.version).toBe("string");
+		expect(body.flavor).toBe("cloud");
+	});
+
+	it("starts GitHub OAuth with separate state, verifier, and return cookies", async () => {
+		const { services } = await makeServices(new ScriptedProvider([]));
+		const response = await handleRequest(services, apiRequest("GET", "/api/auth/login"));
+
+		expect(response.status).toBe(302);
+		expect(response.headers.get("location")).toMatch(/^https:\/\/github\.com\/login\/oauth\/authorize\?/);
+
+		const cookies = response.headers.getSetCookie();
+		expect(cookies.map((cookie) => cookie.split("=")[0])).toEqual([
+			"relay_oauth_state",
+			"relay_oauth_verifier",
+			"relay_oauth_return",
+		]);
+		for (const cookie of cookies) {
+			expect(cookie).toContain("Path=/");
+			expect(cookie).toContain("HttpOnly");
+			expect(cookie).toContain("SameSite=Lax");
+		}
 	});
 
 	it("rejects unauthenticated API requests with 401", async () => {

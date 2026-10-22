@@ -70,7 +70,19 @@ describe("serverConfigFromEnv flavor selection", () => {
 	it("requires Turso and GitHub credentials in cloud mode", () => {
 		expect(() => serverConfigFromEnv(without(CLOUD_ENV, "TURSO_DB_URL"))).toThrow(/TURSO_DB_URL/);
 		expect(() => serverConfigFromEnv({ ...CLOUD_ENV, TURSO_DB_TOKEN: "" })).toThrow(/TURSO_DB_TOKEN/);
+		expect(() => serverConfigFromEnv({ ...CLOUD_ENV, TURSO_DB_URL: "file:/tmp/relay.db" })).toThrow(/TURSO_DB_URL/);
 		expect(() => serverConfigFromEnv(without(CLOUD_ENV, "GITHUB_APP_CLIENT_ID"))).toThrow(/GITHUB_APP_CLIENT_ID/);
+	});
+
+	it("validates and normalizes RELAY_PUBLIC_URL", () => {
+		expect(() => serverConfigFromEnv({ ...CLOUD_ENV, RELAY_PUBLIC_URL: "not a URL" })).toThrow(
+			/valid absolute URL/,
+		);
+		const config = serverConfigFromEnv({
+			...CLOUD_ENV,
+			RELAY_PUBLIC_URL: "http://127.0.0.1:7433/",
+		});
+		expect(config.publicUrl).toBe("http://127.0.0.1:7433");
 	});
 
 	it("rejects an unknown flavor", () => {
@@ -81,17 +93,37 @@ describe("serverConfigFromEnv flavor selection", () => {
 		expect(() => serverConfigFromEnv({ ...LOCAL_ENV, RELAY_HOST: "0.0.0.0" })).toThrow(/loopback-only/);
 	});
 
-	it("requires allowlists for a non-loopback cloud host", () => {
-		const base = { ...CLOUD_ENV, RELAY_HOST: "0.0.0.0", RELAY_WORKSPACE_ROOTS: "/srv/projects" };
-		expect(() => serverConfigFromEnv(base)).toThrow(/AUTH_ALLOWED_GITHUB/);
+	it("requires an HTTPS origin and allowlists for a non-loopback cloud host", () => {
+		const base = {
+			...CLOUD_ENV,
+			RELAY_HOST: "0.0.0.0",
+			RELAY_WORKSPACE_ROOTS: process.cwd(),
+			RELAY_WORKSPACE: process.cwd(),
+		};
+		expect(() => serverConfigFromEnv(base)).toThrow(/RELAY_PUBLIC_URL/);
+		expect(() => serverConfigFromEnv({ ...base, RELAY_PUBLIC_URL: "http://relay.example.com" })).toThrow(/https/);
 
 		expect(() =>
 			serverConfigFromEnv({
 				...base,
+				RELAY_PUBLIC_URL: "https://relay.example.com",
 				AUTH_ALLOWED_GITHUB: "octocat",
 				RELAY_WORKSPACE_ROOTS: "*",
 			}),
 		).toThrow(/RELAY_WORKSPACE_ROOTS=\*/);
+		expect(() =>
+			serverConfigFromEnv({
+				...base,
+				RELAY_PUBLIC_URL: "https://relay.example.com",
+			}),
+		).toThrow(/AUTH_ALLOWED_GITHUB/);
+
+		const hardened = serverConfigFromEnv({
+			...base,
+			RELAY_PUBLIC_URL: "https://relay.example.com",
+			AUTH_ALLOWED_GITHUB: "octocat",
+		});
+		expect(hardened.publicUrl).toBe("https://relay.example.com");
 	});
 });
 
