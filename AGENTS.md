@@ -90,6 +90,12 @@ After concluding that a task is complete, always run these commands in order:
 If any command fails, fix the issues and re-run until they pass cleanly. Do not report the task as done until they pass
 cleanly.
 
+### Testing
+
+Do not add low-signal test suites to the repository. Verify changes end-to-end when possible (run the CLI/server, exercise
+the API or UI). If a focused unit check is necessary, write a temporary test for that specific feature, use it to verify
+the change, and remove it before finishing. There is no permanent test suite; CI runs checks and builds only.
+
 ### Type Checking
 
 The root `tsconfig.base.json` `compilerOptions` apply to every workspace package and enable strict settings beyond
