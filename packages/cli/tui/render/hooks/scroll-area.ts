@@ -18,10 +18,17 @@ export function useScrollArea(options?: {
 	const viewportHeight = useSignal(0);
 	const maxScroll = useSignal(0);
 
+	// The input handler is registered once, so route it through a signal that
+	// always holds the latest options: focus can move to a modal while this
+	// ScrollArea stays mounted (e.g. the diff review overlay).
+	const optionsRef = useSignal(options);
+	optionsRef.value = options;
+
 	useSignalEffect(() => {
 		return useInput((event) => {
-			if (options?.focused === false) return false;
-			const step = options?.scrollStep ?? 1;
+			const current = optionsRef.value;
+			if (current?.focused === false) return false;
+			const step = current?.scrollStep ?? 1;
 
 			if (event.key === "up") {
 				scrollOffset.value = Math.max(0, scrollOffset.value - step);
@@ -57,7 +64,7 @@ export function useScrollArea(options?: {
 			const wasAtBottom = scrollOffset.value >= maxScroll.value;
 			viewportHeight.value = metrics.viewportHeight;
 			maxScroll.value = metrics.maxScroll;
-			if (options?.autoScroll && wasAtBottom) {
+			if (optionsRef.value?.autoScroll && wasAtBottom) {
 				scrollOffset.value = metrics.maxScroll;
 			}
 		},

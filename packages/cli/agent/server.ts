@@ -2,28 +2,29 @@
  * Supervises the background Relay server shared by the TUI and the browser.
  *
  * `relay` and `relay web` call {@link ensureServer}: they attach to a healthy
- * server (tracked in `~/.relay/server.json`) or start one detached, so a single
- * backend serves every client. The server binds its configured port, writes its
- * own state file (PID, port, web URL) once listening, and the CLI discovers the
- * actual URL from that file — it never assumes a port before the bind succeeds.
+ * server (tracked in `~/.relay/server-<flavor>.json`) or start one detached, so
+ * a single backend serves every client. The server binds its configured port,
+ * writes its own state file (PID, port, web URL) once listening, and the CLI
+ * discovers the actual URL from that file — it never assumes a port before the
+ * bind succeeds. Local and cloud state files are separate, so both modes can be
+ * stopped/status-checked independently.
  *
  * Porting rules: `RELAY_PORT` (default 7433) is the only source for the listen
- * port; `RELAY_PUBLIC_URL` is the browser-facing origin (Vite in development)
- * and must never influence it. When the preferred port is taken by something
- * that is not a healthy Relay server, development falls back to a free
- * ephemeral port; production (or an explicit `RELAY_PORT`) fails with the
- * server log so the conflict is fixed rather than hidden.
+ * port; `RELAY_PUBLIC_URL` is the browser-facing origin (a reverse proxy in
+ * deployment) and must never influence it. When the preferred port is taken by
+ * something that is not a healthy Relay server, startup fails with the server
+ * log so the conflict is fixed rather than hidden.
  */
 
 import { type ChildProcess } from "node:child_process";
 import { closeSync, mkdirSync, openSync, readFileSync, readSync, rmSync, statSync } from "node:fs";
-import { createServer } from "node:net";
-import { dirname, join } from "node:path";
+import { dirname } from "node:path";
+import { isSea } from "node:sea";
 import { fileURLToPath } from "node:url";
 import { spawnDetached } from "@vvtxn/relay/core/command.ts";
 import type { SettingsResponse } from "@vvtxn/client/protocol.ts";
 import { readStoredSession } from "@vvtxn/relay/core/auth/session-file.ts";
-import { relayDir } from "@vvtxn/relay/core/paths.ts";
+import { serverLogPath, serverStatePath } from "@vvtxn/relay/core/server-state.ts";
 import { encodeWorkspaceToken } from "@vvtxn/relay/core/workspace-token.ts";
 import { resolveWorkspacePath } from "./config.ts";
 import { openBrowser } from "./open.ts";
@@ -38,8 +39,6 @@ const API_KEY_TIMEOUT_MS = 10 * 60_000;
 const POLL_INTERVAL_MS = 100;
 /** How long to look for a server another process may be starting after a port conflict. */
 const CONFLICT_GRACE_MS = 3_000;
-/** Preferred port plus two fallback ports (fallback is development-only). */
-const MAX_START_ATTEMPTS = 3;
 /** Exit code the server uses when its port is taken (`EX_TEMPFAIL` from sysexits). */
 const EXIT_ADDR_IN_USE = 75;
 
@@ -54,11 +53,27 @@ export interface ServerState {
 }
 
 function statePath(): string {
-	return join(relayDir(), "server.json");
+	return serverStatePath();
 }
 
 function logPath(): string {
-	return join(relayDir(), "logs", "server.log");
+	return serverLogPath();
+}
+
+/** User-facing command for an explicit flavor and packaging. */
+function relayCommandFor(flavor: string | undefined, subcommand?: string): string {
+	const effective = flavor === "local" ? "local" : "cloud";
+	const base = isSea()
+		? `RELAY_FLAVOR=${effective} ./relay`
+		: effective === "local"
+			? "pnpm relay:local"
+			: "pnpm relay";
+	return subcommand ? `${base} ${subcommand}` : base;
+}
+
+/** User-facing command for the current mode and packaging. */
+function relayCommand(subcommand?: string): string {
+	return relayCommandFor(process.env.RELAY_FLAVOR, subcommand);
 }
 
 function delay(ms: number): Promise<void> {
@@ -92,15 +107,42 @@ function clearState(): void {
 	}
 }
 
-async function isHealthy(url: string): Promise<boolean> {
+interface HealthProbe {
+	ok: boolean;
+	flavor?: string;
+}
+
+async function probeHealth(url: string): Promise<HealthProbe> {
 	try {
 		const response = await fetch(`${url}/api/health`, { signal: AbortSignal.timeout(HEALTH_TIMEOUT_MS) });
-		if (!response.ok) return false;
-		const body = (await response.json()) as { status?: string };
-		return body.status === "ok";
+		if (!response.ok) return { ok: false };
+		const body = (await response.json()) as { status?: string; flavor?: string };
+		return { ok: body.status === "ok", ...(body.flavor ? { flavor: body.flavor } : {}) };
 	} catch {
-		return false;
+		return { ok: false };
 	}
+}
+
+/**
+ * Healthy and, when both sides advertise a flavor, the requested one. Older
+ * servers without a flavor field remain attachable.
+ */
+async function isHealthy(url: string, expectedFlavor: string | undefined = process.env.RELAY_FLAVOR): Promise<boolean> {
+	const health = await probeHealth(url);
+	if (!health.ok) return false;
+	return expectedFlavor === undefined || health.flavor === undefined || health.flavor === expectedFlavor;
+}
+
+function flavorMismatch(health: HealthProbe, expectedFlavor = process.env.RELAY_FLAVOR): string | null {
+	if (!expectedFlavor || !health.flavor || health.flavor === expectedFlavor) return null;
+	return `Relay at this URL is running in ${health.flavor} mode, but ${expectedFlavor} mode was requested.`;
+}
+
+function foreignModeError(health: HealthProbe): Error | null {
+	const mismatch = flavorMismatch(health);
+	if (!mismatch) return null;
+	const stopCommand = relayCommandFor(health.flavor, "stop");
+	return new Error(`${mismatch} Stop it with \`${stopCommand}\`, or set RELAY_PORT to run both modes side by side.`);
 }
 
 /** Port the background server should use: explicit `RELAY_PORT`, else the default. */
@@ -108,18 +150,6 @@ function preferredPort(): number {
 	const explicit = Number(process.env.RELAY_PORT);
 	if (Number.isInteger(explicit) && explicit > 0) return explicit;
 	return DEFAULT_PORT;
-}
-
-/**
- * Whether the CLI may start the server on a fallback ephemeral port when the
- * preferred one is taken by something other than a healthy Relay server.
- * Development convenience only: an explicit `RELAY_PORT` is always respected,
- * and production deployments must surface a port conflict instead of hiding it.
- */
-function portFallbackAllowed(): boolean {
-	const explicit = Number(process.env.RELAY_PORT);
-	if (Number.isInteger(explicit) && explicit > 0) return false;
-	return process.env.RELAY_ENV !== "production";
 }
 
 function startTimeoutMs(): number {
@@ -143,19 +173,11 @@ function adoptedState(url: string, port: number, cwd: string): ServerState {
 	};
 }
 
-/** Bind an ephemeral port, release it, and return the number. */
-async function pickFreePort(): Promise<number> {
-	const server = createServer();
-	await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-	const address = server.address();
-	const port = typeof address === "object" && address ? address.port : 0;
-	await new Promise<void>((resolve) => server.close(() => resolve()));
-	return port;
-}
-
 /** Arguments that re-launch this program as a foreground server. */
 function serverArgs(): string[] {
-	const entry = fileURLToPath(new URL("../../server/main.ts", import.meta.url));
+	// In a SEA the executable is the server entry; re-exec it with `serve`.
+	if (isSea()) return ["serve"];
+	const entry = fileURLToPath(new URL("../../server/entry.ts", import.meta.url));
 	return [entry];
 }
 
@@ -270,7 +292,12 @@ async function waitForRunningServer(preferred: number, cwd: string): Promise<Ser
 		const state = readState();
 		if (state && state.pid > 0 && (await isHealthy(state.url))) return state;
 		const url = loopbackUrl(preferred);
-		if (await isHealthy(url)) return adoptedState(url, preferred, cwd);
+		const health = await probeHealth(url);
+		if (health.ok) {
+			const foreign = foreignModeError(health);
+			if (foreign) throw foreign;
+			return adoptedState(url, preferred, cwd);
+		}
 		await delay(150);
 	}
 	return null;
@@ -286,7 +313,10 @@ export async function ensureServer(options: { cwd: string }): Promise<ServerStat
 	const explicit = process.env.RELAY_SERVER_URL;
 	if (explicit) {
 		const url = explicit.replace(/\/+$/, "");
-		if (!(await isHealthy(url))) throw new Error(`Cannot reach the Relay server at ${url}.`);
+		const health = await probeHealth(url);
+		if (!health.ok) throw new Error(`Cannot reach the Relay server at ${url}.`);
+		const mismatch = flavorMismatch(health);
+		if (mismatch) throw new Error(`${mismatch} Set RELAY_SERVER_URL to the matching mode or unset it.`);
 		return {
 			url,
 			port: new URL(url).port ? Number(new URL(url).port) : 0,
@@ -302,32 +332,34 @@ export async function ensureServer(options: { cwd: string }): Promise<ServerStat
 	if (existing) clearState();
 
 	// Adopt a healthy server on the preferred port even without a state file —
-	// for example a foreground `relay serve` started outside the supervisor.
+	// for example a foreground `relay serve` started outside the supervisor. A
+	// healthy server for the *other* mode is a conflict, not a fallback: silently
+	// moving to another port would leave the open browser pointing at the old
+	// mode.
 	const preferred = preferredPort();
-	if (await isHealthy(loopbackUrl(preferred))) return adoptedState(loopbackUrl(preferred), preferred, options.cwd);
-
-	const fallbackAllowed = portFallbackAllowed();
-	let port = preferred;
-	for (let attempt = 1; ; attempt++) {
-		const outcome = await awaitStart(spawnServer(port, options.cwd), port, options.cwd);
-		if (outcome.kind === "started") return outcome.state;
-		if (outcome.kind === "exited") throw startupFailure(outcome.detail);
-		if (outcome.kind === "timeout") {
-			throw startupFailure(`${outcome.detail} (it may still be starting; run \`relay\` again to attach)`);
-		}
-
-		// The port was taken from under us: another CLI may be bringing a server
-		// up on it right now, so look before falling back.
-		const winner = await waitForRunningServer(preferred, options.cwd);
-		if (winner) return winner;
-		if (!fallbackAllowed || attempt >= MAX_START_ATTEMPTS) {
-			throw startupFailure(
-				`port ${port} is already in use and is not answering as a Relay server. ` +
-					`Stop the process holding it, or set RELAY_PORT to a free port.`,
-			);
-		}
-		port = await pickFreePort();
+	const preferredUrl = loopbackUrl(preferred);
+	const preferredHealth = await probeHealth(preferredUrl);
+	if (preferredHealth.ok) {
+		const foreign = foreignModeError(preferredHealth);
+		if (foreign) throw foreign;
+		return adoptedState(preferredUrl, preferred, options.cwd);
 	}
+
+	const outcome = await awaitStart(spawnServer(preferred, options.cwd), preferred, options.cwd);
+	if (outcome.kind === "started") return outcome.state;
+	if (outcome.kind === "exited") throw startupFailure(outcome.detail);
+	if (outcome.kind === "timeout") {
+		throw startupFailure(`${outcome.detail} (it may still be starting; run \`${relayCommand()}\` again to attach)`);
+	}
+
+	// The port was taken from under us: another CLI may be bringing the same
+	// mode up on it right now. Adopt it if so; otherwise surface the bind error.
+	const winner = await waitForRunningServer(preferred, options.cwd);
+	if (winner) return winner;
+	throw startupFailure(
+		`port ${preferred} is already in use and is not answering as a Relay server. ` +
+			`Stop the process holding it, or set RELAY_PORT to a different port.`,
+	);
 }
 
 /** True when this CLI currently has valid credentials for the server. */
@@ -374,7 +406,7 @@ export async function ensureAuthenticated(state: ServerState): Promise<void> {
 	if (status.status === "unreachable") {
 		throw new Error(
 			`Cannot reach the Relay server at ${state.url} (${status.detail}). ` +
-				`Check ${logPath()}, then run \`relay stop\` and \`relay\` again.`,
+				`Check ${logPath()}, then run \`${relayCommand("stop")}\` and \`${relayCommand()}\` again.`,
 		);
 	}
 
@@ -390,7 +422,7 @@ export async function ensureAuthenticated(state: ServerState): Promise<void> {
 			return;
 		}
 	}
-	throw new Error("Sign-in timed out. Open the web client, sign in, then run `relay` again.");
+	throw new Error(`Sign-in timed out. Open the web client, sign in, then run \`${relayCommand()}\` again.`);
 }
 
 export type ApiKeyStatus =
@@ -430,24 +462,16 @@ export async function ensureApiKey(state: ServerState): Promise<void> {
 	const status = await apiKeyStatus(state.url);
 	if (status.status === "configured") return;
 	if (status.status === "unauthenticated") {
-		throw new Error("Not signed in. Run `relay` again to sign in.");
+		throw new Error(`Not signed in. Run \`${relayCommand()}\` again to sign in.`);
 	}
 	if (status.status === "unreachable") {
 		throw new Error(
 			`Cannot reach the Relay server at ${state.url} (${status.detail}). ` +
-				`Check ${logPath()}, then run \`relay stop\` and \`relay\` again.`,
+				`Check ${logPath()}, then run \`${relayCommand("stop")}\` and \`${relayCommand()}\` again.`,
 		);
 	}
 
-	// In development the web origin is Vite (e.g. localhost:5173); fall back to
-	// the web app the server itself serves when that is not running, so the user
-	// is never sent to a dead page.
-	let webOrigin = state.webUrl || state.url;
-	if (webOrigin !== state.url && !(await isReachable(webOrigin))) {
-		webOrigin = state.url;
-	}
-
-	const settingsUrl = new URL("/settings", webOrigin).toString();
+	const settingsUrl = new URL("/settings", state.webUrl || state.url).toString();
 	console.log(`No API key configured. Opening ${settingsUrl} — add one to continue.`);
 	openBrowser(settingsUrl);
 
@@ -461,7 +485,7 @@ export async function ensureApiKey(state: ServerState): Promise<void> {
 			return;
 		}
 		if (current.status === "unauthenticated") {
-			throw new Error("Signed out while waiting for the API key. Run `relay` again.");
+			throw new Error(`Signed out while waiting for the API key. Run \`${relayCommand()}\` again.`);
 		}
 		if (current.status === "unreachable" && !warned) {
 			// A transient blip (server restart) should not abort the wait; the
@@ -470,7 +494,9 @@ export async function ensureApiKey(state: ServerState): Promise<void> {
 			console.log(`Lost contact with the server (${current.detail}); waiting for it to return…`);
 		}
 	}
-	throw new Error("Timed out waiting for an API key. Add one in the web Settings page, then run `relay` again.");
+	throw new Error(
+		`Timed out waiting for an API key. Add one in the web Settings page, then run \`${relayCommand()}\` again.`,
+	);
 }
 
 /** Stop the background server recorded in the state file. */ export async function stopServer(): Promise<void> {
@@ -508,19 +534,11 @@ export async function printStatus(): Promise<void> {
 		return;
 	}
 	const alive = await isHealthy(state.url);
+	console.log(`Mode:      ${process.env.RELAY_FLAVOR === "local" ? "local" : "cloud"}`);
 	console.log(`Server:    ${state.url} (${alive ? "running" : "not responding"})`);
 	console.log(`Workspace: ${state.cwd}`);
 	console.log(`Web:       ${state.webUrl}`);
 	if (state.pid > 0) console.log(`PID:       ${state.pid}`);
-}
-
-async function isReachable(url: string): Promise<boolean> {
-	try {
-		await fetch(url, { signal: AbortSignal.timeout(HEALTH_TIMEOUT_MS) });
-		return true;
-	} catch {
-		return false;
-	}
 }
 
 /** `relay web`: ensure a server, open the browser at the workspace, then return (or stay watching). */
@@ -542,14 +560,7 @@ export async function runWeb(args: string[]): Promise<void> {
 	}
 
 	const state = await ensureServer({ cwd: process.cwd() });
-	let webUrl = state.webUrl || state.url;
-
-	// In development the web origin is Vite (e.g. localhost:5173); if that is
-	// not running, fall back to the web app the server itself serves.
-	if (webUrl !== state.url && !(await isReachable(webUrl))) {
-		console.log(`Web client at ${webUrl} is not running; using the server's bundled web app.`);
-		webUrl = state.url;
-	}
+	const webUrl = state.webUrl || state.url;
 
 	// Deep-link into the workspace pane; an unregistered directory shows the
 	// "add workspace" flow rather than failing.

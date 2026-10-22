@@ -203,7 +203,7 @@ export class RunManager {
 		return true;
 	}
 
-	/** Number of active runs (for tests and diagnostics). */
+	/** Number of active runs (for diagnostics). */
 	get activeCount(): number {
 		let count = 0;
 		for (const session of this.sessions.values()) {

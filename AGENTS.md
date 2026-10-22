@@ -11,9 +11,11 @@ Terminal-based coding agent with custom TUI framework.
 │   │   └── core/           # Agent loop, runner, tools, sessions, context, display
 │   ├── client/             # Wire protocol + RelayClient + Effect service layer (@vvtxn/client)
 │   ├── server/             # HTTP + SSE server hosting the runtime (@vvtxn/server)
+│   ├── box/                # Per-session Microsandbox runtime (@vvtxn/box)
 │   ├── cli/                # TUI client + serve subcommand (@vvtxn/cli)
 │   │   ├── agent/          # App entry point, config, components, hooks
 │   │   └── tui/            # Terminal UI framework (JSX runtime, Yoga layout)
+│   ├── local/              # Linux x64 single-executable packaging (@vvtxn/local)
 │   └── web/                # Solid + Vite SPA client (@vvtxn/web)
 │       └── src/            # Effect API layer, TanStack Query/Router, components
 ├── scripts/                # Env loading and version bump scripts
@@ -32,11 +34,14 @@ packages/client  (protocol + transport + shared session-state reducer)
        ↑                    ↑
 packages/server       packages/cli / packages/web
 (HTTP + SSE runtime)  (clients — TUI and browser)
+       ↑
+packages/local        (Linux x64 single executable; packages cli + server)
 ```
 
 All clients (CLI, web) talk to the server over the shared protocol in `packages/client`; the agent runtime executes only
 in the server. `packages/relay` powers the server and provides display + theme utilities to clients. Both clients fold
-`ServerEvent`s with the same reducer (`packages/client/session-state.ts`).
+`ServerEvent`s with the same reducer (`packages/client/session-state.ts`). `packages/box` is the optional Microsandbox
+runtime consumed by the server.
 
 ## Effect Runtime Boundaries
 
@@ -63,17 +68,19 @@ modules stay Effect-free on purpose.
 - **Check formatting**: `pnpm fmt:check`
 - **Lint**: `pnpm lint`
 - **Type-check**: `pnpm check` (strict; checks every entrypoint)
-- **Run CLI**: `pnpm relay` (starts/reuses the background server, then the TUI; non-TUI subcommands run from source
-  without a bundle build — see `scripts/relay.ts`)
-- **Open web client**: `pnpm relay web` (ensures the server, opens the browser)
-- **Stop/status the background server**: `pnpm relay stop` / `pnpm relay status`
-- **Manage workspaces**: `pnpm relay workspace add|list|remove [path]` (no TUI; attaches to the running server)
-- **Install the shared terminal font**: `pnpm relay fonts install` / `pnpm relay fonts status`
-- **Run server (foreground)**: `pnpm serve` (dev alias; loads mode env files)
-- **Run server (prod)**: `pnpm serve:prod` (sets `RELAY_ENV=production`)
-- **Run web dev server**: `pnpm web:dev` (Vite; proxies `/api` to `127.0.0.1:7433`)
-- **Build web app**: `pnpm web:build` (Vite → `packages/web/dist`; serve with `RELAY_STATIC_DIR`)
+- **Run CLI (cloud, primary)**: `pnpm relay` (builds the bundled web app + CLI, starts/reuses the cloud server, then
+  the TUI; lifecycle-only subcommands skip builds — see `scripts/relay.ts`)
+- **Run CLI (local self-host)**: `pnpm relay:local` (SQLite + local auth; same subcommands)
+- **Open web client**: `pnpm relay web` / `pnpm relay:local web`
+- **Stop/status the background server**: `pnpm relay stop|status` / `pnpm relay:local stop|status` (mode-specific
+  state files)
+- **Manage workspaces**: `pnpm relay workspace add|list|remove [path]` or `pnpm relay:local workspace …`
+- **Install the shared terminal font**: `pnpm relay fonts install|status` or `pnpm relay:local fonts …`
+- **Run cloud server (foreground)**: `pnpm relay serve`
+- **Run local server (foreground)**: `pnpm relay:local serve`
+- **Build web app**: `pnpm web:build` (Vite → `packages/web/dist`; served by the relay commands)
 - **Build web app + CLI bundle**: `pnpm build`
+- **Build Linux x64 single executable**: `pnpm build:sea` (outputs `dist/relay`)
 
 ## Task Completion Checklist
 
@@ -81,10 +88,15 @@ After concluding that a task is complete, always run these commands in order:
 
 1. `pnpm exec vp fmt` — auto-format all code
 2. `pnpm check` — format, lint, and type-check (Oxfmt, Oxlint, tsgo via Vite+)
-3. `pnpm exec vp test` — run the test suites (`packages/*/test`)
 
 If any command fails, fix the issues and re-run until they pass cleanly. Do not report the task as done until they pass
 cleanly.
+
+### Testing
+
+Do not add low-signal test suites to the repository. Verify changes end-to-end when possible (run the CLI/server, exercise
+the API or UI). If a focused unit check is necessary, write a temporary test for that specific feature, use it to verify
+the change, and remove it before finishing. There is no permanent test suite; CI runs checks and builds only.
 
 ### Type Checking
 
@@ -95,23 +107,23 @@ TypeScript's defaults: `noUncheckedIndexedAccess`, `exactOptionalPropertyTypes`,
 Prefer real guards over `!`; use `!` only where an invariant is already guaranteed.
 
 Code must also run under Node's native TypeScript type stripping: no enums, namespaces, parameter properties, or other
-syntax that requires transformation. Only `packages/cli` is bundled (for JSX).
+syntax that requires transformation. The CLI and the single-executable entry are bundled (for JSX).
 
-### Environment & Modes
+### Environment
 
-`RELAY_ENV` selects `development` (default) or `production`. Tasks run through `scripts/run-env.ts`, which merges env
-files with explicit precedence — **process env > `.env.<mode>.local` > `.env.<mode>` > `.env.local` > `.env`** (Node has
-no multi-file "if exists" env loading, so the merge is explicit). Files resolve relative to the working directory,
-falling back to the current worktree root and then the main worktree root, so gitignored secrets also load in linked
-worktrees.
+Relay has one gitignored `.env`; process env wins. `scripts/run-env.ts` reads `.env` from the working directory, the
+current worktree root, then the main worktree root, so linked worktrees pick up the main checkout's secrets.
 
-- `.env.development` / `.env.production` — committed non-secret mode defaults.
-- `.env.local`, `.env.<mode>.local` — gitignored secrets (`TURSO_*`, `GITHUB_APP_*`).
+- `pnpm relay` — cloud (Turso + GitHub); requires those keys in `.env`.
+- `pnpm relay:local` — local (SQLite + local auth); ignores Turso/GitHub.
 - `.env.example` — template for every key.
+
+There are no development/production env files and no `RELAY_ENV` mode.
 
 ### Build & Version
 
 - **Build web app + CLI bundle**: `pnpm build`
+- **Build Linux x64 single executable**: `pnpm build:sea` (outputs `dist/relay`)
 - **Show version**: `pnpm run version`
 - **Bump version**: `pnpm run version:bump <patch|minor|major>`
 
@@ -122,7 +134,8 @@ Tag-based releases via GitHub Actions (`.github/workflows/release.yml`):
 1. `pnpm run version:bump <patch|minor|major>`
 2. Commit and push to `main`
 3. `git tag v<version> && git push --tags`
-4. CI verifies checks and creates the GitHub Release (source-only — no binary is published)
+4. CI verifies checks, builds `dist/relay`, and creates the GitHub Release with the Linux x64 executable and its
+   checksum
 
 ## Import Aliases
 
@@ -137,7 +150,7 @@ import { Box, Text } from "#/tui/render/components.tsx";
 ```
 
 > **Native-Node caveat**: `#/` specifiers are only resolved by bundlers (Vite / `vp pack`). Node's native ESM
-> loader rejects `#/` (`ERR_INVALID_MODULE_SPECIFIER`), and the server runs unbundled (`node packages/server/main.ts`).
+> loader rejects `#/` (`ERR_INVALID_MODULE_SPECIFIER`), and the server runs unbundled (`node packages/server/entry.ts`).
 > Files reachable at runtime by the server (or any `node` entry) must use **relative** imports for runtime bindings;
 > `import type` is fine either way since it is erased. The bundled CLI and web clients can keep using `#/`.
 
@@ -176,8 +189,10 @@ Each sub-package has its own AGENTS.md with package-specific details:
 - `packages/relay/core/AGENTS.md` - Agent loop, runner, tools, sessions
 - `packages/client/AGENTS.md` - Wire protocol and HTTP/SSE client
 - `packages/server/AGENTS.md` - HTTP + SSE server hosting the agent runtime
+- `packages/box/AGENTS.md` - Per-session Microsandbox microVMs and workspace manifests
 - `packages/cli/agent/AGENTS.md` - CLI application and TUI components
 - `packages/cli/tui/AGENTS.md` - Terminal UI framework
+- `packages/local/AGENTS.md` - Linux x64 single-executable packaging
 - `packages/web/AGENTS.md` - Solid + Vite web client (TanStack Query/Router + Effect)
 
 ## Git Conventions

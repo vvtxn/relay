@@ -45,8 +45,6 @@ fires when the stream response is established (clients use it to know events can
 and `RelayError`/`isUnauthorized` are the shared failure vocabulary. The transport below it stays Promise-based on
 purpose: environments without an Effect runtime (the TUI bundle) use `RelayClient` directly.
 
-Tests for this module live in `test/services.test.ts` and run under Node (`pnpm exec vp test`).
-
 ### Session state (`session-state.ts`)
 
 The shared event fold: `applyServerEvent(state, event)` is a pure reducer over `ServerEvent` producing display-ready
@@ -65,7 +63,6 @@ After concluding that a task is complete, always run these commands from the rep
 
 1. `pnpm exec vp fmt` — auto-format all code
 2. `pnpm check` — format, lint, and type-check (Oxfmt, Oxlint, tsgo via Vite+)
-3. `pnpm exec vp test` — run the test suites
 
 ## Code Patterns
 

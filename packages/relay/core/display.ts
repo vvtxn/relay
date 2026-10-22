@@ -34,6 +34,22 @@ export interface DiffLine {
 	content: string;
 }
 
+/** One hunk of a unified diff. */
+export interface DiffHunk {
+	/** The `@@ -old,count +new,count @@` header line. */
+	header: string;
+	lines: DiffLine[];
+}
+
+/** One file's section of a unified diff. */
+export interface DiffFile {
+	/** Path parsed from the `+++` header (without the `b/` prefix), when present. */
+	path?: string;
+	hunks: DiffHunk[];
+}
+
+const HUNK_HEADER = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/;
+
 // ---------------------------------------------------------------------------
 // Tool display names
 // ---------------------------------------------------------------------------
@@ -189,6 +205,8 @@ export interface ToolCallGroup {
 	stat: string;
 	/** Calls in the group that returned an error. */
 	errorCount: number;
+	/** Underlying calls in their original order, for per-call detail rendering. */
+	calls: UIToolCall[];
 }
 
 /** A call without a result yet (its output/diff/error arrives later). */
@@ -231,6 +249,50 @@ function compactToolArgs(name: string, calls: UIToolCall[]): string {
 		: `${truncateText(joined, ARG_LIST_MAX_LENGTH - suffix.length)}${suffix}`;
 }
 
+/**
+ * Added/removed line counts from a unified diff. Only hunk bodies count, so
+ * git/file headers and `---`/`+++` lines are never mistaken for changes.
+ */
+export function diffStats(raw: string): { adds: number; deletes: number } {
+	let adds = 0;
+	let deletes = 0;
+	let inHunk = false;
+	let oldRemaining = 0;
+	let newRemaining = 0;
+
+	for (const line of raw.split("\n")) {
+		if (line.startsWith("diff --git ")) {
+			inHunk = false;
+			continue;
+		}
+		if (line.startsWith("@@")) {
+			const match = HUNK_HEADER.exec(line);
+			inHunk = match !== null;
+			oldRemaining = Number.parseInt(match?.[2] ?? "1", 10);
+			newRemaining = Number.parseInt(match?.[4] ?? "1", 10);
+			continue;
+		}
+		if (!inHunk) continue;
+
+		if (line.startsWith("+")) {
+			adds++;
+			newRemaining--;
+		} else if (line.startsWith("-")) {
+			deletes++;
+			oldRemaining--;
+		} else if (line.startsWith(" ")) {
+			oldRemaining--;
+			newRemaining--;
+		} else {
+			continue;
+		}
+
+		if (oldRemaining <= 0 && newRemaining <= 0) inHunk = false;
+	}
+
+	return { adds, deletes };
+}
+
 /** Aggregate the group's completed results into one short stat. */
 function groupStat(name: string, calls: UIToolCall[]): string {
 	if (calls.some(isPendingToolCall)) return "running…";
@@ -264,10 +326,9 @@ function groupStat(name: string, calls: UIToolCall[]): string {
 			for (const tool of done) {
 				if (!tool.diff) continue;
 				hasDiff = true;
-				for (const line of tool.diff.split("\n")) {
-					if (line.startsWith("+") && !line.startsWith("+++")) adds++;
-					else if (line.startsWith("-") && !line.startsWith("---")) deletes++;
-				}
+				const stats = diffStats(tool.diff);
+				adds += stats.adds;
+				deletes += stats.deletes;
 			}
 			return hasDiff ? `+${adds} −${deletes}` : formatCount(done.length, "file", "files");
 		}
@@ -305,6 +366,7 @@ export function groupToolCalls(toolCalls: UIToolCall[]): ToolCallGroup[] {
 			args: compactToolArgs(name, calls),
 			stat: groupStat(name, calls),
 			errorCount: calls.filter((tool) => tool.isError === true).length,
+			calls,
 		};
 	});
 }
@@ -337,36 +399,93 @@ export function expandHome(path: string, home?: string): string {
 // Diff parsing
 // ---------------------------------------------------------------------------
 
-const DIFF_HEADER_PREFIXES = ["diff ", "index ", "--- ", "+++ "];
-
-export function parseDiffLines(raw: string): DiffLine[] {
-	const lines: DiffLine[] = [];
+/**
+ * Parse a unified diff into files and hunks with line numbers.
+ *
+ * Tolerant of extra git metadata (`index`, mode lines, `\ No newline …`) and
+ * of diffs without `diff --git` headers. Header-looking content lines inside a
+ * hunk are treated as content, never as headers: hunk lengths come from the
+ * `@@` header, so a `--- foo` deletion is unambiguous until the hunk is full.
+ */
+export function parseDiff(raw: string): DiffFile[] {
+	const files: DiffFile[] = [];
+	let current: DiffFile | null = null;
+	let hunk: DiffHunk | null = null;
 	let oldLine = 0;
 	let newLine = 0;
+	let oldRemaining = 0;
+	let newRemaining = 0;
+
+	const ensureFile = (): DiffFile => {
+		if (!current) {
+			current = { hunks: [] };
+			files.push(current);
+		}
+		return current;
+	};
 
 	for (const line of raw.split("\n")) {
-		if (DIFF_HEADER_PREFIXES.some((p) => line.startsWith(p))) continue;
-		if (line.startsWith("@@")) {
-			const m = line.match(/@@ -(\d+)(?:,\d+)? \+(\d+)/);
-			if (m) {
-				oldLine = parseInt(m[1] ?? "0");
-				newLine = parseInt(m[2] ?? "0");
-			}
+		if (line.startsWith("diff --git ")) {
+			const match = /^diff --git a\/(.+) b\/(.+)$/.exec(line);
+			const path = match?.[2];
+			current = { ...(path ? { path } : {}), hunks: [] };
+			files.push(current);
+			hunk = null;
 			continue;
 		}
-		if (line.startsWith("+")) {
-			lines.push({ lineNo: newLine++, prefix: "+", content: line.slice(1) });
-		} else if (line.startsWith("-")) {
-			lines.push({ lineNo: oldLine++, prefix: "-", content: line.slice(1) });
-		} else {
-			lines.push({
-				lineNo: newLine,
-				prefix: " ",
-				content: line.startsWith(" ") ? line.slice(1) : line,
-			});
-			oldLine++;
-			newLine++;
+
+		if (line.startsWith("@@")) {
+			const file = ensureFile();
+			const match = HUNK_HEADER.exec(line);
+			oldLine = Number.parseInt(match?.[1] ?? "0", 10);
+			newLine = Number.parseInt(match?.[3] ?? "0", 10);
+			oldRemaining = Number.parseInt(match?.[2] ?? "1", 10);
+			newRemaining = Number.parseInt(match?.[4] ?? "1", 10);
+			hunk = { header: line, lines: [] };
+			file.hunks.push(hunk);
+			continue;
+		}
+
+		if (hunk) {
+			if (line === "" || line.startsWith("\\")) continue;
+
+			if (line.startsWith("+")) {
+				hunk.lines.push({ lineNo: newLine++, prefix: "+", content: line.slice(1) });
+				newRemaining--;
+			} else if (line.startsWith("-")) {
+				hunk.lines.push({ lineNo: oldLine++, prefix: "-", content: line.slice(1) });
+				oldRemaining--;
+			} else if (line.startsWith(" ")) {
+				hunk.lines.push({ lineNo: newLine, prefix: " ", content: line.slice(1) });
+				oldLine++;
+				newLine++;
+				oldRemaining--;
+				newRemaining--;
+			} else {
+				continue;
+			}
+
+			if (oldRemaining <= 0 && newRemaining <= 0) hunk = null;
+			continue;
+		}
+
+		// File headers and metadata outside a hunk. A `---` line after a file
+		// section starts a new file even when the patch omits `diff --git`.
+		if (line.startsWith("--- ")) {
+			if (current && current.hunks.length > 0) current = null;
+			continue;
+		}
+		if (line.startsWith("+++ ")) {
+			const file = ensureFile();
+			const headerPath = line.slice(4).split("\t")[0] ?? "";
+			const path = headerPath.startsWith("b/") ? headerPath.slice(2) : headerPath;
+			if (path && path !== "/dev/null") file.path = path;
 		}
 	}
-	return lines;
+
+	return files;
+}
+
+export function parseDiffLines(raw: string): DiffLine[] {
+	return parseDiff(raw).flatMap((file) => file.hunks.flatMap((hunk) => hunk.lines));
 }

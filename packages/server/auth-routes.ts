@@ -1,4 +1,4 @@
-import { Effect } from "effect";
+import { Duration, Effect } from "effect";
 import { HttpServerResponse, type HttpServerRequest } from "effect/http";
 import {
 	authenticate,
@@ -12,7 +12,7 @@ import { attempt, causeMessage, type StoreError } from "@vvtxn/relay/core/effect
 import type { StatusResponse } from "@vvtxn/client/protocol.ts";
 import type { ServerServices } from "./services.ts";
 import { error, json, requestUrl } from "./http.ts";
-import { clearCookie, isSecureOrigin, serializeCookie } from "./cookies.ts";
+import { isSecureOrigin } from "./cookies.ts";
 import { isLoopbackHost } from "./config.ts";
 import { readSessionToken, SESSION_COOKIE, sessionTtlMs } from "./identity.ts";
 import { OAUTH_RETURN_COOKIE, OAUTH_STATE_COOKIE, OAUTH_VERIFIER_COOKIE } from "./identity.ts";
@@ -24,15 +24,10 @@ const SECONDS_PER_DAY = 86_400;
 function cookieOptions(services: ServerServices) {
 	return {
 		httpOnly: true,
-		sameSite: "Lax" as const,
+		sameSite: "lax" as const,
 		secure: isSecureOrigin(services.config.publicUrl),
 		path: "/",
 	};
-}
-
-/** A redirect response carrying one or more `Set-Cookie` headers. */
-function redirectWithCookies(location: string, cookies: string[]): HttpServerResponse.HttpServerResponse {
-	return HttpServerResponse.setHeaders(HttpServerResponse.redirect(location), { "set-cookie": cookies });
 }
 
 /**
@@ -75,12 +70,12 @@ export function handleLogin(
 			challenge,
 		});
 
-		const options = { ...cookieOptions(services), maxAgeSeconds: OAUTH_COOKIE_MAX_AGE_SECONDS };
-		return redirectWithCookies(authorizeUrl, [
-			serializeCookie(OAUTH_STATE_COOKIE, state, options),
-			serializeCookie(OAUTH_VERIFIER_COOKIE, verifier, options),
-			serializeCookie(OAUTH_RETURN_COOKIE, returnTo, options),
-		]);
+		const options = { ...cookieOptions(services), maxAge: Duration.seconds(OAUTH_COOKIE_MAX_AGE_SECONDS) };
+		let response = HttpServerResponse.redirect(authorizeUrl);
+		response = HttpServerResponse.setCookieUnsafe(response, OAUTH_STATE_COOKIE, state, options);
+		response = HttpServerResponse.setCookieUnsafe(response, OAUTH_VERIFIER_COOKIE, verifier, options);
+		response = HttpServerResponse.setCookieUnsafe(response, OAUTH_RETURN_COOKIE, returnTo, options);
+		return response;
 	});
 }
 
@@ -127,15 +122,15 @@ export function handleCallback(
 			writeStoredSession({ serverUrl: config.publicUrl, token, createdAt: new Date().toISOString() });
 		}
 
-		return redirectWithCookies(returnTo, [
-			serializeCookie(SESSION_COOKIE, token, {
-				...cookieOptions(services),
-				maxAgeSeconds: config.sessionTtlDays * SECONDS_PER_DAY,
-			}),
-			clearCookie(OAUTH_STATE_COOKIE),
-			clearCookie(OAUTH_VERIFIER_COOKIE),
-			clearCookie(OAUTH_RETURN_COOKIE),
-		]);
+		let response = HttpServerResponse.redirect(returnTo);
+		response = HttpServerResponse.setCookieUnsafe(response, SESSION_COOKIE, token, {
+			...cookieOptions(services),
+			maxAge: Duration.seconds(config.sessionTtlDays * SECONDS_PER_DAY),
+		});
+		response = HttpServerResponse.expireCookieUnsafe(response, OAUTH_STATE_COOKIE, cookieOptions(services));
+		response = HttpServerResponse.expireCookieUnsafe(response, OAUTH_VERIFIER_COOKIE, cookieOptions(services));
+		response = HttpServerResponse.expireCookieUnsafe(response, OAUTH_RETURN_COOKIE, cookieOptions(services));
+		return response;
 	});
 
 	return run.pipe(
@@ -154,6 +149,6 @@ export function handleLogout(
 			if (readStoredSession()?.token === token) clearStoredSession();
 		}
 		const response = json({ status: "ok" } satisfies StatusResponse);
-		return HttpServerResponse.setHeaders(response, { "set-cookie": [clearCookie(SESSION_COOKIE)] });
+		return HttpServerResponse.expireCookieUnsafe(response, SESSION_COOKIE, cookieOptions(services));
 	});
 }

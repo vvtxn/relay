@@ -1,6 +1,6 @@
 import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { runCommand } from "@vvtxn/relay/core/command.ts";
 import { font } from "@vvtxn/relay/core/fonts.ts";
 import { homeDir } from "@vvtxn/relay/core/paths.ts";
@@ -15,7 +15,10 @@ import { homeDir } from "@vvtxn/relay/core/paths.ts";
  * sits at the same depth), so the same code works from a source checkout.
  */
 
-const FONT_ASSET_DIR = new URL("../../relay/assets/fonts/", import.meta.url);
+const fontAssetDir = process.env.RELAY_FONT_DIR;
+const FONT_ASSET_DIR = fontAssetDir
+	? pathToFileURL(fontAssetDir.endsWith("/") ? fontAssetDir : `${fontAssetDir}/`)
+	: new URL("../../relay/assets/fonts/", import.meta.url);
 
 const USAGE = `Usage: relay fonts <command>
 

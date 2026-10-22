@@ -15,8 +15,7 @@ box/
 ├── sanitize.ts       # removes host credentials from the clone
 ├── config.ts         # .relay/box.json parsing + defaults merge
 ├── env.ts            # box command environment allowlist
-├── microsandbox.ts   # the only native-SDK import (lazy dynamic import)
-└── test/
+└── microsandbox.ts   # the only native-SDK import (lazy dynamic import)
 ```
 
 ## Rules
@@ -36,8 +35,6 @@ box/
 ```bash
 pnpm exec vp fmt
 pnpm check
-pnpm exec vp test
-RELAY_BOX_TEST=1 pnpm exec vp test packages/box/test/microsandbox.integration.test.ts
 ```
 
-The integration test needs KVM and pulls `alpine` (or `RELAY_BOX_TEST_IMAGE`). It is skipped by default.
+Verify box behavior end-to-end with `RELAY_BOX=1 pnpm relay:local` when KVM is available.

@@ -1,5 +1,5 @@
 import type { Effect } from "effect";
-import { createDatabaseClient, type DatabaseClient } from "../database.ts";
+import type { DatabaseClient } from "../database.ts";
 import { storeEffect, type StoreError } from "../effect.ts";
 import { isEncryptedSecret, type SecretCipher, userSettingsAad } from "./secret.ts";
 
@@ -40,18 +40,17 @@ export function apiKeyHint(apiKey: string): string {
 }
 
 export interface DatabaseUserSettingsStoreOptions {
-	url: string;
-	authToken: string;
-	client?: DatabaseClient;
+	client: DatabaseClient;
 	/** Encrypts keys at rest; constructed from the server's master key. */
 	cipher: SecretCipher;
 }
 
 /**
  * Database-backed per-user settings. The LLM API key is stored encrypted
- * (AES-GCM, owner-bound AAD) because the database is remote: a leaked database
- * or database token yields ciphertext only. Rows written before encryption was
- * introduced are read as plaintext and upgraded in place on first read.
+ * (AES-GCM, owner-bound AAD) because the database may be remote: a leaked
+ * database or database token yields ciphertext only. Rows written before
+ * encryption was introduced are read as plaintext and upgraded in place on
+ * first read.
  */
 export class DatabaseUserSettingsStore implements UserSettingsStore {
 	private readonly client: DatabaseClient;
@@ -59,7 +58,7 @@ export class DatabaseUserSettingsStore implements UserSettingsStore {
 	private readonly schemaReady: Promise<void>;
 
 	constructor(options: DatabaseUserSettingsStoreOptions) {
-		this.client = options.client ?? createDatabaseClient({ url: options.url, authToken: options.authToken });
+		this.client = options.client;
 		this.cipher = options.cipher;
 		this.schemaReady = this.initialize();
 	}

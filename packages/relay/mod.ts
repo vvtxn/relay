@@ -69,16 +69,18 @@ export type { RunnerCallbacks } from "./core/runner.ts";
 export {
 	abbreviateHome,
 	createUIToolCall,
+	diffStats,
 	entriesToUIMessages,
 	expandHome,
 	getToolDisplayName,
 	getToolDisplayOutput,
 	groupToolCalls,
+	parseDiff,
 	parseDiffLines,
 	summarizeToolArgs,
 	TOOL_DISPLAY_NAMES,
 } from "./core/display.ts";
-export type { DiffLine, ToolCallGroup, UIMessage, UIToolCall } from "./core/display.ts";
+export type { DiffFile, DiffHunk, DiffLine, ToolCallGroup, UIMessage, UIToolCall } from "./core/display.ts";
 
 // Theme (shared design tokens for terminal and web clients)
 export { theme, themeToCssVariables } from "./core/theme.ts";
@@ -146,11 +148,12 @@ export type {
 } from "./core/index.ts";
 
 // Database (shared Turso client for the session and user stores)
-export { createDatabaseClient, databaseCredentialsFromEnv } from "./core/database.ts";
+export { createDatabaseClient, normalizeDatabaseUrl } from "./core/database.ts";
 export type { DatabaseClient, DatabaseCredentials } from "./core/database.ts";
 
 // Paths
 export { homeDir, relayDir } from "./core/paths.ts";
+export { serverLogPath, serverStatePath } from "./core/server-state.ts";
 
 // System prompt (shared default + registry-aware builder)
 export { buildSystemPrompt, SYSTEM_PROMPT } from "./core/system-prompt.ts";

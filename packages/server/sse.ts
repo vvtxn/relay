@@ -22,7 +22,7 @@ export function handleEvents(
 		services.runs.attachHandle(sessionId, handle, services.user.id);
 
 		// Immediate comment frame flushes response headers through proxies
-		// (e.g. the Vite dev proxy) before the first real event arrives.
+		// before the first real event arrives.
 		const preamble: Uint8Array[] = [new TextEncoder().encode(": connected\n\n")];
 		// Catch-up snapshot for late subscribers
 		const snapshot = services.runs.getRunState(sessionId);

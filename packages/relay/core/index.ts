@@ -6,15 +6,17 @@ export type { RunnerCallbacks } from "./runner.ts";
 
 export {
 	createUIToolCall,
+	diffStats,
 	entriesToUIMessages,
 	getToolDisplayName,
 	getToolDisplayOutput,
 	groupToolCalls,
+	parseDiff,
 	parseDiffLines,
 	summarizeToolArgs,
 	TOOL_DISPLAY_NAMES,
 } from "./display.ts";
-export type { DiffLine, ToolCallGroup, UIMessage, UIToolCall } from "./display.ts";
+export type { DiffFile, DiffHunk, DiffLine, ToolCallGroup, UIMessage, UIToolCall } from "./display.ts";
 
 export { estimateMessageTokens, estimateTokens, trimContext } from "./context.ts";
 export type { TrimOptions } from "./context.ts";
@@ -48,7 +50,7 @@ export type {
 	WorkspaceSummary,
 } from "./sessions/index.ts";
 
-export { createDatabaseClient, databaseCredentialsFromEnv } from "./database.ts";
+export { createDatabaseClient, normalizeDatabaseUrl } from "./database.ts";
 export type { DatabaseClient, DatabaseCredentials } from "./database.ts";
 
 export { DatabaseUserStore } from "./auth/db.ts";
@@ -78,6 +80,7 @@ export type { AuthenticatedUser, AuthIdentity, AuthProvider, UserDirectory, User
 export { scrubbedAgentEnv } from "./env.ts";
 
 export { homeDir, relayDir } from "./paths.ts";
+export { serverLogPath, serverStatePath } from "./server-state.ts";
 
 export { buildSystemPrompt, SYSTEM_PROMPT } from "./system-prompt.ts";
 export type { BuildSystemPromptOptions, SystemPromptMode } from "./system-prompt.ts";

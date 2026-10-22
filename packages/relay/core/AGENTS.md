@@ -17,7 +17,7 @@ core/
 ├── context.ts            # Context trimming (token estimation, turn-based truncation)
 ├── effect.ts             # Shared Effect helpers: attempt, causeMessage, StoreError, storeEffect
 ├── env.ts                # scrubbedAgentEnv(): credential-free environment for tool subprocesses
-├── database.ts           # Shared Turso client factory + env credentials (used by session and user stores)
+├── database.ts           # Shared libSQL client factory (local file or Turso) used by every store
 ├── auth/                 # Identity + sessions
 │   ├── types.ts          # AuthIdentity, AuthenticatedUser, AuthProvider, UserStore, UserDirectory
 │   ├── github.ts         # GitHubAuthProvider (profile → identity)
@@ -118,9 +118,12 @@ Shared across all clients (TUI, web). Deliberately dependency-free so browser bu
 - `getToolDisplayOutput()` — Formats tool output as concise summaries for display
 - `groupToolCalls()` — Collapses a turn's tool calls into one row per tool (first-seen order): compact targets
   (`app.tsx, chat.tsx +2 more`, capped by count and length), an aggregated stat (`12 matches in 3 files`, `+4 −2`,
-  `running…` while results are pending), and an error count
+  `running…` while results are pending), an error count, and the underlying `calls` for per-call detail rendering
 - `abbreviateHome()` / `expandHome()` — Replace a home-directory prefix with `~` for display and back
-- `parseDiffLines()` — Parses unified diff into structured `DiffLine[]` (without color assignment)
+- `parseDiff()` — Parses unified diffs into files → hunks → lines with line numbers; handles git headers, multiple
+  hunks/files, no-newline markers, and header-looking content lines
+- `diffStats()` — Added/removed line counts from a diff's hunk bodies (never file headers)
+- `parseDiffLines()` — Flat `DiffLine[]` view of `parseDiff()`, kept for the web's plain-line diff fallback
 
 ### Tool System
 
@@ -198,8 +201,9 @@ actually wires (workspace tools + `delegate`), and `createDelegateTool` defaults
 
 - `DatabaseSessionStore` stores shared sessions and ordered messages in the database; `SessionHandle` operations
   (`append`, `flush`) are Effects that fail with `StoreError`, while synchronous in-memory reads stay synchronous.
-  Each owner/workspace is capped at `maxSessionsPerWorkspace` (default 10): persisting a user message atomically
-  deletes older sessions and their entries, and `pruneAll()` trims pre-existing overflow at startup.
+  Each owner/workspace is capped at `maxSessionsPerWorkspace` (`0` = unlimited; local default). With a finite limit,
+  persisting a user message atomically deletes older sessions and their entries, and `pruneAll()` trims pre-existing
+  overflow at startup.
 - `FileSessionStore` preserves the JSONL implementation for fallback tooling (also Effect-facing)
 - Session ownership and workspace are explicit in `SessionScope`
 - `authenticate()` and the auth store interfaces (`UserStore`, `UserDirectory`, `AuthSessionStore`, `UserSettingsStore`)
@@ -227,12 +231,7 @@ These remain promise-based IO helpers (wrapped with `attempt` at Effect call sit
 ## Dependencies
 
 - `effect` (v4) — the agent runtime (streams, retries, tool execution, store contracts)
-- `@tursodatabase/serverless` — database client for the stores
-
-## Testing
-
-`pnpm exec vp test` runs the suites under `test/`. The agent-loop tests drive `TestClock` for virtual backoff/timeout
-proving and use a scripted `Stream` provider.
+- `@libsql/client` — one libSQL client for both embedded local files and remote Turso databases
 
 ## Task Completion Checklist
 
@@ -240,7 +239,6 @@ After concluding that a task is complete, always run these commands from the rep
 
 1. `pnpm exec vp fmt` — auto-format all code
 2. `pnpm check` — format, lint, and type-check (Oxfmt, Oxlint, tsgo via Vite+)
-3. `pnpm exec vp test` — run the test suites
 
 ## Code Patterns
 
