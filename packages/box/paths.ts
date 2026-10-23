@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { closeSync, mkdirSync, openSync, readFileSync, rmSync, writeSync } from "node:fs";
 import { join } from "node:path";
 import { BoxError } from "./errors.ts";
@@ -7,8 +7,19 @@ import type { BoxSettings } from "./types.ts";
 export const BOX_DIR_MODE = 0o700;
 export const BOX_FILE_MODE = 0o600;
 
-/** Stable, filesystem-safe identity for a session. */
-export function boxIdFor(sessionId: string): string {
+/**
+ * Generate an independent, filesystem-safe box id. Boxes are not derived from
+ * sessions: a box can outlive its attachments and be attached elsewhere.
+ */
+export function createBoxId(): string {
+	return randomBytes(18).toString("base64url");
+}
+
+/**
+ * Legacy v1 identity. Only used to recognize manifests created before boxes
+ * were decoupled from sessions; new code must use {@link createBoxId}.
+ */
+export function legacyBoxIdFor(sessionId: string): string {
 	return createHash("sha256").update(sessionId).digest("base64url").slice(0, 26);
 }
 

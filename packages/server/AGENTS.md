@@ -21,6 +21,9 @@ server/
 ├── http.ts          # json()/error() helpers, requestUrl, readJsonBody, HTTP error classes
 ├── sessions.ts      # /api/me, /api/config, session CRUD, message submission
 ├── run.ts           # RunManager: one fiber per run, SSE fan-out, approvals
+├── box-tools.ts     # box bash executor + model-facing box status/resize tool
+├── boxes.ts         # /api/boxes routes (create/list/attach/resize/pause/stop/rm)
+├── box-summary.ts   # BoxStatus -> wire BoxSummary projection
 ├── approvals.ts     # /api/sessions/:id/approve + /cancel handlers
 ├── sse.ts           # GET /api/sessions/:id/events (snapshot + live stream + heartbeat)
 ├── files.ts         # GET /api/sessions/:id/files (project file listing for @-mentions)
@@ -86,7 +89,8 @@ sessions created in-process are not yet visible to `store.open()`; all session r
 The database store keeps at most `RELAY_MAX_SESSIONS_PER_WORKSPACE` sessions per owner/workspace. `0` means unlimited
 (the local default); Turso deployments default to 10. When a user message is persisted with a finite limit, the
 insert/update and the delete of older sessions plus their entries run in one atomic batch. `pruneAll()` trims
-pre-existing overflow on startup, before any runs are active.
+pre-existing overflow on startup, before any runs are active. `DatabaseSessionStore.onPruned` reports removed session
+ids; `createServices` wires it to `boxes.detachSessions` so pruned threads do not keep box attachments alive.
 
 The per-session workspace cwd comes from the client (CLI sends its terminal cwd). File tools are confined to that cwd;
 bash is not (documented in relay core AGENTS.md).
@@ -164,8 +168,20 @@ starting": it adopts a healthy winner, otherwise it reports the bind error. The 
 | `/api/sessions/:id/cancel`   | POST   | Abort active run                                      |
 | `/api/sessions/:id/events`   | GET    | SSE stream                                            |
 | `/api/sessions/:id/files`    | GET    | Project file listing                                  |
+| `/api/boxes`                 | GET    | List the caller's boxes + capacity                    |
+| `/api/boxes`                 | POST   | Create a standalone box (optional cwd/profile)        |
+| `/api/boxes/:id`             | GET    | Box status                                            |
+| `/api/boxes/:id/attach`      | POST   | Attach a session                                      |
+| `/api/boxes/:id/detach`      | POST   | Detach a session                                      |
+| `/api/boxes/:id/resize`      | POST   | Live-resize to tiny/small/medium                      |
+| `/api/boxes/:id/pause`       | POST   | Pause an idle box (services stay warm)                |
+| `/api/boxes/:id/resume`      | POST   | Resume a paused box                                   |
+| `/api/boxes/:id/stop`        | POST   | Stop an idle box                                      |
+| `/api/boxes/:id`             | DELETE | Detach attachments and remove the box                 |
 
-Payload types live in `@vvtxn/client/protocol.ts` — never redeclare them here.
+Payload types live in `@vvtxn/client/protocol.ts` — never redeclare them here. Box routes are owner-checked through
+`ownedBox`; only the box owner may inspect or control it. `GET /api/sessions/:id` includes the attached `box` summary
+when boxes are enabled.
 
 ## Environment
 
@@ -184,6 +200,11 @@ Payload types live in `@vvtxn/client/protocol.ts` — never redeclare them here.
   cloud default is 10
 - Settings storage: `RELAY_SETTINGS_STORE` (`file` default, or `database`), `RELAY_DATA_DIR` (default `~/.relay`),
   `RELAY_SECRET_KEY` / `RELAY_SECRET_KEY_FILE` (master key; required with the database backend)
+- Boxes (off by default): `RELAY_BOX=1`, `RELAY_BOX_PROFILE` (`tiny` default), `RELAY_BOX_MAX_PROFILE` (`small`),
+  `RELAY_BOX_IMAGE`, `RELAY_BOX_MAX_RUNNING`, `RELAY_BOX_MAX_CPUS`, `RELAY_BOX_MEMORY_BUDGET_MIB`,
+  `RELAY_BOX_VM_OVERHEAD_MIB`, `RELAY_BOX_PAUSE_MS`, `RELAY_BOX_STOP_MS`, `RELAY_BOX_RETENTION_MS`,
+  `RELAY_BOX_ACQUIRE_TIMEOUT_MS`, `RELAY_BOX_SETUP_TIMEOUT_MS`, `RELAY_BOX_DATA_DIR`, `RELAY_BOX_CACHE_DIR`,
+  `RELAY_BOX_SETUP`, `RELAY_BOX_RESUME`, `RELAY_BOX_GITHUB_TOKEN`, `RELAY_BOX_GIT_HOST`
 
 ## Running
 

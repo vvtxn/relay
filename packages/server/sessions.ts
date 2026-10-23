@@ -17,6 +17,7 @@ import type {
 	SessionListResponse,
 	WorkspacesResponse,
 } from "@vvtxn/client/protocol.ts";
+import { boxSummary } from "./box-summary.ts";
 import type { RequestServices } from "./services.ts";
 import { BadRequestError, error, ForbiddenError, json, NotFoundError, readJsonBody, requestUrl } from "./http.ts";
 import { RunConflictError } from "./run.ts";
@@ -168,7 +169,7 @@ export function handleOpenSession(
 	return Effect.gen(function* () {
 		const handle = yield* openSessionHandle(services, sessionId);
 		services.runs.attachHandle(sessionId, handle, services.user.id);
-		const box = yield* services.boxes.status(sessionId).pipe(Effect.catchCause(() => Effect.succeed(null)));
+		const box = yield* services.boxes.findBySession(sessionId).pipe(Effect.catchCause(() => Effect.succeed(null)));
 		const branch = yield* attempt(() => getGitBranch(box?.workspace ?? handle.getHeader().cwd)).pipe(
 			Effect.catchCause(() => Effect.succeed(null)),
 		);
@@ -180,6 +181,7 @@ export function handleOpenSession(
 			cost: handle.getCost(),
 			branch,
 			running: services.runs.isRunning(sessionId),
+			...(box ? { box: boxSummary(box) } : {}),
 		} satisfies OpenSessionResponse);
 	});
 }

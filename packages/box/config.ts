@@ -1,7 +1,8 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { BoxError } from "./errors.ts";
-import type { BoxSettings, ProjectBoxConfig } from "./types.ts";
+import { isBoxProfile, profileRank, profileResources } from "./profiles.ts";
+import type { BoxProfile, BoxSettings, ProjectBoxConfig } from "./types.ts";
 
 const PROJECT_CONFIG_PATH = join(".relay", "box.json");
 
@@ -17,6 +18,14 @@ function optionalString(value: unknown, field: string): string | undefined {
 	if (value === undefined) return undefined;
 	if (typeof value !== "string" || value.trim().length === 0) {
 		throw new BoxError({ message: `.relay/box.json: ${field} must be a non-empty string` });
+	}
+	return value;
+}
+
+function optionalProfile(value: unknown, field: string): BoxProfile | undefined {
+	if (value === undefined) return undefined;
+	if (!isBoxProfile(value)) {
+		throw new BoxError({ message: `.relay/box.json: ${field} must be "tiny", "small", or "medium"` });
 	}
 	return value;
 }
@@ -55,6 +64,8 @@ export function parseProjectConfig(raw: unknown): ProjectBoxConfig {
 	const known = new Set([
 		"version",
 		"image",
+		"profile",
+		"maxProfile",
 		"cpus",
 		"memoryMiB",
 		"rootDiskMiB",
@@ -69,6 +80,8 @@ export function parseProjectConfig(raw: unknown): ProjectBoxConfig {
 
 	const config: ProjectBoxConfig = { version: 1 };
 	const image = optionalString(value.image, "image");
+	const profile = optionalProfile(value.profile, "profile");
+	const maxProfile = optionalProfile(value.maxProfile, "maxProfile");
 	const cpus = positiveInteger(value.cpus, "cpus");
 	const memoryMiB = positiveInteger(value.memoryMiB, "memoryMiB");
 	const rootDiskMiB = positiveInteger(value.rootDiskMiB, "rootDiskMiB");
@@ -77,6 +90,8 @@ export function parseProjectConfig(raw: unknown): ProjectBoxConfig {
 	const env = stringMap(value.env, "env");
 	const exclude = stringList(value.exclude, "exclude");
 	if (image !== undefined) config.image = image;
+	if (profile !== undefined) config.profile = profile;
+	if (maxProfile !== undefined) config.maxProfile = maxProfile;
 	if (cpus !== undefined) config.cpus = cpus;
 	if (memoryMiB !== undefined) config.memoryMiB = memoryMiB;
 	if (rootDiskMiB !== undefined) config.rootDiskMiB = rootDiskMiB;
@@ -109,11 +124,21 @@ export async function readProjectConfig(projectCwd: string): Promise<ProjectBoxC
 /** Project config overrides server defaults field by field. */
 export function resolveBoxSettings(defaults: BoxSettings, project: ProjectBoxConfig | null): BoxSettings {
 	if (!project) return defaults;
+	const maxProfile = project.maxProfile ?? defaults.maxProfile;
+	const requestedProfile = project.profile ?? defaults.profile;
+	// A project can lower the ceiling but never raise it past the server default.
+	const profile = profileRank(requestedProfile) > profileRank(maxProfile) ? maxProfile : requestedProfile;
+	const resources = profileResources(profile);
+	const cpus = project.cpus ?? (project.profile ? resources.cpus : defaults.cpus);
+	const memoryMiB = project.memoryMiB ?? (project.profile ? resources.memoryMiB : defaults.memoryMiB);
+	const rootDiskMiB = project.rootDiskMiB ?? (project.profile ? resources.rootDiskMiB : defaults.rootDiskMiB);
 	return {
 		image: project.image ?? defaults.image,
-		cpus: project.cpus ?? defaults.cpus,
-		memoryMiB: project.memoryMiB ?? defaults.memoryMiB,
-		rootDiskMiB: project.rootDiskMiB ?? defaults.rootDiskMiB,
+		profile,
+		maxProfile,
+		cpus,
+		memoryMiB,
+		rootDiskMiB,
 		...(project.setup !== undefined
 			? { setup: project.setup }
 			: defaults.setup !== undefined

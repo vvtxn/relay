@@ -8,12 +8,22 @@ import type {
 	RuntimeBoxInfo,
 	RuntimeCreateInput,
 	RuntimeExecOptions,
+	RuntimeResizeInput,
+	RuntimeResizeResult,
 	RuntimeStatus,
 } from "./types.ts";
 
 type MicrosandboxModule = typeof import("microsandbox");
 
 const MAX_STREAM_BYTES = 2 * 1024 * 1024;
+const GIT_ASKPASS_PATH = "/usr/local/bin/relay-git-askpass";
+const GIT_ASKPASS_SCRIPT = `#!/bin/sh
+case "$1" in
+  *Username*) printf '%s\\n' "x-access-token" ;;
+  *Password*) printf '%s\\n' "\${GITHUB_TOKEN:-}" ;;
+  *) printf '\\n' ;;
+esac
+`;
 
 function normalizeStatus(status: string): RuntimeStatus {
 	switch (status) {
@@ -66,10 +76,13 @@ export class MicrosandboxRuntime implements BoxRuntime {
 	async create(input: RuntimeCreateInput): Promise<void> {
 		const ms = await this.module();
 		mkdirSync(this.cacheDir, { recursive: true, mode: 0o700 });
-		const builder = ms.Sandbox.builder(input.name)
+		let builder = ms.Sandbox.builder(input.name)
 			.image(input.settings.image)
 			.cpus(input.settings.cpus)
+			// Hotplug ceilings let the manager resize live without recreating the VM.
+			.maxCpus(Math.max(input.maxCpus, input.settings.cpus))
 			.memory(input.settings.memoryMiB)
+			.maxMemory(Math.max(input.maxMemoryMiB, input.settings.memoryMiB))
 			.rootDisk(input.settings.rootDiskMiB)
 			.workdir("/workspace")
 			.detached(true)
@@ -77,7 +90,13 @@ export class MicrosandboxRuntime implements BoxRuntime {
 			.volume("/workspace", (mount) => mount.bind(input.workspace))
 			.volume("/relay-cache", (mount) => mount.bind(this.cacheDir))
 			.envs(boxBaseEnv(input.settings))
-			.labels(input.labels);
+			.labels(input.labels)
+			.patch((patch) => patch.text(GIT_ASKPASS_PATH, GIT_ASKPASS_SCRIPT, { mode: 0o755, replace: true }));
+		for (const secret of input.secrets) {
+			for (const host of secret.allowedHosts) {
+				builder = builder.secretEnv(secret.envVar, secret.value, host);
+			}
+		}
 		try {
 			const sandbox = await builder.create();
 			await sandbox.detach();
@@ -95,6 +114,55 @@ export class MicrosandboxRuntime implements BoxRuntime {
 			this.handles.set(name, sandbox);
 		} catch (error) {
 			throw toBoxError(error, `Could not start sandbox ${name}`);
+		}
+	}
+
+	async pause(name: string): Promise<void> {
+		const ms = await this.module();
+		try {
+			const handle = await ms.Sandbox.get(name);
+			await handle.pause();
+			this.handles.delete(name);
+		} catch (error) {
+			if (error instanceof ms.SandboxNotFoundError) return;
+			throw toBoxError(error, `Could not pause sandbox ${name}`);
+		}
+	}
+
+	async resume(name: string): Promise<void> {
+		const ms = await this.module();
+		try {
+			const handle = await ms.Sandbox.get(name);
+			await handle.resume();
+			const sandbox = await handle.connectOrStart({ detached: true });
+			this.handles.set(name, sandbox);
+		} catch (error) {
+			throw toBoxError(error, `Could not resume sandbox ${name}`);
+		}
+	}
+
+	async modify(name: string, input: RuntimeResizeInput): Promise<RuntimeResizeResult> {
+		const ms = await this.module();
+		try {
+			const handle = await ms.Sandbox.get(name);
+			const plan = await handle.modify({
+				cpus: input.cpus,
+				memory: input.memoryMiB,
+				rootDiskSize: input.rootDiskMiB,
+				policy: "no_restart",
+			});
+			return {
+				applied: plan.applied,
+				status: plan.status,
+				resizeStatus: plan.resizeStatus.map((status) => ({
+					resource: status.resource,
+					requested: status.requested,
+					actual: status.actual,
+					state: status.state,
+				})),
+			};
+		} catch (error) {
+			throw toBoxError(error, `Could not resize sandbox ${name}`);
 		}
 	}
 

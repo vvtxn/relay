@@ -29,8 +29,8 @@ over the same wire protocol. Tooling (format, lint, type-check, builds) runs thr
 - **Streaming agent loop** — Async generator that yields events for real-time UI updates as the LLM thinks and uses
   tools
 - **Built-in tools** — Bash, file read/write/edit, and grep for filesystem interaction
-- **Per-session boxes (experimental)** — Optional Microsandbox microVMs with copy-on-write workspaces, idle stop/wake,
-  and VM-isolated bash
+- **Managed boxes (experimental)** — Standalone Microsandbox microVMs with copy-on-write workspaces, live agent-driven
+  resizing, pause/wake, and VM-isolated bash
 - **Shared cloud sessions** — Conversations persist in Turso behind GitHub auth; local self-hosting uses SQLite
 - **Tool approval** — Side-effecting tools wait for an allow/deny decision
 - **Inline diffs** — File write and edit operations display colored unified diffs with line numbers
@@ -251,19 +251,33 @@ An HTTP + SSE server built on `effect/http` and `@effect/platform-node`:
   resolution, opaque hashed sessions, and an optional GitHub allowlist
 - **Static serving** — serves the bundled web app by default; `RELAY_STATIC_DIR` overrides its location
 
-### `packages/box/` — Per-session Microsandbox VMs
+### `packages/box/` — Managed Microsandbox VMs
 
-Optional isolated execution for a session. Each thread can get its own local Microsandbox microVM with a copy-on-write
-clone of the project working tree; file tools stay on the host clone, while `bash` runs inside the VM.
+Optional isolated execution. Boxes are independent of sessions: a box owns a Microsandbox microVM and a
+copy-on-write clone of a project, and sessions attach to it. The agent can resize the current box live; idle boxes
+pause first (services stay warm), then stop after a longer idle window.
 
-- `manager.ts` — lazy creation, stopped/idle lifecycle, `maxRunning` LRU scheduling, leases, reconciliation
+- `manager.ts` — box identity, attachments, leases, live resize, pause/stop, budgets, queue, reconciliation, GC
+- `profiles.ts` — `tiny` (1 vCPU / 2 GB), `small` (2 / 4 GB), `medium` (4 / 8 GB) with disk bundles
 - `workspace.ts` — reflink clone of the current working tree (including dirty/untracked state), linked-worktree handling
 - `sanitize.ts` — removes `.env*`, `.npmrc`, SSH/cloud credentials, and git URL credentials before the box starts
-- `manifest.ts` — versioned `box.json` per box under `RELAY_BOX_DATA_DIR`; no separate database
+- `manifest.ts` — versioned `box.json` per box under `RELAY_BOX_DATA_DIR`; sessions are attachments, not identity
 - `microsandbox.ts` — the only module that imports the native Microsandbox SDK
 
-Enable with `RELAY_BOX=1` and see `.env.example` for image, memory, concurrency, and idle settings. A project can add
-`.relay/box.json` for its image and setup/resume hooks. Boxes require Linux KVM, macOS Apple Silicon, or Windows WHP.
+Enable with `RELAY_BOX=1`; see `.env.example` for profiles, budgets, idle timers, and image settings. A project can add
+`.relay/box.json` for its image, profile ceiling, and setup/resume hooks. The agent starts at `tiny` and uses the `box`
+tool to resize before Playwright/browser tests, large builds, or multiple services. The default ceiling is `small`;
+set `RELAY_BOX_MAX_PROFILE=medium` and raise `RELAY_BOX_MEMORY_BUDGET_MIB` above 8 GiB to enable `medium`.
+
+Boxes require Linux KVM, macOS Apple Silicon, or Windows WHP. The manager enforces a memory/CPU budget in addition to
+the running-box count, so paused boxes and concurrent sessions cannot oversubscribe the host.
+
+Use `relay box list|new|resize|pause|resume|stop|attach|detach|rm` to manage boxes; `relay box new [path]` creates a
+standalone box without starting a thread.
+
+Boxes are the working copy: there is no sync-back command. When `RELAY_BOX_GITHUB_TOKEN` (or `GITHUB_TOKEN`) is set,
+the agent can commit and push from inside the box; the real token stays on the host and is substituted only for
+`RELAY_BOX_GIT_HOST` (default `github.com`). Without a token, local commits work but pushes fail.
 
 ### `packages/relay/api/` — LLM Provider Layer
 

@@ -246,6 +246,13 @@ export async function createServices(config: ServerConfig): Promise<ServerServic
 			const sessionStore = yield* SessionStore;
 			const runs = yield* Runs;
 			const boxes = yield* Boxes;
+			// Pruning happens inside the session store's write batch; detach the
+			// affected boxes asynchronously so retention can collect them later.
+			sessionStore.onPruned = (sessionIds) => {
+				void Effect.runPromise(boxes.detachSessions(new Set(sessionIds))).catch((error: unknown) => {
+					console.warn("relay box: could not detach pruned sessions:", error);
+				});
+			};
 			const localUser = serverConfig.authMode === "local" ? yield* resolveLocalUser(userStore) : null;
 			return {
 				config: serverConfig,

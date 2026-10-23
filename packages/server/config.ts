@@ -4,7 +4,8 @@ import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { homeDir, relayDir } from "@vvtxn/relay/core/paths.ts";
 import { validateWorkspacePathSync } from "@vvtxn/relay/core/workspace.ts";
-import type { BoxManagerConfig } from "@vvtxn/box/types.ts";
+import { isBoxProfile, profileRank, profileResources } from "@vvtxn/box/profiles.ts";
+import type { BoxManagerConfig, BoxProfile } from "@vvtxn/box/types.ts";
 
 /** Product mode. Cloud is the primary deployment; local is the self-hosted desktop mode. */
 export type RelayFlavor = "local" | "cloud";
@@ -133,17 +134,46 @@ function booleanEnv(value: string | undefined, fallback: boolean, name: string):
 	throw new Error(`${name} must be a boolean (got "${value}")`);
 }
 
+function boxProfileEnv(value: string | undefined, fallback: BoxProfile, name: string): BoxProfile {
+	if (value === undefined || value === "") return fallback;
+	if (!isBoxProfile(value)) {
+		throw new Error(`${name} must be "tiny", "small", or "medium" (got "${value}")`);
+	}
+	return value;
+}
+
 function boxConfigFromEnv(env: Record<string, string | undefined>): BoxManagerConfig {
 	const dataDir = expandHomePath(env.RELAY_BOX_DATA_DIR ?? join(relayDir(), "boxes"));
 	const cacheDir = expandHomePath(env.RELAY_BOX_CACHE_DIR ?? join(relayDir(), "box-cache"));
 	const setup = env.RELAY_BOX_SETUP?.trim();
 	const resume = env.RELAY_BOX_RESUME?.trim();
+	// `small` is the default ceiling so every selectable profile fits the
+	// default memory budget. Raise both to enable `medium`.
+	const maxProfile = boxProfileEnv(env.RELAY_BOX_MAX_PROFILE, "small", "RELAY_BOX_MAX_PROFILE");
+	const requestedProfile = boxProfileEnv(env.RELAY_BOX_PROFILE, "tiny", "RELAY_BOX_PROFILE");
+	const gitToken =
+		envValue(env, "RELAY_BOX_GITHUB_TOKEN") ?? envValue(env, "GITHUB_TOKEN") ?? envValue(env, "GH_TOKEN");
+	const gitHost = envValue(env, "RELAY_BOX_GIT_HOST") ?? "github.com";
+	const profile = profileRank(requestedProfile) > profileRank(maxProfile) ? maxProfile : requestedProfile;
+	const resources = profileResources(profile);
+	// Pause/stop/retention accept zero to disable that transition.
+	const pauseMs = nonNegativeInt(
+		env.RELAY_BOX_PAUSE_MS ?? env.RELAY_BOX_IDLE_MS,
+		5 * 60_000,
+		"RELAY_BOX_PAUSE_MS",
+		24 * 60 * 60_000,
+	);
+	const stopMs = nonNegativeInt(env.RELAY_BOX_STOP_MS, 60 * 60_000, "RELAY_BOX_STOP_MS", 7 * 24 * 60 * 60_000);
 	return {
 		enabled: booleanEnv(env.RELAY_BOX, false, "RELAY_BOX"),
 		dataDir,
 		cacheDir,
 		maxRunning: positiveInt(env.RELAY_BOX_MAX_RUNNING, 4, "RELAY_BOX_MAX_RUNNING", 64),
-		idleMs: positiveInt(env.RELAY_BOX_IDLE_MS, 5 * 60_000, "RELAY_BOX_IDLE_MS", 24 * 60 * 60_000),
+		maxCpus: positiveInt(env.RELAY_BOX_MAX_CPUS, 8, "RELAY_BOX_MAX_CPUS", 64),
+		maxMemoryMiB: positiveInt(env.RELAY_BOX_MEMORY_BUDGET_MIB, 6144, "RELAY_BOX_MEMORY_BUDGET_MIB", 1_048_576),
+		vmOverheadMiB: positiveInt(env.RELAY_BOX_VM_OVERHEAD_MIB, 128, "RELAY_BOX_VM_OVERHEAD_MIB", 65_536),
+		pauseMs,
+		stopMs,
 		acquireTimeoutMs: positiveInt(
 			env.RELAY_BOX_ACQUIRE_TIMEOUT_MS,
 			10 * 60_000,
@@ -156,11 +186,26 @@ function boxConfigFromEnv(env: Record<string, string | undefined>): BoxManagerCo
 			"RELAY_BOX_SETUP_TIMEOUT_MS",
 			24 * 60 * 60_000,
 		),
+		retentionMs: nonNegativeInt(
+			env.RELAY_BOX_RETENTION_MS,
+			7 * 24 * 60 * 60_000,
+			"RELAY_BOX_RETENTION_MS",
+			365 * 24 * 60 * 60_000,
+		),
+		maxProfile,
+		secrets: gitToken ? [{ envVar: "GITHUB_TOKEN", value: gitToken, allowedHosts: [gitHost] }] : [],
 		defaults: {
 			image: env.RELAY_BOX_IMAGE?.trim() || "node:26-bookworm",
-			cpus: positiveInt(env.RELAY_BOX_CPUS, 2, "RELAY_BOX_CPUS", 64),
-			memoryMiB: positiveInt(env.RELAY_BOX_MEMORY_MIB, 2048, "RELAY_BOX_MEMORY_MIB", 65_536),
-			rootDiskMiB: positiveInt(env.RELAY_BOX_ROOT_DISK_MIB, 8192, "RELAY_BOX_ROOT_DISK_MIB", 1_048_576),
+			profile,
+			maxProfile,
+			cpus: positiveInt(env.RELAY_BOX_CPUS, resources.cpus, "RELAY_BOX_CPUS", 64),
+			memoryMiB: positiveInt(env.RELAY_BOX_MEMORY_MIB, resources.memoryMiB, "RELAY_BOX_MEMORY_MIB", 65_536),
+			rootDiskMiB: positiveInt(
+				env.RELAY_BOX_ROOT_DISK_MIB,
+				resources.rootDiskMiB,
+				"RELAY_BOX_ROOT_DISK_MIB",
+				1_048_576,
+			),
 			...(setup ? { setup } : {}),
 			...(resume ? { resume } : {}),
 			env: {},

@@ -84,7 +84,10 @@ export async function startServer(): Promise<void> {
 	if (services.boxes.enabled) {
 		try {
 			await Effect.runPromise(services.boxes.reconcile());
-			console.log(`Boxes: enabled (${config.box.defaults.image}, max ${config.box.maxRunning} running)`);
+			console.log(
+				`Boxes: enabled (${config.box.defaults.image}, ${config.box.defaults.profile} default, ` +
+					`max ${config.box.maxRunning} running, ${config.box.maxMemoryMiB} MiB budget)`,
+			);
 		} catch (error) {
 			console.error(
 				"Box reconcile failed:",
@@ -147,6 +150,23 @@ export async function startServer(): Promise<void> {
 			"Failed to enforce the per-workspace session limit:",
 			error instanceof Error ? error.message : error,
 		);
+	}
+
+	// Reconcile box attachments with the sessions that survived pruning. Boxes
+	// without attachments are retained by TTL, not deleted on sight.
+	if (services.boxes.enabled) {
+		try {
+			const active = await Effect.runPromise(services.sessionStore.allSessionIds());
+			const collected = await Effect.runPromise(services.boxes.gc(active));
+			if (collected.detached > 0 || collected.trashed > 0 || collected.removed > 0) {
+				console.log(
+					`Box GC: detached ${collected.detached}, trashed ${collected.trashed}, ` +
+						`removed ${collected.removed} old workspace(s).`,
+				);
+			}
+		} catch (error) {
+			console.error("Box GC failed:", error instanceof Error ? error.message : error);
+		}
 	}
 
 	const app = createAppLayer(services);

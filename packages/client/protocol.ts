@@ -113,6 +113,63 @@ export interface OpenSessionResponse {
 	branch: string | null;
 	/** True while a run is active on this session (another client may be driving it). */
 	running: boolean;
+	/** The box attached to this session, when boxes are enabled. */
+	box?: BoxSummary;
+}
+
+// ---------------------------------------------------------------------------
+// Boxes
+// ---------------------------------------------------------------------------
+
+export type BoxProfileName = "tiny" | "small" | "medium";
+
+export type BoxLifecycleState = "provisioning" | "starting" | "ready" | "busy" | "paused" | "stopped" | "error";
+
+/** A managed execution box. Boxes are independent of sessions; attachments name users. */
+export interface BoxSummary {
+	boxId: string;
+	state: BoxLifecycleState;
+	/** Named profile, or "custom" when a project overrides exact resources. */
+	profile: BoxProfileName | "custom";
+	cpus: number;
+	memoryMiB: number;
+	rootDiskMiB: number;
+	attachments: string[];
+	originSessionId?: string;
+	createdAt: string;
+	lastUsedAt: string;
+	pausedAt?: string;
+	error?: string;
+	capacity?: {
+		maxRunning: number;
+		running: number;
+		maxCpus: number;
+		usedCpus: number;
+		maxMemoryMiB: number;
+		usedMemoryMiB: number;
+	};
+}
+
+export interface BoxListResponse {
+	boxes: BoxSummary[];
+}
+
+export interface BoxResponse {
+	box: BoxSummary;
+}
+
+export interface CreateBoxRequest {
+	/** Project directory to clone. Defaults to the server workspace. */
+	cwd?: string;
+	profile?: BoxProfileName;
+}
+
+export interface BoxAttachRequest {
+	sessionId: string;
+}
+
+export interface BoxResizeRequest {
+	profile: BoxProfileName;
 }
 
 export interface FileListResponse {

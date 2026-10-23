@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, statSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
 import { writeFile } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve } from "node:path";
 import { Effect } from "effect";
@@ -9,24 +9,29 @@ import { MicrosandboxRuntime } from "./microsandbox.ts";
 import {
 	acquireDataDirLock,
 	boxDir,
-	boxIdFor,
+	createBoxId,
 	dataDirHash,
 	ensureBoxDirs,
 	sandboxNameFor,
 	workspacePath,
 } from "./paths.ts";
+import { profileRank, profileResources } from "./profiles.ts";
 import { cleanupTempWorkspaces, prepareWorkspace } from "./workspace.ts";
 import type {
+	BoxAttachment,
 	BoxLease,
 	BoxManager,
 	BoxManagerConfig,
+	BoxProfile,
+	BoxRuntime,
+	BoxSettings,
 	BoxSpec,
 	BoxState,
 	BoxStatus,
 	ExecOptions,
 	ExecResult,
 	GcResult,
-	BoxRuntime,
+	RuntimeResizeResult,
 	RuntimeStatus,
 } from "./types.ts";
 
@@ -34,13 +39,33 @@ const SWEEP_INTERVAL_MS = 30_000;
 const TRASH_TTL_MS = 7 * 24 * 60 * 60_000;
 const MICROSANDBOX_VERSION = "0.7.8";
 
-interface RunningEntry {
+interface BoxResources {
+	cpus: number;
+	memoryMiB: number;
+}
+
+interface Resident {
+	boxId: string;
+	resources: BoxResources;
 	leases: number;
+	state: "starting" | "ready" | "busy" | "paused";
 	lastUsedAt: number;
+	pausedAt: number | null;
 	stopping: boolean;
 }
 
-type SlotOutcome = { kind: "reserved" } | { kind: "evict"; boxId: string } | { kind: "wait" };
+interface PendingAcquire {
+	boxId: string;
+	spec: BoxSpec;
+	resources: BoxResources;
+	isNew: boolean;
+	signal?: AbortSignal;
+	resolve: () => void;
+	reject: (error: BoxError) => void;
+	timer: NodeJS.Timeout | null;
+	settled: boolean;
+	cleanup: () => void;
+}
 
 class Mutex {
 	private tail: Promise<void> = Promise.resolve();
@@ -64,24 +89,26 @@ class Mutex {
 class Lease implements BoxLease {
 	private released = false;
 	private readonly manager: BoxManagerImpl;
+	readonly boxId: string;
 	readonly status: BoxStatus;
 	readonly workspace: string;
 
 	constructor(manager: BoxManagerImpl, status: BoxStatus, workspace: string) {
 		this.manager = manager;
+		this.boxId = status.boxId;
 		this.status = status;
 		this.workspace = workspace;
 	}
 
 	exec(command: string, options?: ExecOptions): Effect.Effect<ExecResult, BoxError> {
-		return this.manager.exec(this.status.sessionId, command, options);
+		return this.manager.exec(this.boxId, command, options);
 	}
 
 	release(): Effect.Effect<void> {
 		return Effect.promise(async () => {
 			if (this.released) return;
 			this.released = true;
-			await this.manager.release(this.status.sessionId);
+			await this.manager.release(this.boxId);
 		});
 	}
 }
@@ -90,12 +117,48 @@ class Lease implements BoxLease {
 export class DisabledBoxManager implements BoxManager {
 	readonly enabled = false;
 
+	create(): Effect.Effect<BoxStatus, BoxError> {
+		return Effect.fail(new BoxError({ message: "Boxes are disabled (set RELAY_BOX=1 to enable)" }));
+	}
+
 	acquire(): Effect.Effect<BoxLease, BoxError> {
 		return Effect.fail(new BoxError({ message: "Boxes are disabled (set RELAY_BOX=1 to enable)" }));
 	}
 
+	findBySession(): Effect.Effect<BoxStatus | null, BoxError> {
+		return Effect.succeed(null);
+	}
+
 	status(): Effect.Effect<BoxStatus | null, BoxError> {
 		return Effect.succeed(null);
+	}
+
+	list(): Effect.Effect<BoxStatus[], BoxError> {
+		return Effect.succeed([]);
+	}
+
+	attach(): Effect.Effect<BoxStatus, BoxError> {
+		return Effect.fail(new BoxError({ message: "Boxes are disabled (set RELAY_BOX=1 to enable)" }));
+	}
+
+	detach(): Effect.Effect<void, BoxError> {
+		return Effect.void;
+	}
+
+	detachSessions(): Effect.Effect<number, BoxError> {
+		return Effect.succeed(0);
+	}
+
+	resize(): Effect.Effect<BoxStatus, BoxError> {
+		return Effect.fail(new BoxError({ message: "Boxes are disabled (set RELAY_BOX=1 to enable)" }));
+	}
+
+	pause(): Effect.Effect<void, BoxError> {
+		return Effect.void;
+	}
+
+	resume(): Effect.Effect<void, BoxError> {
+		return Effect.void;
 	}
 
 	stop(): Effect.Effect<void, BoxError> {
@@ -107,7 +170,7 @@ export class DisabledBoxManager implements BoxManager {
 	}
 
 	gc(): Effect.Effect<GcResult, BoxError> {
-		return Effect.succeed({ removed: 0, trashed: 0 });
+		return Effect.succeed({ removed: 0, trashed: 0, detached: 0 });
 	}
 
 	reconcile(): Effect.Effect<void, BoxError> {
@@ -125,13 +188,17 @@ export class BoxManagerImpl implements BoxManager {
 	private readonly store: FileBoxStore;
 	private readonly runtime: BoxRuntime;
 	private readonly releaseLock: () => void;
-	private readonly running = new Map<string, RunningEntry>();
+	/** Resident VMs (starting, ready, busy, or paused); these consume budget. */
+	private readonly resident = new Map<string, Resident>();
 	private readonly boxesLock = new Map<string, Mutex>();
+	private readonly sessionsLock = new Map<string, Mutex>();
 	private readonly schedulerLock = new Mutex();
-	private readonly waiters: Array<() => void> = [];
+	private readonly queue: PendingAcquire[] = [];
+	private readonly sessionIndex = new Map<string, Set<string>>();
 	private sweepTimer: NodeJS.Timeout | null = null;
 	private sweeping = false;
 	private shuttingDown = false;
+	private pumpScheduled = false;
 
 	constructor(config: BoxManagerConfig, runtime?: BoxRuntime) {
 		this.config = config;
@@ -139,10 +206,25 @@ export class BoxManagerImpl implements BoxManager {
 		this.store = new FileBoxStore(config.dataDir);
 		this.releaseLock = acquireDataDirLock(config.dataDir);
 		this.runtime = runtime ?? new MicrosandboxRuntime(config.cacheDir);
+		this.rebuildSessionIndex();
 		this.sweepTimer = setInterval(() => {
 			void this.sweep();
 		}, SWEEP_INTERVAL_MS);
 		this.sweepTimer.unref();
+	}
+
+	create(spec: BoxSpec): Effect.Effect<BoxStatus, BoxError> {
+		return Effect.tryPromise({
+			try: async () => {
+				const boxId = this.nextBoxId();
+				const normalized: BoxSpec = { ...spec, settings: this.normalizeSettings(spec.settings) };
+				await this.withBoxLock(boxId, () => this.createManifest(normalized, boxId));
+				const status = await this.statusInternal(boxId);
+				if (!status) throw new BoxError({ message: `Box ${boxId} disappeared after creation` });
+				return status;
+			},
+			catch: (error) => toBoxError(error, "Could not create box"),
+		});
 	}
 
 	acquire(spec: BoxSpec): Effect.Effect<BoxLease, BoxError> {
@@ -152,23 +234,111 @@ export class BoxManagerImpl implements BoxManager {
 		});
 	}
 
-	status(sessionId: string): Effect.Effect<BoxStatus | null, BoxError> {
+	findBySession(sessionId: string): Effect.Effect<BoxStatus | null, BoxError> {
 		return Effect.tryPromise({
-			try: () => this.statusInternal(sessionId),
+			try: async () => {
+				const manifest = this.manifestForSession(sessionId);
+				return manifest ? await this.statusInternal(manifest.boxId) : null;
+			},
+			catch: (error) => toBoxError(error, "Could not find box"),
+		});
+	}
+
+	status(boxId: string): Effect.Effect<BoxStatus | null, BoxError> {
+		return Effect.tryPromise({
+			try: () => this.statusInternal(boxId),
 			catch: (error) => toBoxError(error, "Could not inspect box"),
 		});
 	}
 
-	stop(sessionId: string): Effect.Effect<void, BoxError> {
+	list(): Effect.Effect<BoxStatus[], BoxError> {
 		return Effect.tryPromise({
-			try: () => this.stopSession(sessionId),
+			try: async () => {
+				const statuses: BoxStatus[] = [];
+				for (const manifest of this.store.list()) {
+					const status = await this.statusInternal(manifest.boxId);
+					if (status) statuses.push(status);
+				}
+				return statuses.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+			},
+			catch: (error) => toBoxError(error, "Could not list boxes"),
+		});
+	}
+
+	attach(boxId: string, sessionId: string): Effect.Effect<BoxStatus, BoxError> {
+		return Effect.tryPromise({
+			try: async () => {
+				await this.withBoxLock(boxId, async () => {
+					await this.attachInternal(this.requireManifest(boxId), sessionId);
+				});
+				const status = await this.statusInternal(boxId);
+				if (!status) throw new BoxError({ message: `Box ${boxId} disappeared` });
+				return status;
+			},
+			catch: (error) => toBoxError(error, "Could not attach box"),
+		});
+	}
+
+	detach(boxId: string, sessionId: string): Effect.Effect<void, BoxError> {
+		return Effect.tryPromise({
+			try: async () => {
+				await this.withBoxLock(boxId, async () => {
+					const resident = this.resident.get(boxId);
+					if (resident && resident.leases > 0) {
+						throw new BoxError({ message: "Cannot detach a box while a run is using it" });
+					}
+					const manifest = this.requireManifest(boxId);
+					if (!manifest.attachments.some((attachment) => attachment.sessionId === sessionId)) return;
+					const next: BoxManifest = {
+						...manifest,
+						attachments: manifest.attachments.filter((attachment) => attachment.sessionId !== sessionId),
+					};
+					this.store.write(next);
+					this.unindexSession(sessionId, boxId);
+				});
+			},
+			catch: (error) => toBoxError(error, "Could not detach box"),
+		});
+	}
+
+	detachSessions(sessionIds: ReadonlySet<string>): Effect.Effect<number, BoxError> {
+		return Effect.tryPromise({
+			try: () => this.detachSessionsInternal(sessionIds),
+			catch: (error) => toBoxError(error, "Could not detach sessions"),
+		});
+	}
+
+	resize(boxId: string, profile: BoxProfile): Effect.Effect<BoxStatus, BoxError> {
+		return Effect.tryPromise({
+			try: () => this.resizeInternal(boxId, profile),
+			catch: (error) => toBoxError(error, "Could not resize box"),
+		});
+	}
+
+	pause(boxId: string): Effect.Effect<void, BoxError> {
+		return Effect.tryPromise({
+			try: () => this.pauseInternal(boxId),
+			catch: (error) => toBoxError(error, "Could not pause box"),
+		});
+	}
+
+	resume(boxId: string): Effect.Effect<void, BoxError> {
+		return Effect.tryPromise({
+			try: () => this.resumeInternal(boxId),
+			catch: (error) => toBoxError(error, "Could not resume box"),
+		});
+	}
+
+	stop(boxId: string): Effect.Effect<void, BoxError> {
+		return Effect.tryPromise({
+			try: () => this.stopInternal(boxId),
 			catch: (error) => toBoxError(error, "Could not stop box"),
 		});
 	}
 
-	destroy(sessionId: string): Effect.Effect<void, BoxError> {
+	destroy(boxId: string): Effect.Effect<void, BoxError> {
 		return Effect.tryPromise({
-			try: () => this.destroyInternal(sessionId),
+			try: () => this.destroyInternal(boxId),
 			catch: (error) => toBoxError(error, "Could not remove box"),
 		});
 	}
@@ -194,148 +364,364 @@ export class BoxManagerImpl implements BoxManager {
 		});
 	}
 
-	exec(sessionId: string, command: string, options: ExecOptions = {}): Effect.Effect<ExecResult, BoxError> {
+	exec(boxId: string, command: string, options: ExecOptions = {}): Effect.Effect<ExecResult, BoxError> {
 		return Effect.tryPromise({
-			try: () => this.execInternal(sessionId, command, options),
+			try: async () => {
+				const manifest = this.store.load(boxId);
+				if (!manifest) throw new BoxError({ message: `No box found: ${boxId}` });
+				const resident = this.resident.get(boxId);
+				if (!resident || resident.state === "paused") {
+					throw new BoxError({ message: `Box ${boxId} is not running` });
+				}
+				return await this.runtime.exec(manifest.sandboxName, command, {
+					cwd: options.cwd ?? "/workspace",
+					env: boxExecEnv(manifest.settings, options.env),
+					timeoutMs: options.timeoutMs ?? 30_000,
+					...(options.signal ? { signal: options.signal } : {}),
+				});
+			},
 			catch: (error) => toBoxError(error, "Command failed"),
 		});
 	}
 
-	async release(sessionId: string): Promise<void> {
-		const boxId = boxIdFor(sessionId);
+	async release(boxId: string): Promise<void> {
 		await this.schedulerLock.run(() => {
-			const entry = this.running.get(boxId);
-			if (!entry) return;
-			entry.leases = Math.max(0, entry.leases - 1);
-			entry.lastUsedAt = Date.now();
-			this.wakeWaiters();
+			const resident = this.resident.get(boxId);
+			if (!resident) return;
+			resident.leases = Math.max(0, resident.leases - 1);
+			if (resident.leases === 0) {
+				resident.state = "ready";
+				resident.lastUsedAt = Date.now();
+			}
 		});
+		const manifest = this.store.load(boxId);
+		if (manifest) {
+			this.store.write({ ...manifest, state: "ready", lastUsedAt: new Date().toISOString() });
+		}
+		this.schedulePump();
 	}
 
 	private async acquireInternal(spec: BoxSpec): Promise<BoxLease> {
-		if (spec.signal?.aborted) throw new BoxError({ message: "Box acquisition was cancelled" });
-		const boxId = boxIdFor(spec.sessionId);
-		await this.reserveSlot(boxId, spec.signal);
-
-		try {
-			const manifest = await this.withBoxLock(boxId, () => this.ensureManifestAndStart(spec));
-			return new Lease(this, this.statusFromManifest(manifest, "running"), manifest.workspacePath);
-		} catch (error) {
-			const entry = this.running.get(boxId);
-			if ((entry?.leases ?? 0) <= 1) {
-				const manifest = this.store.load(boxId);
-				if (manifest) await this.runtime.stop(manifest.sandboxName).catch(() => {});
+		const key = spec.sessionId ?? `standalone:${createBoxId()}`;
+		return await this.withSessionLock(key, async () => {
+			if (spec.signal?.aborted) throw new BoxError({ message: "Box acquisition was cancelled" });
+			let manifest = spec.sessionId ? this.manifestForSession(spec.sessionId) : null;
+			if (manifest && manifest.ownerId !== spec.ownerId) {
+				throw new BoxError({ message: "This box belongs to a different user" });
 			}
-			await this.releaseSlot(boxId);
-			throw error;
+			const isNew = manifest === null;
+			const boxId = manifest?.boxId ?? this.nextBoxId();
+			const settings = this.normalizeSettings(manifest?.settings ?? spec.settings);
+			const resources = { cpus: settings.cpus, memoryMiB: settings.memoryMiB };
+
+			await this.waitForGrant({
+				boxId,
+				spec: { ...spec, settings },
+				resources,
+				isNew,
+				...(spec.signal ? { signal: spec.signal } : {}),
+			});
+			if (spec.signal?.aborted) {
+				await this.releaseReservation(boxId, true);
+				throw new BoxError({ message: "Box acquisition was cancelled" });
+			}
+
+			try {
+				manifest = isNew
+					? await this.withBoxLock(boxId, () => this.createManifest(spec, boxId))
+					: this.requireManifest(boxId);
+				await this.withBoxLock(boxId, () => this.startBox(manifest as BoxManifest));
+				const status = await this.statusInternal(boxId);
+				if (!status) throw new BoxError({ message: `Box ${boxId} disappeared during startup` });
+				return new Lease(this, status, status.workspace);
+			} catch (error) {
+				const failed = this.store.load(boxId);
+				if (failed) {
+					await this.runtime.stop(failed.sandboxName).catch(() => {});
+					this.store.write({ ...failed, state: "error", error: toBoxError(error).message });
+				}
+				await this.releaseReservation(boxId, true);
+				throw toBoxError(error, "Could not start box");
+			}
+		});
+	}
+
+	private async waitForGrant(
+		item: Omit<PendingAcquire, "resolve" | "reject" | "timer" | "settled" | "cleanup">,
+	): Promise<void> {
+		return await new Promise<void>((resolvePromise, rejectPromise) => {
+			const pending: PendingAcquire = {
+				...item,
+				resolve: resolvePromise,
+				reject: rejectPromise,
+				timer: null,
+				settled: false,
+				cleanup: () => {},
+			};
+			const cleanup = (): void => {
+				if (pending.timer) clearTimeout(pending.timer);
+				pending.timer = null;
+				pending.signal?.removeEventListener("abort", onAbort);
+			};
+			const fail = (error: BoxError): void => {
+				if (pending.settled) return;
+				pending.settled = true;
+				cleanup();
+				const index = this.queue.indexOf(pending);
+				if (index >= 0) this.queue.splice(index, 1);
+				rejectPromise(error);
+			};
+			const onAbort = (): void => fail(new BoxError({ message: "Box acquisition was cancelled" }));
+			pending.cleanup = cleanup;
+			pending.timer = setTimeout(
+				() => fail(new BoxError({ message: "Timed out waiting for box capacity" })),
+				this.config.acquireTimeoutMs,
+			);
+			pending.timer.unref();
+			pending.signal?.addEventListener("abort", onAbort, { once: true });
+			this.queue.push(pending);
+			void this.pump();
+		});
+	}
+
+	private schedulePump(): void {
+		if (this.pumpScheduled) return;
+		this.pumpScheduled = true;
+		setImmediate(() => {
+			this.pumpScheduled = false;
+			void this.pump();
+		});
+	}
+
+	private async pump(): Promise<void> {
+		const grants: PendingAcquire[] = [];
+		const evictions: string[] = [];
+		await this.schedulerLock.run(() => {
+			if (this.shuttingDown) return;
+			for (let index = 0; index < this.queue.length;) {
+				const pending = this.queue[index];
+				if (!pending) break;
+				if (pending.settled) {
+					this.queue.splice(index, 1);
+					continue;
+				}
+				const resident = this.resident.get(pending.boxId);
+				if (resident) {
+					if (resident.stopping) break;
+					if (resident.leases > 0) break;
+					resident.leases = 1;
+					resident.state = "busy";
+					resident.lastUsedAt = Date.now();
+					this.queue.splice(index, 1);
+					grants.push(pending);
+					continue;
+				}
+				if (!this.canFit(pending.resources)) {
+					const victim = this.pickVictim();
+					if (victim) {
+						victim.stopping = true;
+						evictions.push(victim.boxId);
+					}
+					// Preserve FIFO: a large request blocks later requests until the
+					// capacity situation changes.
+					break;
+				}
+				this.resident.set(pending.boxId, {
+					boxId: pending.boxId,
+					resources: pending.resources,
+					leases: 1,
+					state: "starting",
+					lastUsedAt: Date.now(),
+					pausedAt: null,
+					stopping: false,
+				});
+				this.queue.splice(index, 1);
+				grants.push(pending);
+			}
+		});
+		for (const pending of grants) {
+			pending.settled = true;
+			pending.cleanup();
+			pending.resolve();
+		}
+		for (const boxId of evictions) void this.evict(boxId);
+	}
+
+	private canFit(resources: BoxResources): boolean {
+		if (this.resident.size >= this.config.maxRunning) return false;
+		let cpus = 0;
+		let memory = 0;
+		for (const resident of this.resident.values()) {
+			cpus += resident.resources.cpus;
+			memory += resident.resources.memoryMiB + this.config.vmOverheadMiB;
+		}
+		return (
+			cpus + resources.cpus <= this.config.maxCpus &&
+			memory + resources.memoryMiB + this.config.vmOverheadMiB <= this.config.maxMemoryMiB
+		);
+	}
+
+	private pickVictim(excludeBoxId?: string): Resident | null {
+		let victim: Resident | null = null;
+		for (const resident of this.resident.values()) {
+			if (resident.boxId === excludeBoxId) continue;
+			if (resident.leases > 0 || resident.stopping) continue;
+			if (!victim) {
+				victim = resident;
+				continue;
+			}
+			const residentPaused = resident.state === "paused";
+			const victimPaused = victim.state === "paused";
+			if (residentPaused !== victimPaused) {
+				if (residentPaused) victim = resident;
+				continue;
+			}
+			if (resident.lastUsedAt < victim.lastUsedAt) victim = resident;
+		}
+		return victim;
+	}
+
+	private async evict(boxId: string): Promise<void> {
+		const manifest = this.store.load(boxId);
+		try {
+			if (manifest) await this.runtime.stop(manifest.sandboxName);
+			await this.schedulerLock.run(() => {
+				this.resident.delete(boxId);
+			});
+			if (manifest) {
+				this.store.write({ ...manifest, state: "stopped", lastUsedAt: new Date().toISOString() });
+			}
+		} catch (error) {
+			console.warn(`relay box: could not evict ${boxId}: ${toBoxError(error).message}`);
+			await this.schedulerLock.run(() => {
+				const resident = this.resident.get(boxId);
+				if (resident) resident.stopping = false;
+			});
+		} finally {
+			this.schedulePump();
 		}
 	}
 
-	private async ensureManifestAndStart(spec: BoxSpec): Promise<BoxManifest> {
-		const boxId = boxIdFor(spec.sessionId);
+	private async releaseReservation(boxId: string, remove: boolean): Promise<void> {
+		await this.schedulerLock.run(() => {
+			const resident = this.resident.get(boxId);
+			if (!resident) return;
+			resident.leases = Math.max(0, resident.leases - 1);
+			if (remove || resident.leases === 0) {
+				this.resident.delete(boxId);
+				return;
+			}
+			resident.state = "ready";
+			resident.lastUsedAt = Date.now();
+		});
+		this.schedulePump();
+	}
+
+	private async createManifest(spec: BoxSpec, boxId: string): Promise<BoxManifest> {
+		const settings = this.normalizeSettings(spec.settings);
 		const dir = boxDir(this.config.dataDir, boxId);
 		const workspace = workspacePath(this.config.dataDir, boxId);
+		if (isPathInside(spec.projectCwd, this.config.dataDir)) {
+			throw new BoxError({ message: "The project directory must not be inside the box data directory" });
+		}
+		ensureBoxDirs(this.config.dataDir, boxId);
 		cleanupTempWorkspaces(dir);
-
-		let manifest = this.store.load(boxId);
-		let created = false;
-
-		if (manifest && manifest.ownerId !== spec.ownerId) {
-			throw new BoxError({ message: "This box belongs to a different user" });
-		}
-
-		if (!manifest) {
-			if (isPathInside(spec.projectCwd, this.config.dataDir)) {
-				throw new BoxError({ message: "The project directory must not be inside the box data directory" });
-			}
-			ensureBoxDirs(this.config.dataDir, boxId);
-			if (!existsSync(workspace)) {
-				await prepareWorkspace(spec.projectCwd, dir, workspace, spec.settings.exclude);
-			}
-			const now = new Date().toISOString();
-			const createdAt = existsSync(workspace) ? statSync(workspace).birthtime.toISOString() : now;
-			manifest = {
-				version: MANIFEST_VERSION,
-				boxId,
-				sessionId: spec.sessionId,
-				ownerId: spec.ownerId,
-				projectCwd: spec.projectCwd,
-				workspacePath: workspace,
-				sandboxName: sandboxNameFor(this.config.dataDir, boxId),
-				runtime: { kind: this.runtime.kind, version: MICROSANDBOX_VERSION },
-				settings: spec.settings,
-				state: "provisioning",
-				setupState: "pending",
-				createdAt,
-				lastUsedAt: now,
-			};
-			this.store.write(manifest);
-			created = true;
-			console.log(`relay box: created ${boxId} at ${workspace}`);
-		}
-
 		if (!existsSync(workspace)) {
+			await prepareWorkspace(spec.projectCwd, dir, workspace, settings.exclude);
+		}
+		const now = new Date().toISOString();
+		const attachments: BoxAttachment[] = spec.sessionId ? [{ sessionId: spec.sessionId, attachedAt: now }] : [];
+		const manifest: BoxManifest = {
+			version: MANIFEST_VERSION,
+			boxId,
+			...(spec.sessionId ? { originSessionId: spec.sessionId } : {}),
+			attachments,
+			ownerId: spec.ownerId,
+			projectCwd: spec.projectCwd,
+			workspacePath: workspace,
+			sandboxName: sandboxNameFor(this.config.dataDir, boxId),
+			runtime: { kind: this.runtime.kind, version: MICROSANDBOX_VERSION },
+			settings,
+			state: "provisioning",
+			setupState: "pending",
+			createdAt: now,
+			lastUsedAt: now,
+		};
+		this.store.write(manifest);
+		this.indexManifest(manifest);
+		console.log(`relay box: created ${boxId} at ${workspace}`);
+		return manifest;
+	}
+
+	private async startBox(initial: BoxManifest): Promise<BoxManifest> {
+		let manifest = initial;
+		if (!existsSync(manifest.workspacePath)) {
 			const failed = this.withState(manifest, "error", "Box workspace is missing");
 			this.store.write(failed);
-			throw new BoxError({ message: `Box workspace is missing: ${workspace}` });
+			throw new BoxError({ message: `Box workspace is missing: ${manifest.workspacePath}` });
 		}
 
 		const before = await this.runtime.status(manifest.sandboxName);
-		const needsStart =
-			before !== "running" && before !== "starting" && before !== "draining" && before !== "paused";
-
-		if (before === "absent") {
-			try {
-				await this.runtime.create({
-					name: manifest.sandboxName,
-					settings: manifest.settings,
-					workspace: manifest.workspacePath,
-					cacheDir: this.config.cacheDir,
-					labels: this.labels(boxId),
-				});
-			} catch (error) {
-				// A concurrent create or a crash between inspect and create can leave a
-				// sandbox behind. Adopt it if it exists; only otherwise mark the box bad.
-				const current = await this.runtime.status(manifest.sandboxName).catch(() => "absent" as const);
-				if (current !== "absent") {
-					await this.runtime.start(manifest.sandboxName);
-				} else {
-					const failed = this.withState(manifest, "error", toBoxError(error).message);
-					this.store.write(failed);
-					throw error;
-				}
-			}
-		} else if (needsStart || before === "paused") {
-			try {
-				await this.runtime.start(manifest.sandboxName);
-			} catch (error) {
-				// A crashed sandbox may be recovered by recreating it around the same workspace.
-				if (before === "crashed") {
-					await this.runtime.destroy(manifest.sandboxName).catch(() => {});
+		let coldStart = false;
+		if (before === "paused") {
+			await this.runtime.resume(manifest.sandboxName);
+		} else {
+			const needsStart = before !== "running" && before !== "starting" && before !== "draining";
+			if (before === "absent") {
+				try {
 					await this.runtime.create({
 						name: manifest.sandboxName,
 						settings: manifest.settings,
 						workspace: manifest.workspacePath,
 						cacheDir: this.config.cacheDir,
-						labels: this.labels(boxId),
+						labels: this.labels(manifest.boxId),
+						secrets: this.config.secrets,
+						maxCpus: this.config.maxCpus,
+						maxMemoryMiB: this.config.maxMemoryMiB,
 					});
-				} else {
-					const failed = this.withState(manifest, "error", toBoxError(error).message);
-					this.store.write(failed);
-					throw error;
+					coldStart = true;
+				} catch (error) {
+					const current = await this.runtime.status(manifest.sandboxName).catch(() => "absent" as const);
+					if (current !== "absent") {
+						await this.runtime.start(manifest.sandboxName);
+						coldStart = true;
+					} else {
+						const failed = this.withState(manifest, "error", toBoxError(error).message);
+						this.store.write(failed);
+						throw error;
+					}
+				}
+			} else if (needsStart) {
+				try {
+					await this.runtime.start(manifest.sandboxName);
+					coldStart = true;
+				} catch (error) {
+					if (before === "crashed") {
+						await this.runtime.destroy(manifest.sandboxName).catch(() => {});
+						await this.runtime.create({
+							name: manifest.sandboxName,
+							settings: manifest.settings,
+							workspace: manifest.workspacePath,
+							cacheDir: this.config.cacheDir,
+							labels: this.labels(manifest.boxId),
+							secrets: this.config.secrets,
+							maxCpus: this.config.maxCpus,
+							maxMemoryMiB: this.config.maxMemoryMiB,
+						});
+						coldStart = true;
+					} else {
+						const failed = this.withState(manifest, "error", toBoxError(error).message);
+						this.store.write(failed);
+						throw error;
+					}
 				}
 			}
 		}
 
 		if (manifest.setupState !== "ok" && manifest.settings.setup) {
-			const setupState = await this.runHook(
-				manifest,
-				"setup",
-				manifest.settings.setup,
-				this.config.setupTimeoutMs,
-				true,
-			);
+			const setupState = await this.runHook(manifest, "setup", manifest.settings.setup, true);
 			manifest = { ...manifest, setupState };
+			this.store.write(manifest);
 			if (setupState === "failed") {
 				const failed = this.withState(manifest, "error", "Box setup failed; see logs/setup.log");
 				this.store.write(failed);
@@ -351,26 +737,35 @@ export class BoxManagerImpl implements BoxManager {
 			throw new BoxError({ message: "Box setup failed; see logs/setup.log" });
 		}
 
-		if ((needsStart || created) && manifest.settings.resume) {
-			await this.runHook(manifest, "resume", manifest.settings.resume, this.config.setupTimeoutMs, false);
+		if (coldStart && manifest.settings.resume) {
+			await this.runHook(manifest, "resume", manifest.settings.resume, false);
 		}
 
-		const running = this.withState(manifest, "running");
-		this.store.write(running);
-		return running;
+		const ready = this.withState(manifest, "busy");
+		delete ready.pausedAt;
+		this.store.write(ready);
+		await this.schedulerLock.run(() => {
+			const resident = this.resident.get(manifest.boxId);
+			if (resident) {
+				resident.state = "busy";
+				resident.pausedAt = null;
+				resident.stopping = false;
+				resident.lastUsedAt = Date.now();
+			}
+		});
+		return ready;
 	}
 
 	private async runHook(
 		manifest: BoxManifest,
 		name: "setup" | "resume",
 		command: string,
-		timeoutMs: number,
 		fatal: boolean,
 	): Promise<SetupState> {
 		const result = await this.runtime.exec(manifest.sandboxName, command, {
 			cwd: "/workspace",
 			env: boxExecEnv(manifest.settings),
-			timeoutMs,
+			timeoutMs: this.config.setupTimeoutMs,
 		});
 		const output = [
 			`$ ${command}`,
@@ -392,111 +787,7 @@ export class BoxManagerImpl implements BoxManager {
 		return "ok";
 	}
 
-	private async reserveSlot(boxId: string, signal?: AbortSignal): Promise<void> {
-		const deadline = Date.now() + this.config.acquireTimeoutMs;
-		for (;;) {
-			if (signal?.aborted) throw new BoxError({ message: "Box acquisition was cancelled" });
-			const outcome = await this.schedulerLock.run(() => this.tryReserve(boxId));
-			if (outcome.kind === "reserved") return;
-			if (outcome.kind === "evict") {
-				await this.evict(outcome.boxId);
-				continue;
-			}
-			const left = deadline - Date.now();
-			if (left <= 0) throw new BoxError({ message: "Timed out waiting for a box slot" });
-			await this.waitForSlot(left, signal);
-		}
-	}
-
-	private tryReserve(boxId: string): SlotOutcome {
-		const existing = this.running.get(boxId);
-		if (existing) {
-			if (existing.stopping) return { kind: "wait" };
-			existing.leases += 1;
-			existing.lastUsedAt = Date.now();
-			return { kind: "reserved" };
-		}
-		if (this.running.size < this.config.maxRunning) {
-			this.running.set(boxId, { leases: 1, lastUsedAt: Date.now(), stopping: false });
-			return { kind: "reserved" };
-		}
-		let victim: string | null = null;
-		let oldest = Number.POSITIVE_INFINITY;
-		for (const [candidate, entry] of this.running) {
-			if (entry.leases > 0 || entry.stopping) continue;
-			if (entry.lastUsedAt < oldest) {
-				oldest = entry.lastUsedAt;
-				victim = candidate;
-			}
-		}
-		if (!victim) return { kind: "wait" };
-		const entry = this.running.get(victim);
-		if (entry) entry.stopping = true;
-		return { kind: "evict", boxId: victim };
-	}
-
-	private waitForSlot(timeoutMs: number, signal?: AbortSignal): Promise<void> {
-		return new Promise((resolve, reject) => {
-			let settled = false;
-			const finish = (error?: BoxError): void => {
-				if (settled) return;
-				settled = true;
-				clearTimeout(timer);
-				signal?.removeEventListener("abort", onAbort);
-				if (error) reject(error);
-				else resolve();
-			};
-			const timer = setTimeout(
-				() => finish(new BoxError({ message: "Timed out waiting for a box slot" })),
-				timeoutMs,
-			);
-			const onAbort = (): void => finish(new BoxError({ message: "Box acquisition was cancelled" }));
-			signal?.addEventListener("abort", onAbort, { once: true });
-			this.waiters.push(() => finish());
-		});
-	}
-
-	private wakeWaiters(): void {
-		const waiters = this.waiters.splice(0);
-		for (const wake of waiters) wake();
-	}
-
-	private async evict(boxId: string): Promise<void> {
-		const manifest = this.store.load(boxId);
-		try {
-			if (manifest) await this.runtime.stop(manifest.sandboxName);
-		} catch (error) {
-			await this.schedulerLock.run(() => {
-				const entry = this.running.get(boxId);
-				if (entry) entry.stopping = false;
-				this.wakeWaiters();
-			});
-			throw error;
-		}
-		await this.schedulerLock.run(() => {
-			this.running.delete(boxId);
-			this.wakeWaiters();
-		});
-		if (manifest) {
-			const stopped = this.withState(manifest, "stopped");
-			this.store.write(stopped);
-		}
-	}
-
-	private async releaseSlot(boxId: string): Promise<void> {
-		await this.schedulerLock.run(() => {
-			const entry = this.running.get(boxId);
-			if (!entry) return;
-			entry.leases = Math.max(0, entry.leases - 1);
-			if (entry.leases === 0) {
-				this.running.delete(boxId);
-				this.wakeWaiters();
-			}
-		});
-	}
-
-	private async statusInternal(sessionId: string): Promise<BoxStatus | null> {
-		const boxId = boxIdFor(sessionId);
+	private async statusInternal(boxId: string): Promise<BoxStatus | null> {
 		const manifest = this.store.load(boxId);
 		if (!manifest) return null;
 		let runtimeStatus: RuntimeStatus = "absent";
@@ -505,7 +796,37 @@ export class BoxManagerImpl implements BoxManager {
 		} catch {
 			runtimeStatus = manifest.state === "error" ? "crashed" : "absent";
 		}
-		return this.statusFromManifest(manifest, this.mapRuntimeState(manifest, runtimeStatus));
+		const resident = this.resident.get(boxId);
+		let state: BoxState;
+		if (manifest.setupState === "failed") {
+			state = "error";
+		} else if (resident) {
+			if (resident.state === "paused") state = "paused";
+			else if (resident.leases > 0) state = "busy";
+			else if (resident.state === "starting") state = "starting";
+			else state = "ready";
+		} else {
+			state = this.mapRuntimeState(manifest, runtimeStatus);
+		}
+		const status = this.statusFromManifest(manifest, state);
+		return { ...status, capacity: this.capacity() };
+	}
+
+	private capacity(): NonNullable<BoxStatus["capacity"]> {
+		let usedCpus = 0;
+		let usedMemoryMiB = 0;
+		for (const resident of this.resident.values()) {
+			usedCpus += resident.resources.cpus;
+			usedMemoryMiB += resident.resources.memoryMiB + this.config.vmOverheadMiB;
+		}
+		return {
+			maxRunning: this.config.maxRunning,
+			running: this.resident.size,
+			maxCpus: this.config.maxCpus,
+			usedCpus,
+			maxMemoryMiB: this.config.maxMemoryMiB,
+			usedMemoryMiB,
+		};
 	}
 
 	private mapRuntimeState(manifest: BoxManifest, status: RuntimeStatus): BoxState {
@@ -514,8 +835,9 @@ export class BoxManagerImpl implements BoxManager {
 			case "running":
 			case "starting":
 			case "draining":
+				return "ready";
 			case "paused":
-				return "running";
+				return "paused";
 			case "crashed":
 				return "error";
 			case "created":
@@ -528,107 +850,326 @@ export class BoxManagerImpl implements BoxManager {
 	private statusFromManifest(manifest: BoxManifest, state: BoxState): BoxStatus {
 		return {
 			boxId: manifest.boxId,
-			sessionId: manifest.sessionId,
+			ownerId: manifest.ownerId,
+			...(manifest.originSessionId ? { originSessionId: manifest.originSessionId } : {}),
+			attachments: manifest.attachments,
 			projectCwd: manifest.projectCwd,
 			workspace: manifest.workspacePath,
 			state,
+			settings: manifest.settings,
 			createdAt: manifest.createdAt,
 			lastUsedAt: manifest.lastUsedAt,
+			...(manifest.pausedAt ? { pausedAt: manifest.pausedAt } : {}),
 			...(manifest.error ? { error: manifest.error } : {}),
 		};
 	}
 
-	private async execInternal(sessionId: string, command: string, options: ExecOptions): Promise<ExecResult> {
-		const manifest = this.store.load(boxIdFor(sessionId));
-		if (!manifest) throw new BoxError({ message: `No box found for session ${sessionId}` });
-		return await this.runtime.exec(manifest.sandboxName, command, {
-			cwd: options.cwd ?? "/workspace",
-			env: boxExecEnv(manifest.settings, options.env),
-			timeoutMs: options.timeoutMs ?? 30_000,
-			...(options.signal ? { signal: options.signal } : {}),
+	private async pauseInternal(boxId: string): Promise<void> {
+		const manifest = this.requireManifest(boxId);
+		const resident = this.resident.get(boxId);
+		if (!resident) return;
+		await this.schedulerLock.run(() => {
+			if (resident.leases > 0) throw new BoxError({ message: "Cannot pause a box while a run is using it" });
+			resident.stopping = true;
 		});
-	}
-
-	private async stopSession(sessionId: string): Promise<void> {
-		const boxId = boxIdFor(sessionId);
-		const manifest = this.store.load(boxId);
-		if (!manifest) return;
-		await this.beginStop(boxId);
 		try {
-			await this.runtime.stop(manifest.sandboxName);
+			await this.runtime.pause(manifest.sandboxName);
+			await this.schedulerLock.run(() => {
+				resident.state = "paused";
+				resident.pausedAt = Date.now();
+				resident.stopping = false;
+			});
+			const pausedAt = new Date().toISOString();
+			this.store.write({ ...manifest, state: "paused", pausedAt, lastUsedAt: manifest.lastUsedAt });
 		} catch (error) {
-			await this.cancelStop(boxId);
-			throw error;
+			console.warn(`relay box: pause failed for ${boxId}; stopping instead: ${toBoxError(error).message}`);
+			await this.stopResident(boxId, resident);
+		} finally {
+			this.schedulePump();
 		}
-		await this.endStop(boxId);
-		this.store.write(this.withState(manifest, "stopped"));
 	}
 
-	private async destroyInternal(sessionId: string): Promise<void> {
-		const boxId = boxIdFor(sessionId);
+	private async resumeInternal(boxId: string): Promise<void> {
+		const manifest = this.requireManifest(boxId);
+		const resident = this.resident.get(boxId);
+		if (!resident || resident.state !== "paused") {
+			throw new BoxError({ message: "Box is not paused" });
+		}
+		await this.schedulerLock.run(() => {
+			resident.stopping = true;
+		});
+		try {
+			await this.runtime.resume(manifest.sandboxName);
+			await this.schedulerLock.run(() => {
+				resident.state = "ready";
+				resident.pausedAt = null;
+				resident.stopping = false;
+				resident.lastUsedAt = Date.now();
+			});
+			const ready = { ...manifest, state: "ready" as const, lastUsedAt: new Date().toISOString() };
+			delete ready.pausedAt;
+			this.store.write(ready);
+		} catch (error) {
+			await this.schedulerLock.run(() => {
+				resident.stopping = false;
+			});
+			throw error;
+		} finally {
+			this.schedulePump();
+		}
+	}
+
+	private async stopInternal(boxId: string): Promise<void> {
 		const manifest = this.store.load(boxId);
 		if (!manifest) return;
-		await this.beginStop(boxId);
+		const resident = this.resident.get(boxId);
+		if (!resident) {
+			await this.runtime.stop(manifest.sandboxName).catch(() => {});
+			this.store.write({ ...manifest, state: "stopped", lastUsedAt: new Date().toISOString() });
+			return;
+		}
+		await this.schedulerLock.run(() => {
+			if (resident.leases > 0) throw new BoxError({ message: "Cannot stop a box while a run is using it" });
+			resident.stopping = true;
+		});
+		await this.stopResident(boxId, resident);
+	}
+
+	private async stopResident(boxId: string, resident: Resident): Promise<void> {
+		const manifest = this.store.load(boxId);
+		try {
+			if (manifest) await this.runtime.stop(manifest.sandboxName);
+			await this.schedulerLock.run(() => {
+				this.resident.delete(boxId);
+			});
+			if (manifest) {
+				this.store.write({ ...manifest, state: "stopped", lastUsedAt: new Date().toISOString() });
+			}
+		} catch (error) {
+			await this.schedulerLock.run(() => {
+				resident.stopping = false;
+			});
+			throw error;
+		} finally {
+			this.schedulePump();
+		}
+	}
+
+	private async destroyInternal(boxId: string): Promise<void> {
+		const manifest = this.store.load(boxId);
+		if (!manifest) return;
+		if (manifest.attachments.length > 0) {
+			throw new BoxError({ message: "Detach all sessions before removing a box" });
+		}
+		const resident = this.resident.get(boxId);
+		if (resident) {
+			await this.schedulerLock.run(() => {
+				if (resident.leases > 0) throw new BoxError({ message: "Cannot remove a box while a run is using it" });
+				resident.stopping = true;
+			});
+		}
 		try {
 			await this.runtime.destroy(manifest.sandboxName);
+			await this.schedulerLock.run(() => {
+				this.resident.delete(boxId);
+			});
+			this.store.trash(manifest);
 		} catch (error) {
-			await this.cancelStop(boxId);
+			if (resident) {
+				await this.schedulerLock.run(() => {
+					resident.stopping = false;
+				});
+			}
+			throw error;
+		} finally {
+			this.schedulePump();
+		}
+	}
+
+	private async resizeInternal(boxId: string, profile: BoxProfile): Promise<BoxStatus> {
+		const manifest = this.requireManifest(boxId);
+		if (profileRank(profile) > profileRank(manifest.settings.maxProfile)) {
+			throw new BoxError({ message: `This box is limited to the ${manifest.settings.maxProfile} profile` });
+		}
+		if (profileRank(profile) > profileRank(this.config.maxProfile)) {
+			throw new BoxError({ message: `The server allows at most the ${this.config.maxProfile} profile` });
+		}
+		const resources = profileResources(profile);
+		const rootDiskMiB = Math.max(manifest.settings.rootDiskMiB, resources.rootDiskMiB);
+		const settings: BoxSettings = {
+			...manifest.settings,
+			profile,
+			cpus: resources.cpus,
+			memoryMiB: resources.memoryMiB,
+			rootDiskMiB,
+		};
+		const resident = this.resident.get(boxId);
+		if (!resident) {
+			this.store.write({ ...manifest, settings });
+			const status = await this.statusInternal(boxId);
+			if (!status) throw new BoxError({ message: `Box ${boxId} disappeared` });
+			return status;
+		}
+		if (resident.state === "paused") {
+			throw new BoxError({ message: "Resume the box before resizing it" });
+		}
+		if (resident.state === "starting") {
+			throw new BoxError({ message: "The box is still starting" });
+		}
+
+		const nextResources = { cpus: resources.cpus, memoryMiB: resources.memoryMiB };
+		const unchanged =
+			resident.resources.cpus === nextResources.cpus &&
+			resident.resources.memoryMiB === nextResources.memoryMiB &&
+			manifest.settings.rootDiskMiB === rootDiskMiB;
+		if (unchanged) {
+			this.store.write({ ...manifest, settings, lastUsedAt: new Date().toISOString() });
+			const status = await this.statusInternal(boxId);
+			if (!status) throw new BoxError({ message: `Box ${boxId} disappeared` });
+			return status;
+		}
+
+		const deltaCpus = nextResources.cpus - resident.resources.cpus;
+		const deltaMemory = nextResources.memoryMiB - resident.resources.memoryMiB;
+		let reserved = false;
+		if (deltaCpus > 0 || deltaMemory > 0) {
+			// Evict idle boxes one at a time until the resize fits or nothing else
+			// can be reclaimed. Never evict the box being resized.
+			while (!reserved) {
+				await this.schedulerLock.run(() => {
+					let cpus = 0;
+					let memory = 0;
+					for (const entry of this.resident.values()) {
+						cpus += entry.resources.cpus;
+						memory += entry.resources.memoryMiB + this.config.vmOverheadMiB;
+					}
+					if (
+						cpus + Math.max(0, deltaCpus) <= this.config.maxCpus &&
+						memory + Math.max(0, deltaMemory) <= this.config.maxMemoryMiB
+					) {
+						resident.resources = nextResources;
+						reserved = true;
+					}
+				});
+				if (reserved) break;
+				const victim = await this.pickAndEvictVictim(boxId);
+				if (!victim) {
+					throw new BoxError({
+						message: `Not enough box capacity for ${profile}; stop or shrink another box first`,
+					});
+				}
+			}
+		} else {
+			await this.schedulerLock.run(() => {
+				resident.resources = nextResources;
+			});
+		}
+
+		try {
+			const result = await this.runtime.modify(manifest.sandboxName, {
+				cpus: resources.cpus,
+				memoryMiB: resources.memoryMiB,
+				rootDiskMiB,
+			});
+			this.assertResizeApplied(result);
+			const updated = { ...manifest, settings, lastUsedAt: new Date().toISOString() };
+			this.store.write(updated);
+			await this.schedulerLock.run(() => {
+				resident.resources = nextResources;
+			});
+		} catch (error) {
+			await this.schedulerLock.run(() => {
+				resident.resources = { cpus: manifest.settings.cpus, memoryMiB: manifest.settings.memoryMiB };
+			});
 			throw error;
 		}
-		await this.endStop(boxId);
-		this.store.trash(manifest);
+		const status = await this.statusInternal(boxId);
+		if (!status) throw new BoxError({ message: `Box ${boxId} disappeared` });
+		return status;
 	}
 
-	private async beginStop(boxId: string): Promise<void> {
+	private assertResizeApplied(result: RuntimeResizeResult): void {
+		const failed = result.resizeStatus.find(
+			(status) => status.state === "failed" || status.state === "guest-refused",
+		);
+		if (failed) {
+			throw new BoxError({
+				message: `Could not resize ${failed.resource} to ${failed.requested}: ${failed.state}`,
+			});
+		}
+		if (!result.applied && result.resizeStatus.length > 0) {
+			throw new BoxError({ message: `Box resize was not applied (status: ${result.status})` });
+		}
+	}
+
+	private async pickAndEvictVictim(excludeBoxId?: string): Promise<string | null> {
+		let victim: Resident | null = null;
 		await this.schedulerLock.run(() => {
-			const entry = this.running.get(boxId);
-			if (!entry) return;
-			if (entry.leases > 0) {
-				throw new BoxError({ message: "Cannot stop or remove a box while a run is using it" });
+			victim = this.pickVictim(excludeBoxId);
+			if (victim) victim.stopping = true;
+		});
+		if (!victim) return null;
+		const boxId = (victim as Resident).boxId;
+		await this.evict(boxId);
+		return boxId;
+	}
+
+	private async detachSessionsInternal(sessionIds: ReadonlySet<string>): Promise<number> {
+		let detached = 0;
+		for (const manifest of this.store.list()) {
+			const resident = this.resident.get(manifest.boxId);
+			if (resident && resident.leases > 0) continue;
+			const attachments = manifest.attachments.filter((attachment) => !sessionIds.has(attachment.sessionId));
+			if (attachments.length === manifest.attachments.length) continue;
+			for (const attachment of manifest.attachments) {
+				if (sessionIds.has(attachment.sessionId)) this.unindexSession(attachment.sessionId, manifest.boxId);
 			}
-			entry.stopping = true;
-		});
-	}
-
-	private async cancelStop(boxId: string): Promise<void> {
-		await this.schedulerLock.run(() => {
-			const entry = this.running.get(boxId);
-			if (entry) entry.stopping = false;
-			this.wakeWaiters();
-		});
-	}
-
-	private async endStop(boxId: string): Promise<void> {
-		await this.schedulerLock.run(() => {
-			this.running.delete(boxId);
-			this.wakeWaiters();
-		});
+			this.store.write({ ...manifest, attachments });
+			detached += manifest.attachments.length - attachments.length;
+		}
+		return detached;
 	}
 
 	private async gcInternal(activeSessionIds: ReadonlySet<string>): Promise<GcResult> {
-		let trashed = 0;
+		let detached = 0;
 		for (const manifest of this.store.list()) {
-			if (activeSessionIds.has(manifest.sessionId)) continue;
-			const entry = this.running.get(manifest.boxId);
-			if (entry && entry.leases > 0) continue;
-			try {
-				await this.runtime.destroy(manifest.sandboxName);
-				await this.schedulerLock.run(() => {
-					this.running.delete(manifest.boxId);
-					this.wakeWaiters();
-				});
-				this.store.trash(manifest);
-				trashed += 1;
-			} catch (error) {
-				console.warn(`relay box: could not collect ${manifest.boxId}: ${toBoxError(error).message}`);
+			const resident = this.resident.get(manifest.boxId);
+			if (resident && resident.leases > 0) continue;
+			const attachments = manifest.attachments.filter((attachment) => activeSessionIds.has(attachment.sessionId));
+			if (attachments.length !== manifest.attachments.length) {
+				for (const attachment of manifest.attachments) {
+					if (!attachments.some((kept) => kept.sessionId === attachment.sessionId)) {
+						this.unindexSession(attachment.sessionId, manifest.boxId);
+					}
+				}
+				this.store.write({ ...manifest, attachments });
+				detached += manifest.attachments.length - attachments.length;
+			}
+		}
+
+		let trashed = 0;
+		if (this.config.retentionMs > 0) {
+			const cutoff = Date.now() - this.config.retentionMs;
+			for (const manifest of this.store.list()) {
+				if (manifest.attachments.length > 0) continue;
+				const resident = this.resident.get(manifest.boxId);
+				if (resident && (resident.leases > 0 || resident.stopping)) continue;
+				const lastUsed = Date.parse(manifest.lastUsedAt);
+				if (!Number.isFinite(lastUsed) || lastUsed > cutoff) continue;
+				try {
+					if (resident) await this.stopInternal(manifest.boxId);
+					await this.destroyInternal(manifest.boxId);
+					trashed += 1;
+				} catch (error) {
+					console.warn(`relay box: could not collect ${manifest.boxId}: ${toBoxError(error).message}`);
+				}
 			}
 		}
 		const removed = this.store.removeTrash(TRASH_TTL_MS);
-		return { removed, trashed };
+		return { removed, trashed, detached };
 	}
 
 	private async reconcileInternal(): Promise<void> {
-		// The data-dir lock guarantees no other manager is using these sandboxes.
 		for (const manifest of this.store.list()) {
 			cleanupTempWorkspaces(this.store.dir(manifest.boxId));
 		}
@@ -648,14 +1189,16 @@ export class BoxManagerImpl implements BoxManager {
 			console.warn(`relay box: reconcile could not list sandboxes: ${toBoxError(error).message}`);
 		}
 		await this.schedulerLock.run(() => {
-			this.running.clear();
-			this.wakeWaiters();
+			this.resident.clear();
 		});
 		for (const manifest of this.store.list()) {
-			if (manifest.state === "running" || manifest.state === "provisioning") {
-				this.store.write(this.withState(manifest, "stopped"));
-			}
+			if (manifest.state === "error") continue;
+			const rest = { ...manifest, state: "stopped" as const };
+			delete rest.pausedAt;
+			this.store.write(rest);
 		}
+		this.rebuildSessionIndex();
+		this.schedulePump();
 	}
 
 	private async shutdownInternal(): Promise<void> {
@@ -663,21 +1206,18 @@ export class BoxManagerImpl implements BoxManager {
 		this.shuttingDown = true;
 		if (this.sweepTimer) clearInterval(this.sweepTimer);
 		this.sweepTimer = null;
-		const entries = [...this.running.keys()];
-		for (const boxId of entries) {
+		for (const boxId of [...this.resident.keys()]) {
 			const manifest = this.store.load(boxId);
-			if (!manifest) continue;
 			try {
-				await this.runtime.stop(manifest.sandboxName);
-				this.store.write(this.withState(manifest, "stopped"));
+				if (manifest) await this.runtime.stop(manifest.sandboxName);
+				if (manifest) this.store.write({ ...manifest, state: "stopped", lastUsedAt: new Date().toISOString() });
 			} catch (error) {
 				console.warn(`relay box: could not stop ${boxId}: ${toBoxError(error).message}`);
 			}
+			await this.schedulerLock.run(() => {
+				this.resident.delete(boxId);
+			});
 		}
-		await this.schedulerLock.run(() => {
-			this.running.clear();
-			this.wakeWaiters();
-		});
 		this.releaseLock();
 	}
 
@@ -685,34 +1225,34 @@ export class BoxManagerImpl implements BoxManager {
 		if (this.sweeping || this.shuttingDown) return;
 		this.sweeping = true;
 		try {
-			const cutoff = Date.now() - this.config.idleMs;
-			const idle: string[] = [];
+			const now = Date.now();
+			const toPause: string[] = [];
+			const toStop: string[] = [];
 			await this.schedulerLock.run(() => {
-				for (const [boxId, entry] of this.running) {
-					if (entry.leases > 0 || entry.stopping || entry.lastUsedAt > cutoff) continue;
-					entry.stopping = true;
-					idle.push(boxId);
+				for (const [boxId, resident] of this.resident) {
+					if (resident.leases > 0 || resident.stopping) continue;
+					if (resident.state === "ready") {
+						if (this.config.stopMs > 0 && now - resident.lastUsedAt >= this.config.stopMs)
+							toStop.push(boxId);
+						else if (this.config.pauseMs > 0 && now - resident.lastUsedAt >= this.config.pauseMs)
+							toPause.push(boxId);
+					} else if (resident.state === "paused" && resident.pausedAt !== null) {
+						if (this.config.stopMs > 0 && now - resident.pausedAt >= this.config.stopMs) toStop.push(boxId);
+					}
 				}
 			});
-			for (const boxId of idle) {
-				const manifest = this.store.load(boxId);
-				let stopped = true;
+			for (const boxId of toPause) {
 				try {
-					if (manifest) await this.runtime.stop(manifest.sandboxName);
-					if (manifest) this.store.write(this.withState(manifest, "stopped"));
+					await this.pauseInternal(boxId);
 				} catch (error) {
-					stopped = false;
+					console.warn(`relay box: idle pause failed for ${boxId}: ${toBoxError(error).message}`);
+				}
+			}
+			for (const boxId of toStop) {
+				try {
+					await this.stopInternal(boxId);
+				} catch (error) {
 					console.warn(`relay box: idle stop failed for ${boxId}: ${toBoxError(error).message}`);
-				} finally {
-					await this.schedulerLock.run(() => {
-						if (!stopped) {
-							const entry = this.running.get(boxId);
-							if (entry) entry.stopping = false;
-						} else {
-							this.running.delete(boxId);
-						}
-						this.wakeWaiters();
-					});
 				}
 			}
 		} finally {
@@ -720,11 +1260,99 @@ export class BoxManagerImpl implements BoxManager {
 		}
 	}
 
+	private nextBoxId(): string {
+		for (;;) {
+			const boxId = createBoxId();
+			if (!this.store.load(boxId) && !existsSync(boxDir(this.config.dataDir, boxId))) return boxId;
+		}
+	}
+
+	/** Clamp a requested profile and its exact overrides to the server ceiling. */
+	private normalizeSettings(settings: BoxSettings): BoxSettings {
+		const maxProfile =
+			profileRank(settings.maxProfile) > profileRank(this.config.maxProfile)
+				? this.config.maxProfile
+				: settings.maxProfile;
+		const profile = profileRank(settings.profile) > profileRank(maxProfile) ? maxProfile : settings.profile;
+		const resources = profileResources(maxProfile);
+		return {
+			...settings,
+			profile,
+			maxProfile,
+			cpus: Math.min(settings.cpus, resources.cpus),
+			memoryMiB: Math.min(settings.memoryMiB, resources.memoryMiB),
+			rootDiskMiB: Math.min(settings.rootDiskMiB, resources.rootDiskMiB),
+		};
+	}
+
+	private requireManifest(boxId: string): BoxManifest {
+		const manifest = this.store.load(boxId);
+		if (!manifest) throw new BoxError({ message: `No box found: ${boxId}` });
+		return manifest;
+	}
+
+	private manifestForSession(sessionId: string): BoxManifest | null {
+		const ids = this.sessionIndex.get(sessionId);
+		if (!ids || ids.size === 0) return null;
+		let best: BoxManifest | null = null;
+		for (const boxId of ids) {
+			const manifest = this.store.load(boxId);
+			if (!manifest) {
+				this.unindexSession(sessionId, boxId);
+				continue;
+			}
+			if (!best || manifest.lastUsedAt > best.lastUsedAt) best = manifest;
+		}
+		return best;
+	}
+
+	private rebuildSessionIndex(): void {
+		this.sessionIndex.clear();
+		for (const manifest of this.store.list()) this.indexManifest(manifest);
+	}
+
+	private indexManifest(manifest: BoxManifest): void {
+		for (const attachment of manifest.attachments) {
+			let ids = this.sessionIndex.get(attachment.sessionId);
+			if (!ids) {
+				ids = new Set();
+				this.sessionIndex.set(attachment.sessionId, ids);
+			}
+			ids.add(manifest.boxId);
+		}
+	}
+
+	private unindexSession(sessionId: string, boxId: string): void {
+		const ids = this.sessionIndex.get(sessionId);
+		if (!ids) return;
+		ids.delete(boxId);
+		if (ids.size === 0) this.sessionIndex.delete(sessionId);
+	}
+
+	private async attachInternal(manifest: BoxManifest, sessionId: string): Promise<void> {
+		if (manifest.attachments.some((attachment) => attachment.sessionId === sessionId)) return;
+		const next: BoxManifest = {
+			...manifest,
+			attachments: [...manifest.attachments, { sessionId, attachedAt: new Date().toISOString() }],
+		};
+		this.store.write(next);
+		this.indexManifest(next);
+	}
+
 	private withBoxLock<T>(boxId: string, fn: () => Promise<T>): Promise<T> {
 		let mutex = this.boxesLock.get(boxId);
 		if (!mutex) {
 			mutex = new Mutex();
 			this.boxesLock.set(boxId, mutex);
+		}
+		return mutex.run(fn);
+	}
+
+	private withSessionLock<T>(sessionId: string, fn: () => Promise<T>): Promise<T> {
+		let mutex = this.sessionsLock.get(sessionId);
+		if (!mutex) {
+			mutex = new Mutex();
+			this.sessionsLock.set(sessionId, mutex);
 		}
 		return mutex.run(fn);
 	}

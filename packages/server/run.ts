@@ -3,6 +3,7 @@ import type { LLMProvider } from "@vvtxn/relay/api/types.ts";
 import type { BoxLease, BoxManager } from "@vvtxn/box/types.ts";
 import { DisabledBoxManager } from "@vvtxn/box/manager.ts";
 import { resolveProjectBoxSettings } from "@vvtxn/box/config.ts";
+import { profileForSettings } from "@vvtxn/box/profiles.ts";
 import {
 	createDelegateTool,
 	createToolRegistry,
@@ -17,7 +18,7 @@ import { attempt, causeMessage, type StoreError } from "@vvtxn/relay/core/effect
 import { buildSystemPrompt } from "@vvtxn/relay/core/prompts.ts";
 import type { ApprovalDecision, PendingApprovalInfo, RunStateEvent, ServerEvent } from "@vvtxn/client/protocol.ts";
 import type { ServerConfig } from "./config.ts";
-import { createBoxBashTool } from "./box-tools.ts";
+import { createBoxBashTool, createBoxTool } from "./box-tools.ts";
 
 type Subscriber = (event: ServerEvent) => void;
 type RunFinishReason = Extract<ServerEvent, { type: "run_finished" }>["reason"];
@@ -303,13 +304,13 @@ export class RunManager {
 			let lease: BoxLease | null = null;
 
 			if (boxes.enabled) {
-				const existing = yield* boxes.status(sessionId);
+				const existing = yield* boxes.findBySession(sessionId);
 				if (existing) {
 					lease = yield* boxes.acquire({
 						sessionId,
 						ownerId,
 						projectCwd: existing.projectCwd,
-						settings: config.box.defaults,
+						settings: existing.settings,
 						signal: abort.signal,
 					});
 				} else {
@@ -372,12 +373,30 @@ export class RunManager {
 					maxTokens: config.maxCompletionTokens,
 					signal: abort.signal,
 				});
+				const approvedTools = withApproval([...workspaceTools, delegate], (tool, input) =>
+					requestApproval(tool, input),
+				);
+				// Box management is auto-approved by design; the manager enforces the
+				// host budget, so the model may size the box without another prompt.
 				const tools = createToolRegistry(
-					withApproval([...workspaceTools, delegate], (tool, input) => requestApproval(tool, input)),
+					lease ? [...approvedTools, createBoxTool(boxes, lease)] : approvedTools,
 				);
 				// Rendered from the registry the run actually exposes, so the tool
 				// guidance can never drift from the available tools.
-				const systemPrompt = buildSystemPrompt({ mode: "main", tools });
+				const systemPrompt = buildSystemPrompt({
+					mode: "main",
+					tools,
+					...(lease
+						? {
+								box: {
+									profile: profileForSettings(lease.status.settings),
+									cpus: lease.status.settings.cpus,
+									memoryMiB: lease.status.settings.memoryMiB,
+									maxProfile: lease.status.settings.maxProfile,
+								},
+							}
+						: {}),
+				});
 
 				// The agent loop is a Stream of events; the run fiber consumes it and
 				// mirrors each event onto the session draft state + SSE subscribers.

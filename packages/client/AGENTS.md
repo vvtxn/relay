@@ -19,6 +19,9 @@ client/
 
 ### Protocol (`protocol.ts`)
 
+Box payloads (`BoxSummary`, `BoxListResponse`, `CreateBoxRequest`, `BoxAttachRequest`, `BoxResizeRequest`) are plain
+JSON too; `OpenSessionResponse.box` is optional and additive so older clients keep working.
+
 The single source of truth for the server↔client contract. All types are plain JSON so any runtime can consume them.
 REST payloads cover health, auth info, identity (`MeResponse` includes an optional `avatarUrl`), per-user settings
 (`SettingsResponse` carries only `{ set, hint }` for the stored API key), workspace, sessions CRUD, files, and

@@ -17,6 +17,13 @@ export interface BuildSystemPromptOptions {
 	mode?: SystemPromptMode;
 	/** The tools the runtime will expose; renders the registry-aware Tool Usage section. */
 	tools?: ToolRegistry | readonly Tool[];
+	/** Current box profile, when the run executes inside an isolated box. */
+	box?: {
+		profile: string;
+		cpus: number;
+		memoryMiB: number;
+		maxProfile: string;
+	};
 	/** Appended verbatim at the end (e.g. project-specific instructions). */
 	extraInstructions?: string;
 }
@@ -37,6 +44,7 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions = {}): strin
 			: [
 					MAIN_IDENTITY,
 					agencySection(tools),
+					boxSection(options.box),
 					toolUsageSection(tools),
 					WORKFLOW_EXISTING_PROJECTS,
 					WORKFLOW_NEW_PROJECTS,
@@ -130,6 +138,18 @@ You take initiative when the user asks you to do something, but maintain balance
 2. Not surprising the user — if they ask how to approach something, answer first before acting
 
 When you know you need to run multiple tools, run them in parallel if they are independent operations. ${parallelism}`;
+}
+
+function boxSection(box: BuildSystemPromptOptions["box"]): string {
+	if (!box) return "";
+	return `## Box
+
+You are working inside an isolated box. Bash and services run in the box; the workspace is shared with the file tools.
+
+- Current profile: **${box.profile}** (${box.cpus} vCPU, ${box.memoryMiB} MiB RAM). The highest allowed profile is ${box.maxProfile}.
+- Start small. Use the \`box\` tool to inspect the current size and to resize before heavy work.
+- Before Playwright/browser tests, large builds, or running several services, resize to \`small\` or \`medium\`.
+- Resize back down when heavy work is finished; other boxes share the host budget.`;
 }
 
 function toolUsageSection(tools: readonly Tool[]): string {

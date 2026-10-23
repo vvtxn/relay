@@ -59,6 +59,8 @@ export interface DatabaseSessionStoreOptions {
 	client: DatabaseClient;
 	/** Maximum persisted sessions kept per owner and workspace. `0` = unlimited. */
 	maxSessionsPerWorkspace?: number;
+	/** Notified after pruning removes sessions, so dependent resources can detach. */
+	onPruned?: (sessionIds: readonly string[]) => void;
 }
 
 const DEFAULT_MAX_SESSIONS_PER_WORKSPACE = 10;
@@ -86,6 +88,8 @@ export class DatabaseSessionStore implements SessionStore {
 	private readonly client: DatabaseClient;
 	private readonly schemaReady: Promise<void>;
 	private readonly maxSessionsPerWorkspace: number;
+	/** Notified after pruning removes sessions, so boxes can detach them. */
+	onPruned: ((sessionIds: readonly string[]) => void) | undefined;
 
 	constructor(options: DatabaseSessionStoreOptions) {
 		this.client = options.client;
@@ -94,6 +98,7 @@ export class DatabaseSessionStore implements SessionStore {
 			throw new Error("maxSessionsPerWorkspace must be a non-negative integer");
 		}
 		this.maxSessionsPerWorkspace = maxSessions;
+		this.onPruned = options.onPruned;
 		this.schemaReady = this.initialize();
 	}
 
@@ -277,8 +282,26 @@ export class DatabaseSessionStore implements SessionStore {
 		await this.schemaReady;
 		const statements = this.pruneStatements(scope);
 		if (statements.length === 0) return 0;
+		const before = await this.sessionIdsInScope(scope);
 		const results = await this.client.batch(statements, "write");
+		await this.notifyPruned(scope, before);
 		return results[1]?.rowsAffected ?? 0;
+	}
+
+	/** Session ids currently persisted for one owner/workspace. */
+	private async sessionIdsInScope(scope: SessionScope): Promise<Set<string>> {
+		const result = await this.execute({
+			sql: "SELECT id FROM sessions WHERE owner_id = ? AND cwd = ?",
+			args: [scope.ownerId, scope.cwd],
+		});
+		return new Set(result.rows.map((row) => stringValue(row, "id")));
+	}
+
+	private async notifyPruned(scope: SessionScope, before: Set<string>): Promise<void> {
+		if (!this.onPruned || before.size === 0) return;
+		const after = await this.sessionIdsInScope(scope);
+		const removed = [...before].filter((id) => !after.has(id));
+		if (removed.length > 0) this.onPruned(removed);
 	}
 
 	/**
@@ -411,10 +434,13 @@ export class DatabaseSessionStore implements SessionStore {
 		// A user message is the point where a lazily-created session becomes a
 		// persisted row. Prune in the same atomic batch so a workspace never
 		// observably exceeds the configured limit.
-		if (full.type === "message" && full.role === "user") {
+		const pruning = this.maxSessionsPerWorkspace > 0 && full.type === "message" && full.role === "user";
+		if (pruning) {
 			statements.push(...this.pruneStatements(scope, header.id));
 		}
+		const before = pruning ? await this.sessionIdsInScope(scope) : null;
 		await this.client.batch(statements, "write");
+		if (before) await this.notifyPruned(scope, before);
 		return { id, timestamp };
 	}
 

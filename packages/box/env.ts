@@ -19,6 +19,10 @@ export function boxBaseEnv(settings: BoxSettings): Record<string, string> {
 		GIT_AUTHOR_EMAIL: "agent@relay.local",
 		GIT_COMMITTER_NAME: "Relay Agent",
 		GIT_COMMITTER_EMAIL: "agent@relay.local",
+		// The askpass helper reads the placeholder token; Microsandbox substitutes
+		// the real value only for the configured git host.
+		GIT_ASKPASS: "/usr/local/bin/relay-git-askpass",
+		GIT_TERMINAL_PROMPT: "0",
 		...settings.env,
 	};
 }
