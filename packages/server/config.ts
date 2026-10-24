@@ -165,7 +165,7 @@ function boxConfigFromEnv(env: Record<string, string | undefined>): BoxManagerCo
 	);
 	const stopMs = nonNegativeInt(env.RELAY_BOX_STOP_MS, 60 * 60_000, "RELAY_BOX_STOP_MS", 7 * 24 * 60 * 60_000);
 	return {
-		enabled: booleanEnv(env.RELAY_BOX, false, "RELAY_BOX"),
+		enabled: booleanEnv(env.RELAY_BOX, true, "RELAY_BOX"),
 		dataDir,
 		cacheDir,
 		maxRunning: positiveInt(env.RELAY_BOX_MAX_RUNNING, 4, "RELAY_BOX_MAX_RUNNING", 64),
@@ -188,7 +188,7 @@ function boxConfigFromEnv(env: Record<string, string | undefined>): BoxManagerCo
 		),
 		retentionMs: nonNegativeInt(
 			env.RELAY_BOX_RETENTION_MS,
-			7 * 24 * 60 * 60_000,
+			24 * 60 * 60_000,
 			"RELAY_BOX_RETENTION_MS",
 			365 * 24 * 60 * 60_000,
 		),

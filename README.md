@@ -264,7 +264,8 @@ pause first (services stay warm), then stop after a longer idle window.
 - `manifest.ts` — versioned `box.json` per box under `RELAY_BOX_DATA_DIR`; sessions are attachments, not identity
 - `microsandbox.ts` — the only module that imports the native Microsandbox SDK
 
-Enable with `RELAY_BOX=1`; see `.env.example` for profiles, budgets, idle timers, and image settings. A project can add
+Boxes are enabled by default; set `RELAY_BOX=0` to run on the host with approvals instead. See `.env.example` for
+profiles, budgets, idle timers, and image settings. A project can add
 `.relay/box.json` for its image, profile ceiling, and setup/resume hooks. The agent starts at `tiny` and uses the `box`
 tool to resize before Playwright/browser tests, large builds, or multiple services. The default ceiling is `small`;
 set `RELAY_BOX_MAX_PROFILE=medium` and raise `RELAY_BOX_MEMORY_BUDGET_MIB` above 8 GiB to enable `medium`.

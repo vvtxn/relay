@@ -37,6 +37,7 @@ import type {
 } from "./types.ts";
 
 const SWEEP_INTERVAL_MS = 30_000;
+const GC_INTERVAL_MS = 5 * 60_000;
 const TRASH_TTL_MS = 7 * 24 * 60 * 60_000;
 const MICROSANDBOX_VERSION = "0.7.8";
 
@@ -201,6 +202,7 @@ export class BoxManagerImpl implements BoxManager {
 	private shuttingDown = false;
 	private pumpScheduled = false;
 	private imageFallbackWarned = false;
+	private lastGcAt = 0;
 
 	constructor(config: BoxManagerConfig, runtime?: BoxRuntime) {
 		this.config = config;
@@ -1154,26 +1156,47 @@ export class BoxManagerImpl implements BoxManager {
 			}
 		}
 
-		let trashed = 0;
-		if (this.config.retentionMs > 0) {
-			const cutoff = Date.now() - this.config.retentionMs;
-			for (const manifest of this.store.list()) {
-				if (manifest.attachments.length > 0) continue;
-				const resident = this.resident.get(manifest.boxId);
-				if (resident && (resident.leases > 0 || resident.stopping)) continue;
-				const lastUsed = Date.parse(manifest.lastUsedAt);
-				if (!Number.isFinite(lastUsed) || lastUsed > cutoff) continue;
-				try {
-					if (resident) await this.stopInternal(manifest.boxId);
-					await this.destroyInternal(manifest.boxId);
-					trashed += 1;
-				} catch (error) {
-					console.warn(`relay box: could not collect ${manifest.boxId}: ${toBoxError(error).message}`);
-				}
-			}
-		}
+		const trashed = await this.collectExpiredInternal();
 		const removed = this.store.removeTrash(TRASH_TTL_MS);
 		return { removed, trashed, detached };
+	}
+
+	/**
+	 * Trash boxes whose retention elapsed. Retention applies to attached boxes
+	 * too: a session keeps its box warm for a while, then the next message
+	 * creates a fresh one. Active leases are never collected.
+	 */
+	private async collectExpiredInternal(): Promise<number> {
+		if (this.config.retentionMs <= 0) return 0;
+		const cutoff = Date.now() - this.config.retentionMs;
+		let trashed = 0;
+		for (const manifest of this.store.list()) {
+			try {
+				const removed = await this.withBoxLock(manifest.boxId, async () => {
+					const resident = this.resident.get(manifest.boxId);
+					if (resident && (resident.leases > 0 || resident.stopping)) return false;
+					const current = this.store.load(manifest.boxId);
+					if (!current) return false;
+					const lastUsed = Date.parse(current.lastUsedAt);
+					if (!Number.isFinite(lastUsed) || lastUsed > cutoff) return false;
+					if (resident) await this.stopInternal(manifest.boxId);
+					const stopped = this.store.load(manifest.boxId);
+					if (!stopped) return false;
+					if (stopped.attachments.length > 0) {
+						for (const attachment of stopped.attachments) {
+							this.unindexSession(attachment.sessionId, stopped.boxId);
+						}
+						this.store.write({ ...stopped, attachments: [] });
+					}
+					await this.destroyInternal(manifest.boxId);
+					return true;
+				});
+				if (removed) trashed += 1;
+			} catch (error) {
+				console.warn(`relay box: could not collect ${manifest.boxId}: ${toBoxError(error).message}`);
+			}
+		}
+		return trashed;
 	}
 
 	private async reconcileInternal(): Promise<void> {
@@ -1260,6 +1283,19 @@ export class BoxManagerImpl implements BoxManager {
 					await this.stopInternal(boxId);
 				} catch (error) {
 					console.warn(`relay box: idle stop failed for ${boxId}: ${toBoxError(error).message}`);
+				}
+			}
+
+			if (now - this.lastGcAt >= GC_INTERVAL_MS) {
+				this.lastGcAt = now;
+				try {
+					const trashed = await this.collectExpiredInternal();
+					const removed = this.store.removeTrash(TRASH_TTL_MS);
+					if (trashed > 0 || removed > 0) {
+						console.log(`Box GC: trashed ${trashed}, removed ${removed} expired workspace(s).`);
+					}
+				} catch (error) {
+					console.warn(`relay box: periodic GC failed: ${toBoxError(error).message}`);
 				}
 			}
 		} finally {

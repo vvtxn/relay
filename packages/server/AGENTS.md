@@ -201,7 +201,8 @@ when boxes are enabled.
   cloud default is 10
 - Settings storage: `RELAY_SETTINGS_STORE` (`file` default, or `database`), `RELAY_DATA_DIR` (default `~/.relay`),
   `RELAY_SECRET_KEY` / `RELAY_SECRET_KEY_FILE` (master key; required with the database backend)
-- Boxes (off by default): `RELAY_BOX=1`, `RELAY_BOX_PROFILE` (`tiny` default), `RELAY_BOX_MAX_PROFILE` (`small`),
+- Boxes (on by default; `RELAY_BOX=0` disables): `RELAY_BOX_RETENTION_MS` (24h default; applies to stopped boxes
+  even while attached), `RELAY_BOX_PROFILE` (`tiny` default), `RELAY_BOX_MAX_PROFILE` (`small`),
   `RELAY_BOX_IMAGE` (`auto` by default; uses `relay-box:local` when loaded), `RELAY_BOX_MAX_RUNNING`,
   `RELAY_BOX_MAX_CPUS`, `RELAY_BOX_MEMORY_BUDGET_MIB`,
   `RELAY_BOX_VM_OVERHEAD_MIB`, `RELAY_BOX_PAUSE_MS`, `RELAY_BOX_STOP_MS`, `RELAY_BOX_RETENTION_MS`,
