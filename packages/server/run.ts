@@ -20,6 +20,7 @@ import { buildSystemPrompt } from "@vvtxn/relay/core/prompts.ts";
 import type { ApprovalDecision, PendingApprovalInfo, RunStateEvent, ServerEvent } from "@vvtxn/client/protocol.ts";
 import type { ServerConfig } from "./config.ts";
 import { createBoxBashTool, createBoxTool } from "./box-tools.ts";
+import { createBrowserTool } from "./browser-tool.ts";
 
 type Subscriber = (event: ServerEvent) => void;
 type RunFinishReason = Extract<ServerEvent, { type: "run_finished" }>["reason"];
@@ -375,11 +376,17 @@ export class RunManager {
 					signal: abort.signal,
 				});
 				const baseTools = [...workspaceTools, delegate];
+				const browserTools =
+					lease && isPreparedBoxImage(lease.status.settings.image)
+						? [createBoxTool(boxes, lease), createBrowserTool(lease)]
+						: lease
+							? [createBoxTool(boxes, lease)]
+							: [];
 				// The box is the security boundary: everything inside it runs without
 				// approval prompts. Host runs keep the approval layer.
 				const tools = createToolRegistry(
 					lease
-						? [...baseTools, createBoxTool(boxes, lease)]
+						? [...baseTools, ...browserTools]
 						: withApproval(baseTools, (tool, input) => requestApproval(tool, input)),
 				);
 				// Rendered from the registry the run actually exposes, so the tool

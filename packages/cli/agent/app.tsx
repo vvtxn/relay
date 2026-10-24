@@ -102,6 +102,7 @@ function App({ onQuit, initialSessionId, info }: AppProps) {
 	const mode = useSignal<VimMode>("INSERT");
 	const sessionId = useSignal<string | null>(initialSessionId);
 	const branchName = useSignal<string | null>(null);
+	const boxLabel = useSignal<string>("");
 	const stream = useSignal<SessionStreamState>(initialSessionStreamState);
 	const escPrimed = useSignal(false);
 
@@ -174,6 +175,9 @@ function App({ onQuit, initialSessionId, info }: AppProps) {
 			};
 			syncStream(true);
 			branchName.value = response.branch;
+			boxLabel.value = response.box
+				? `${response.box.image.replace(/^localhost\//, "")} · ${response.box.state}`
+				: "";
 			loadingSession.value = null;
 		} catch {
 			// Keep the current view on transient failures
@@ -544,7 +548,7 @@ function App({ onQuit, initialSessionId, info }: AppProps) {
 
 	return (
 		<Box flex flexDirection="column" padding={1} bgColor={theme.background}>
-			<StatusBar totalCost={stream.value.cost} branchName={branchName.value ?? ""} />
+			<StatusBar totalCost={stream.value.cost} branchName={branchName.value ?? ""} boxLabel={boxLabel.value} />
 
 			{messages.length === 0 ? (
 				loadingSession.value !== null ? (

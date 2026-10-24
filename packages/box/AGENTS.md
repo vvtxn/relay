@@ -47,7 +47,8 @@ pnpm box:image                 # build + load relay-box:local
 `RELAY_BOX_IMAGE=auto` (the default) selects `relay-box:local` when it is loaded and falls back to `node:26-bookworm`.
 The prepared image embeds Node 26, pnpm, Playwright + Chromium at `/opt/playwright`, git, ripgrep, and build/database
 tooling. When this image is active the runtime prompt requires real-browser verification of rendered UI changes; the
-agent should use the embedded browsers and never run `playwright install`. Verify box behavior end-to-end with
+agent should use the `browser` tool / embedded browsers, never run `playwright install`, and never add probe `.mjs`
+files to the repository. Verify box behavior end-to-end with
 `pnpm relay:local` (boxes are on by default) when KVM is available. Stress the real runtime: create/exec, live
 resize, pause/resume, stop, retention cleanup, and reconcile after a server restart. Set `RELAY_BOX=0` for the
 host/approval path.

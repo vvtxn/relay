@@ -101,7 +101,8 @@ const WORKFLOW_GENERAL = `### General
 
 - Work incrementally: make a small change, verify it works, then continue
 - Never assume a library is available. Check package.json, cargo.toml, go.mod, etc. before using one
-- When creating new components or modules, look at existing ones first to match conventions`;
+- When creating new components or modules, look at existing ones first to match conventions
+- Do not leave temporary scripts or debugging files in the repository; put scratch files under \`/tmp\` and remove them.`;
 
 const CODE_QUALITY = `## Code Quality
 
@@ -153,9 +154,10 @@ modified. Bash and services run in the box.
 - Current profile: **${box.profile}** (${box.cpus} vCPU, ${box.memoryMiB} MiB RAM). The highest allowed profile is ${box.maxProfile}.
 - Start small. Use the \`box\` tool to inspect the current size and to resize before heavy work.
 - Before Playwright/browser tests, large builds, or running several services, resize to \`small\` or \`medium\`.
+- Do not import \`microsandbox\` or create your own sandbox. This run already has a managed box; use its tools.
 - Resize back down when heavy work is finished; other boxes share the host budget.${
 		box.playwright
-			? "\n- The prepared box includes Playwright + Chromium; use it to verify web/UI changes instead of installing browsers."
+			? "\n- The prepared box includes Playwright + Chromium; use the `browser` tool for web/UI checks instead of installing browsers."
 			: ""
 	}`;
 }
@@ -167,11 +169,11 @@ function browserVerificationSection(box: BuildSystemPromptOptions["box"]): strin
 Every change that affects rendered UI must be verified in a real browser before you report the task done.
 
 - This box has Playwright and Chromium preinstalled at \`/opt/playwright\`.
+- Use the \`browser\` tool for the check; it runs Playwright inside this box.
 - Start the app or dev server with the project's existing command.
-- Prefer the project's \`node_modules/.bin/playwright\` when present; otherwise use the embedded \`playwright\` CLI.
 - Never run \`playwright install\` — the browsers are already present.
-- Assert the specific behavior that changed, not just that the page loads. A short Playwright script, DOM assertion, or screenshot is ideal.
-- Capture a screenshot for visual changes when useful.
+- Do not create temporary \`.mjs\` probe scripts or add debugging files to the repository. If you need a temporary script, write it under \`/tmp\` with a \`bash\` heredoc and remove it afterward.
+- Assert the specific behavior that changed, not just that the page loads.
 - Stop any dev server you started when the check is complete.`;
 }
 

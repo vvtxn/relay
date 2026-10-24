@@ -7,6 +7,7 @@ export function boxSummary(status: BoxStatus): BoxSummary {
 	return {
 		boxId: status.boxId,
 		state: status.state,
+		image: status.settings.image,
 		profile: profileForSettings(status.settings),
 		cpus: status.settings.cpus,
 		memoryMiB: status.settings.memoryMiB,

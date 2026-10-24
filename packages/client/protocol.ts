@@ -129,6 +129,8 @@ export type BoxLifecycleState = "provisioning" | "starting" | "ready" | "busy" |
 export interface BoxSummary {
 	boxId: string;
 	state: BoxLifecycleState;
+	/** OCI image backing this box (for example `relay-box:local`). */
+	image: string;
 	/** Named profile, or "custom" when a project overrides exact resources. */
 	profile: BoxProfileName | "custom";
 	cpus: number;

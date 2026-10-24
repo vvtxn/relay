@@ -22,6 +22,7 @@ server/
 ├── sessions.ts      # /api/me, /api/config, session CRUD, message submission
 ├── run.ts           # RunManager: one fiber per run, SSE fan-out, approvals
 ├── box-tools.ts     # box bash executor + model-facing box status/resize tool
+├── browser-tool.ts  # one-shot Playwright check inside the current box
 ├── boxes.ts         # /api/boxes routes (create/list/attach/resize/pause/stop/rm)
 ├── box-summary.ts   # BoxStatus -> wire BoxSummary projection
 ├── approvals.ts     # /api/sessions/:id/approve + /cancel handlers
@@ -76,7 +77,8 @@ Owns active runs, one per session:
 - Each run registers a `delegate` subagent tool (relay core) with the read-only workspace tools, and builds its system
   prompt from the run's registry (`buildSystemPrompt`); subagent cost rides on the tool result's `meta.cost` and is
   added to the session total. When the prepared box image is active, the prompt adds a firm Browser Verification
-  section: UI changes must be checked with the embedded Playwright/Chromium before completion.
+  section: UI changes must be checked with the embedded Playwright/Chromium before completion. The `browser` tool
+  runs that check through the current box lease; it must never spawn a second sandbox.
 - `subscribe`/`subscribeStream` register SSE consumers; `getRunState` serves the catch-up `run_state` snapshot
 - "always allow" is per session, in memory
 
