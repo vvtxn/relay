@@ -618,7 +618,8 @@ export class BoxManagerImpl implements BoxManager {
 	}
 
 	private async createManifest(spec: BoxSpec, boxId: string): Promise<BoxManifest> {
-		const settings = this.normalizeSettings(spec.settings);
+		const normalized = this.normalizeSettings(spec.settings);
+		const settings = normalized.image === "auto" ? { ...normalized, image: await this.resolveImage() } : normalized;
 		const dir = boxDir(this.config.dataDir, boxId);
 		const workspace = workspacePath(this.config.dataDir, boxId);
 		if (isPathInside(spec.projectCwd, this.config.dataDir)) {
@@ -655,6 +656,10 @@ export class BoxManagerImpl implements BoxManager {
 
 	private async startBox(initial: BoxManifest): Promise<BoxManifest> {
 		let manifest = initial;
+		if (manifest.settings.image === "auto") {
+			manifest = { ...manifest, settings: { ...manifest.settings, image: await this.resolveImage() } };
+			this.store.write(manifest);
+		}
 		if (!existsSync(manifest.workspacePath)) {
 			const failed = this.withState(manifest, "error", "Box workspace is missing");
 			this.store.write(failed);
@@ -1283,6 +1288,27 @@ export class BoxManagerImpl implements BoxManager {
 			memoryMiB: Math.min(settings.memoryMiB, resources.memoryMiB),
 			rootDiskMiB: Math.min(settings.rootDiskMiB, resources.rootDiskMiB),
 		};
+	}
+
+	/**
+	 * Pick the prepared tool image when it is loaded, otherwise the plain Node
+	 * image. `RELAY_BOX_IMAGE` bypasses this by setting a concrete reference.
+	 */
+	private async resolveImage(): Promise<string> {
+		try {
+			const images = await this.runtime.listImages();
+			if (images.includes("relay-box:local")) return "relay-box:local";
+			if (images.includes("localhost/relay-box:local")) return "localhost/relay-box:local";
+			const prepared = images
+				.filter(
+					(reference) => reference.startsWith("relay-box:") || reference.startsWith("localhost/relay-box:"),
+				)
+				.sort();
+			if (prepared.length > 0) return prepared[prepared.length - 1] as string;
+		} catch {
+			// Missing runtime/KVM must not prevent the fallback image from working.
+		}
+		return "node:26-bookworm";
 	}
 
 	private requireManifest(boxId: string): BoxManifest {

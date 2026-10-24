@@ -269,6 +269,16 @@ Enable with `RELAY_BOX=1`; see `.env.example` for profiles, budgets, idle timers
 tool to resize before Playwright/browser tests, large builds, or multiple services. The default ceiling is `small`;
 set `RELAY_BOX_MAX_PROFILE=medium` and raise `RELAY_BOX_MEMORY_BUDGET_MIB` above 8 GiB to enable `medium`.
 
+Build the prepared toolchain image once (Node 26, pnpm, Playwright + Chromium, git, ripgrep, build tools, databases):
+
+```bash
+pnpm box:image
+```
+
+With the default `RELAY_BOX_IMAGE=auto`, new boxes use `relay-box:local` when it is loaded and fall back to
+`node:26-bookworm` otherwise. Playwright browsers are embedded at `/opt/playwright`, so the agent can run browser tests
+without downloading Chromium inside every box.
+
 Boxes require Linux KVM, macOS Apple Silicon, or Windows WHP. The manager enforces a memory/CPU budget in addition to
 the running-box count, so paused boxes and concurrent sessions cannot oversubscribe the host.
 

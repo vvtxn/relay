@@ -195,7 +195,7 @@ function boxConfigFromEnv(env: Record<string, string | undefined>): BoxManagerCo
 		maxProfile,
 		secrets: gitToken ? [{ envVar: "GITHUB_TOKEN", value: gitToken, allowedHosts: [gitHost] }] : [],
 		defaults: {
-			image: env.RELAY_BOX_IMAGE?.trim() || "node:26-bookworm",
+			image: env.RELAY_BOX_IMAGE?.trim() || "auto",
 			profile,
 			maxProfile,
 			cpus: positiveInt(env.RELAY_BOX_CPUS, resources.cpus, "RELAY_BOX_CPUS", 64),

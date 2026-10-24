@@ -206,6 +206,8 @@ export interface BoxRuntime {
 	status(name: string): Promise<RuntimeStatus>;
 	exec(name: string, command: string, options: RuntimeExecOptions): Promise<ExecResult>;
 	list(labels: Record<string, string>): Promise<RuntimeBoxInfo[]>;
+	/** Cached OCI image references; used to auto-select the prepared box image. */
+	listImages(): Promise<string[]>;
 }
 
 /** Settings used by the server configuration layer before project overrides. */

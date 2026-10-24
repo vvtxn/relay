@@ -8,6 +8,7 @@
 		"web:build": "vp -C packages/web build",
 		"build": "vp -C packages/web build && vp -C packages/cli pack",
 		"build:sea": "node scripts/build-sea.ts",
+		"box:image": "node scripts/box-image.ts",
 		"check": "vp check",
 		"fmt": "vp fmt",
 		"fmt:check": "vp fmt --check",

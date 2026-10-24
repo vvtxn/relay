@@ -84,8 +84,9 @@ export async function startServer(): Promise<void> {
 	if (services.boxes.enabled) {
 		try {
 			await Effect.runPromise(services.boxes.reconcile());
+			const image = config.box.defaults.image === "auto" ? "auto image" : config.box.defaults.image;
 			console.log(
-				`Boxes: enabled (${config.box.defaults.image}, ${config.box.defaults.profile} default, ` +
+				`Boxes: enabled (${image}, ${config.box.defaults.profile} default, ` +
 					`max ${config.box.maxRunning} running, ${config.box.maxMemoryMiB} MiB budget)`,
 			);
 		} catch (error) {

@@ -41,7 +41,10 @@ box/
 ```bash
 pnpm exec vp fmt
 pnpm check
+pnpm box:image                 # build + load relay-box:local
 ```
 
-Verify box behavior end-to-end with `RELAY_BOX=1 pnpm relay:local` when KVM is available. Stress the real runtime:
-create/exec, live resize, pause/resume, stop, and reconcile after a server restart.
+`RELAY_BOX_IMAGE=auto` (the default) selects `relay-box:local` when it is loaded and falls back to `node:26-bookworm`.
+The prepared image embeds Node 26, pnpm, Playwright + Chromium at `/opt/playwright`, git, ripgrep, and build/database
+tooling. Verify box behavior end-to-end with `RELAY_BOX=1 pnpm relay:local` when KVM is available. Stress the real
+runtime: create/exec, live resize, pause/resume, stop, and reconcile after a server restart.

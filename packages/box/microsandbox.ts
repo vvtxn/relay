@@ -300,6 +300,12 @@ export class MicrosandboxRuntime implements BoxRuntime {
 		};
 	}
 
+	async listImages(): Promise<string[]> {
+		const ms = await this.module();
+		const images = await ms.Image.list();
+		return images.map((image) => image.reference);
+	}
+
 	async list(labels: Record<string, string>): Promise<RuntimeBoxInfo[]> {
 		const ms = await this.module();
 		const results: RuntimeBoxInfo[] = [];
