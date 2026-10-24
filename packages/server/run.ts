@@ -3,6 +3,7 @@ import type { LLMProvider } from "@vvtxn/relay/api/types.ts";
 import type { BoxLease, BoxManager } from "@vvtxn/box/types.ts";
 import { DisabledBoxManager } from "@vvtxn/box/manager.ts";
 import { resolveProjectBoxSettings } from "@vvtxn/box/config.ts";
+import { isPreparedBoxImage } from "@vvtxn/box/images.ts";
 import { profileForSettings } from "@vvtxn/box/profiles.ts";
 import {
 	createDelegateTool,
@@ -373,13 +374,13 @@ export class RunManager {
 					maxTokens: config.maxCompletionTokens,
 					signal: abort.signal,
 				});
-				const approvedTools = withApproval([...workspaceTools, delegate], (tool, input) =>
-					requestApproval(tool, input),
-				);
-				// Box management is auto-approved by design; the manager enforces the
-				// host budget, so the model may size the box without another prompt.
+				const baseTools = [...workspaceTools, delegate];
+				// The box is the security boundary: everything inside it runs without
+				// approval prompts. Host runs keep the approval layer.
 				const tools = createToolRegistry(
-					lease ? [...approvedTools, createBoxTool(boxes, lease)] : approvedTools,
+					lease
+						? [...baseTools, createBoxTool(boxes, lease)]
+						: withApproval(baseTools, (tool, input) => requestApproval(tool, input)),
 				);
 				// Rendered from the registry the run actually exposes, so the tool
 				// guidance can never drift from the available tools.
@@ -393,6 +394,7 @@ export class RunManager {
 									cpus: lease.status.settings.cpus,
 									memoryMiB: lease.status.settings.memoryMiB,
 									maxProfile: lease.status.settings.maxProfile,
+									playwright: isPreparedBoxImage(lease.status.settings.image),
 								},
 							}
 						: {}),

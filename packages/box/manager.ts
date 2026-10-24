@@ -15,6 +15,7 @@ import {
 	sandboxNameFor,
 	workspacePath,
 } from "./paths.ts";
+import { isPreparedBoxImage, PREPARED_BOX_IMAGE } from "./images.ts";
 import { profileRank, profileResources } from "./profiles.ts";
 import { cleanupTempWorkspaces, prepareWorkspace } from "./workspace.ts";
 import type {
@@ -199,6 +200,7 @@ export class BoxManagerImpl implements BoxManager {
 	private sweeping = false;
 	private shuttingDown = false;
 	private pumpScheduled = false;
+	private imageFallbackWarned = false;
 
 	constructor(config: BoxManagerConfig, runtime?: BoxRuntime) {
 		this.config = config;
@@ -1297,16 +1299,19 @@ export class BoxManagerImpl implements BoxManager {
 	private async resolveImage(): Promise<string> {
 		try {
 			const images = await this.runtime.listImages();
-			if (images.includes("relay-box:local")) return "relay-box:local";
-			if (images.includes("localhost/relay-box:local")) return "localhost/relay-box:local";
-			const prepared = images
-				.filter(
-					(reference) => reference.startsWith("relay-box:") || reference.startsWith("localhost/relay-box:"),
-				)
-				.sort();
+			if (images.includes(PREPARED_BOX_IMAGE)) return PREPARED_BOX_IMAGE;
+			const prepared = images.filter((reference) => isPreparedBoxImage(reference)).sort();
 			if (prepared.length > 0) return prepared[prepared.length - 1] as string;
 		} catch {
 			// Missing runtime/KVM must not prevent the fallback image from working.
+			return "node:26-bookworm";
+		}
+		if (!this.imageFallbackWarned) {
+			this.imageFallbackWarned = true;
+			console.warn(
+				"relay box: prepared relay-box:local is not loaded; using node:26-bookworm. " +
+					"Run `pnpm box:image` to enable embedded Playwright/browser tools.",
+			);
 		}
 		return "node:26-bookworm";
 	}

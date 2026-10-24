@@ -277,7 +277,11 @@ pnpm box:image
 
 With the default `RELAY_BOX_IMAGE=auto`, new boxes use `relay-box:local` when it is loaded and fall back to
 `node:26-bookworm` otherwise. Playwright browsers are embedded at `/opt/playwright`, so the agent can run browser tests
-without downloading Chromium inside every box.
+without downloading Chromium inside every box. When the prepared image is active, the agent's system prompt requires
+real-browser verification of rendered UI changes.
+
+Boxed runs do not ask for tool approval: the VM is the execution boundary. Host fallback runs still use the approval
+layer.
 
 Boxes require Linux KVM, macOS Apple Silicon, or Windows WHP. The manager enforces a memory/CPU budget in addition to
 the running-box count, so paused boxes and concurrent sessions cannot oversubscribe the host.

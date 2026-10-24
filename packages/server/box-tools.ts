@@ -1,4 +1,5 @@
 import { Effect } from "effect";
+import { isPreparedBoxImage } from "@vvtxn/box/images.ts";
 import { isBoxProfile, profileForSettings } from "@vvtxn/box/profiles.ts";
 import type { BoxLease, BoxManager, BoxStatus } from "@vvtxn/box/types.ts";
 import { bashToolDefinition } from "@vvtxn/relay/core/tools/bash.ts";
@@ -70,6 +71,9 @@ function describeStatus(status: BoxStatus): string {
 		`Profile: ${profile} (${status.settings.cpus} vCPU, ${status.settings.memoryMiB} MiB RAM, ${status.settings.rootDiskMiB} MiB disk)`,
 		`Attachments: ${status.attachments.length === 0 ? "(none)" : status.attachments.map((a) => a.sessionId).join(", ")}`,
 	];
+	if (isPreparedBoxImage(status.settings.image)) {
+		lines.push("Browser tooling: Playwright + Chromium embedded");
+	}
 	if (capacity) {
 		lines.push(
 			`Capacity: ${capacity.running}/${capacity.maxRunning} boxes, ` +
@@ -93,7 +97,7 @@ export function createBoxTool(manager: BoxManager, lease: BoxLease): Tool {
 			function: {
 				name: "box",
 				description:
-					"Inspect or resize the isolated box that runs bash. Start tiny; use small or medium when the task needs Playwright/browser tests, large builds, or several services. Resizing is live and does not recreate the workspace.",
+					"Inspect or resize the isolated box that runs all file and shell work. Start tiny; use small or medium when the task needs Playwright/browser tests, large builds, or several services. The prepared box already contains Playwright and Chromium; verify UI changes before reporting done. Resizing is live and does not recreate the workspace.",
 				parameters: {
 					type: "object",
 					properties: {
@@ -118,7 +122,7 @@ export function createBoxTool(manager: BoxManager, lease: BoxLease): Tool {
 			},
 		},
 		usageHint:
-			"Start with tiny. Before Playwright/browser tests, big builds, or several services, resize to small or medium. Resize back down when heavy work is done; other boxes share the host budget.",
+			"Start with tiny. Before Playwright/browser tests, big builds, or several services, resize to small or medium. The prepared box has Playwright + Chromium; do not install browsers. Resize back down when heavy work is done; other boxes share the host budget.",
 		execute: (input): Effect.Effect<ToolResult> =>
 			Effect.gen(function* () {
 				const { action, size } = (input ?? {}) as { action?: unknown; size?: unknown };

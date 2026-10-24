@@ -23,6 +23,8 @@ export interface BuildSystemPromptOptions {
 		cpus: number;
 		memoryMiB: number;
 		maxProfile: string;
+		/** True when the prepared image has Playwright + Chromium embedded. */
+		playwright: boolean;
 	};
 	/** Appended verbatim at the end (e.g. project-specific instructions). */
 	extraInstructions?: string;
@@ -49,6 +51,7 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions = {}): strin
 					WORKFLOW_EXISTING_PROJECTS,
 					WORKFLOW_NEW_PROJECTS,
 					WORKFLOW_GENERAL,
+					browserVerificationSection(options.box),
 					CODE_QUALITY,
 					selfReviewSection(tools),
 					MAIN_COMMUNICATION,
@@ -144,12 +147,32 @@ function boxSection(box: BuildSystemPromptOptions["box"]): string {
 	if (!box) return "";
 	return `## Box
 
-You are working inside an isolated box. Bash and services run in the box; the workspace is shared with the file tools.
+You are working inside an isolated box. All file and shell work happens inside this box; the host checkout is not
+modified. Bash and services run in the box.
 
 - Current profile: **${box.profile}** (${box.cpus} vCPU, ${box.memoryMiB} MiB RAM). The highest allowed profile is ${box.maxProfile}.
 - Start small. Use the \`box\` tool to inspect the current size and to resize before heavy work.
 - Before Playwright/browser tests, large builds, or running several services, resize to \`small\` or \`medium\`.
-- Resize back down when heavy work is finished; other boxes share the host budget.`;
+- Resize back down when heavy work is finished; other boxes share the host budget.${
+		box.playwright
+			? "\n- The prepared box includes Playwright + Chromium; use it to verify web/UI changes instead of installing browsers."
+			: ""
+	}`;
+}
+
+function browserVerificationSection(box: BuildSystemPromptOptions["box"]): string {
+	if (!box?.playwright) return "";
+	return `## Browser Verification
+
+Every change that affects rendered UI must be verified in a real browser before you report the task done.
+
+- This box has Playwright and Chromium preinstalled at \`/opt/playwright\`.
+- Start the app or dev server with the project's existing command.
+- Prefer the project's \`node_modules/.bin/playwright\` when present; otherwise use the embedded \`playwright\` CLI.
+- Never run \`playwright install\` — the browsers are already present.
+- Assert the specific behavior that changed, not just that the page loads. A short Playwright script, DOM assertion, or screenshot is ideal.
+- Capture a screenshot for visual changes when useful.
+- Stop any dev server you started when the check is complete.`;
 }
 
 function toolUsageSection(tools: readonly Tool[]): string {
@@ -168,7 +191,8 @@ function selfReviewSection(tools: readonly Tool[]): string {
 
 After the overall task is complete, briefly review your changes${reader}. Check for bugs, typos, or logic errors.
 Fix any issues found before reporting the task as done. Do not verify individual steps mid-task — only verify once at
-the end. Do not run extra shell commands to verify unless the task specifically requires running tests or builds.`;
+the end. Do not run extra shell commands to verify unless the task specifically requires running tests, builds, or a
+browser check.`;
 }
 
 // ---------------------------------------------------------------------------
