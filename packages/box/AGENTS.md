@@ -28,6 +28,7 @@ box/
 - A lease pins a running box and protects it from idle eviction. Release it in a run finalizer.
 - Resident VMs (starting, ready, busy, paused) consume the memory/CPU budget. Stopped boxes cost disk only.
 - Idle transitions are tiered: ready → paused (services stay alive) → stopped. Pause failure falls back to stop.
+  Microsandbox refuses a graceful stop while paused, so `runtime.stop()` resumes the VM first (or bounded-kills it).
 - `resize()` is live within the boot-time `maxCpus`/`maxMemory` ceilings; disk is grow-only.
 - Capacity is reserved atomically before runtime calls. Failed starts/resizes must release the reservation.
 - Never copy host credentials into a box. Sanitization runs on every new workspace clone; explicit env/secrets only.

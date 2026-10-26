@@ -169,12 +169,18 @@ export class MicrosandboxRuntime implements BoxRuntime {
 	async stop(name: string): Promise<void> {
 		const ms = await this.module();
 		try {
-			const cached = this.handles.get(name);
-			if (cached) {
-				await cached.stopWithTimeout(10_000);
-				return;
-			}
 			const handle = await ms.Sandbox.get(name);
+			// Microsandbox refuses a graceful stop while the VM is paused. Wake it
+			// first, then stop it; fall back to a bounded kill if resume fails.
+			if (handle.status === "paused") {
+				try {
+					await handle.resume();
+				} catch {
+					await handle.killWithTimeout(10_000);
+					this.handles.delete(name);
+					return;
+				}
+			}
 			await handle.stopWithTimeout(10_000);
 		} catch (error) {
 			if (error instanceof ms.SandboxNotFoundError) return;
@@ -188,6 +194,11 @@ export class MicrosandboxRuntime implements BoxRuntime {
 		const ms = await this.module();
 		try {
 			const handle = await ms.Sandbox.get(name);
+			if (handle.status === "paused") {
+				// `destroy` is a forced operation, but some runtimes still require
+				// the VM to be resident before teardown.
+				await handle.resume().catch(() => {});
+			}
 			await handle.destroy({ force: true, timeoutMs: 10_000 });
 		} catch (error) {
 			if (error instanceof ms.SandboxNotFoundError) return;
