@@ -20,12 +20,12 @@ server/
 ├── cookies.ts       # Cookie serialization helpers
 ├── http.ts          # json()/error() helpers, requestUrl, readJsonBody, HTTP error classes
 ├── sessions.ts      # /api/me, /api/config, session CRUD, message submission
-├── run.ts           # RunManager: one fiber per run, SSE fan-out, approvals
-├── box-tools.ts     # box bash executor + model-facing box status/resize tool
+├── run.ts           # RunManager: one fiber per run, SSE fan-out, box/host execution
+├── box-tools.ts     # box bash executor + model-facing status/resize/sync tool
 ├── browser-tool.ts  # one-shot Playwright check inside the current box
 ├── boxes.ts         # /api/boxes routes (create/list/attach/resize/pause/stop/rm)
 ├── box-summary.ts   # BoxStatus -> wire BoxSummary projection
-├── approvals.ts     # /api/sessions/:id/approve + /cancel handlers
+├── cancel.ts        # /api/sessions/:id/cancel handler
 ├── sse.ts           # GET /api/sessions/:id/events (snapshot + live stream + heartbeat)
 ├── files.ts         # GET /api/sessions/:id/files (project file listing for @-mentions)
 ├── workspace.ts     # /api/workspace(s) routes
@@ -66,21 +66,24 @@ Owns active runs, one per session:
 - `startMessage()` claims the slot synchronously (409-equivalent via `RunConflictError`) then forks the run fiber
 - The fiber consumes the agent `run()` stream and mirrors events onto a run `Ref` and per-subscriber `Queue`s
   (registered synchronously, so the SSE snapshot-then-subscribe sequence cannot drop events)
-- `cancel()` interrupts the fiber; a single uninterruptible finalizer aborts the provider call, denies still-pending
-  approvals (their `Deferred`s resolve), flushes the session handle, publishes `run_finished`, and releases the session
-  when idle and unwatched
-- Approvals are `Deferred`s; `resolveApproval()` takes one out of the `Ref` atomically and resolves it. **Boxed runs
-  skip the approval wrapper entirely** — the VM is the boundary. Host runs keep the layer, where only unconfined tools
-  prompt (reads, confined file mutations, and `delegate` execute unattended; bash asks). Prompts are serialized per
-  session (a semaphore) so custom gated tool sets may execute in parallel while the protocol surfaces one pending
-  approval at a time, and queued calls re-check `alwaysApproved`/abort before prompting
+- `cancel()` interrupts the fiber; a single uninterruptible finalizer aborts the provider call, flushes the session
+  handle, publishes `run_finished`, and releases the session when idle and unwatched
+- Boxed runs are unrestricted inside the VM: the box is the boundary. A successful boxed run syncs its workspace
+  changes to the project checkout before `run_finished`; the agent can also call the `box` tool's `sync` action to
+  apply verified changes mid-run. A sync conflict marks the run as an error instead of overwriting a diverged checkout.
+  Legacy boxes backfill a baseline on their next acquisition; changes made before that point stay in the box. Host
+  runs (`RELAY_BOX=0`) execute directly on the host
+  with no sandbox and no approval prompts; `main.ts` logs a warning at startup. In both modes the system prompt adds a
+  Safety section telling the agent to stop and ask before actions that leave the box or are hard to undo
+- Runs pass `maxToolRounds: 40` to the agent loop (the core default stays 30). The loop emits system notes when 10 and
+  3 rounds remain so the model wraps up instead of silently hitting the cap; agent error events are logged with the
+  session id for diagnosis.
 - Each run registers a `delegate` subagent tool (relay core) with the read-only workspace tools, and builds its system
   prompt from the run's registry (`buildSystemPrompt`); subagent cost rides on the tool result's `meta.cost` and is
   added to the session total. When the prepared box image is active, the prompt adds a firm Browser Verification
   section: UI changes must be checked with the embedded Playwright/Chromium before completion. The `browser` tool
   runs that check through the current box lease; it must never spawn a second sandbox.
 - `subscribe`/`subscribeStream` register SSE consumers; `getRunState` serves the catch-up `run_state` snapshot
-- "always allow" is per session, in memory
 
 ### Sessions
 
@@ -167,7 +170,6 @@ starting": it adopts a healthy winner, otherwise it reports the bind error. The 
 | `/api/sessions`              | POST   | Create session                                        |
 | `/api/sessions/:id`          | GET    | Open (header, entries, tokens, cost, branch, running) |
 | `/api/sessions/:id/messages` | POST   | Submit user message (starts a run)                    |
-| `/api/sessions/:id/approve`  | POST   | Resolve pending approval                              |
 | `/api/sessions/:id/cancel`   | POST   | Abort active run                                      |
 | `/api/sessions/:id/events`   | GET    | SSE stream                                            |
 | `/api/sessions/:id/files`    | GET    | Project file listing                                  |
@@ -177,6 +179,7 @@ starting": it adopts a healthy winner, otherwise it reports the bind error. The 
 | `/api/boxes/:id/attach`      | POST   | Attach a session                                      |
 | `/api/boxes/:id/detach`      | POST   | Detach a session                                      |
 | `/api/boxes/:id/resize`      | POST   | Live-resize to tiny/small/medium                      |
+| `/api/boxes/:id/sync`        | POST   | Apply box workspace changes to the project checkout   |
 | `/api/boxes/:id/pause`       | POST   | Pause an idle box (services stay warm)                |
 | `/api/boxes/:id/resume`      | POST   | Resume a paused box                                   |
 | `/api/boxes/:id/stop`        | POST   | Stop an idle box                                      |
@@ -203,7 +206,8 @@ when boxes are enabled.
   cloud default is 10
 - Settings storage: `RELAY_SETTINGS_STORE` (`file` default, or `database`), `RELAY_DATA_DIR` (default `~/.relay`),
   `RELAY_SECRET_KEY` / `RELAY_SECRET_KEY_FILE` (master key; required with the database backend)
-- Boxes (on by default; `RELAY_BOX=0` disables): `RELAY_BOX_RETENTION_MS` (24h default; applies to stopped boxes
+- Boxes (on by default; `RELAY_BOX=0` selects unsandboxed host execution with a startup warning):
+  `RELAY_BOX_RETENTION_MS` (24h default; applies to stopped boxes
   even while attached), `RELAY_BOX_PROFILE` (`tiny` default), `RELAY_BOX_MAX_PROFILE` (`small`),
   `RELAY_BOX_IMAGE` (`auto` by default; uses `relay-box:local` when loaded), `RELAY_BOX_MAX_RUNNING`,
   `RELAY_BOX_MAX_CPUS`, `RELAY_BOX_MEMORY_BUDGET_MIB`,

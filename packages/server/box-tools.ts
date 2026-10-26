@@ -21,7 +21,6 @@ export function createBoxBashTool(lease: BoxLease): Tool {
 				parameters: bashToolDefinition.parameters,
 			},
 		},
-		confined: true,
 		usageHint: bashToolDefinition.usageHint,
 		execute: (input): Effect.Effect<ToolResult> =>
 			Effect.gen(function* () {
@@ -97,14 +96,15 @@ export function createBoxTool(manager: BoxManager, lease: BoxLease): Tool {
 			function: {
 				name: "box",
 				description:
-					"Inspect or resize the isolated box that runs all file and shell work. Start tiny; use small or medium when the task needs Playwright/browser tests, large builds, or several services. The prepared box already contains Playwright and Chromium; verify UI changes before reporting done. Resizing is live and does not recreate the workspace.",
+					"Inspect or resize the isolated box that runs all file and shell work, or sync its changes to the project checkout. Start tiny; use small or medium when the task needs Playwright/browser tests, large builds, or several services. The prepared box already contains Playwright and Chromium; verify UI changes before reporting done. Resizing is live and does not recreate the workspace.",
 				parameters: {
 					type: "object",
 					properties: {
 						action: {
 							type: "string",
-							enum: ["status", "resize"],
-							description: "Inspect the current box or change its resource profile.",
+							enum: ["status", "resize", "sync"],
+							description:
+								"Inspect the current box, change its resource profile, or apply its changes to the project checkout.",
 						},
 						size: {
 							type: "string",
@@ -122,10 +122,27 @@ export function createBoxTool(manager: BoxManager, lease: BoxLease): Tool {
 			},
 		},
 		usageHint:
-			"Start with tiny. Before Playwright/browser tests, big builds, or several services, resize to small or medium. The prepared box has Playwright + Chromium; do not install browsers. Resize back down when heavy work is done; other boxes share the host budget.",
+			"Start with tiny. Before Playwright/browser tests, big builds, or several services, resize to small or medium. The prepared box has Playwright + Chromium; do not install browsers. Resize back down when heavy work is done; other boxes share the host budget. After verifying a completed change, use action sync to apply it to the project checkout; completed runs sync automatically as a fallback.",
 		execute: (input): Effect.Effect<ToolResult> =>
 			Effect.gen(function* () {
 				const { action, size } = (input ?? {}) as { action?: unknown; size?: unknown };
+				if (action === "sync") {
+					if (!lease.syncAvailable) {
+						return {
+							content:
+								"This box has no sync baseline (it predates sync support or the project is not a Git repository). Create a new box to sync changes automatically.",
+							isError: true,
+						};
+					}
+					const synced = yield* lease.sync().pipe(
+						Effect.map((result) => ({ ok: true as const, result })),
+						Effect.catchTag("BoxError", (error) => Effect.succeed({ ok: false as const, error })),
+					);
+					if (!synced.ok) {
+						return { content: `Could not sync the box changes: ${synced.error.message}`, isError: true };
+					}
+					return { content: synced.result.summary };
+				}
 				if (action === "status" || action === undefined) {
 					const result = yield* manager.status(lease.boxId).pipe(
 						Effect.map((status) => ({ ok: true as const, status })),

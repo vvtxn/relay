@@ -97,7 +97,10 @@ export async function startServer(): Promise<void> {
 			);
 		}
 	} else {
-		console.log("Boxes: disabled");
+		console.warn(
+			"Boxes: disabled — agent commands run directly on the host with no sandbox and no approval prompts. " +
+				"Use RELAY_BOX=0 only when you trust the agent and the workspace.",
+		);
 	}
 
 	console.log(`Flavor: ${config.flavor}`);

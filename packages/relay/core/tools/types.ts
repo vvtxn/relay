@@ -40,12 +40,6 @@ export interface Tool {
 	definition: ToolDefinition;
 	readonly?: boolean;
 	/**
-	 * True when the tool can only touch resources inside a sandbox root (set by
-	 * the workspace confinement wrappers). Approval layers treat confined tools
-	 * as safe by default: the sandbox — not the prompt — is the boundary.
-	 */
-	confined?: boolean;
-	/**
 	 * One-line guidance rendered into a system prompt's tool section by
 	 * `buildSystemPrompt`. Keep it to policy the schema description doesn't
 	 * carry ("prefer this over bash cat"); schemas own the mechanics. When
@@ -94,7 +88,6 @@ export function defineTool(opts: {
 	description: string;
 	parameters: JsonSchema;
 	readonly?: boolean;
-	confined?: boolean;
 	usageHint?: string;
 	resourceKey?: (input: unknown) => string | undefined;
 	execute: (input: unknown) => Promise<ToolResult>;
@@ -109,7 +102,6 @@ export function defineTool(opts: {
 			},
 		},
 		...(opts.readonly !== undefined ? { readonly: opts.readonly } : {}),
-		...(opts.confined !== undefined ? { confined: opts.confined } : {}),
 		...(opts.usageHint !== undefined ? { usageHint: opts.usageHint } : {}),
 		...(opts.resourceKey !== undefined ? { resourceKey: opts.resourceKey } : {}),
 		execute: (input) =>

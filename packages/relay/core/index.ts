@@ -31,7 +31,6 @@ export {
 } from "./tools/index.ts";
 export type { DelegateToolOptions, Tool, ToolRegistry, ToolResult } from "./tools/index.ts";
 export { ToolError } from "./tools/index.ts";
-export { type ApprovalHandler, type ApprovalOptions, withApproval } from "./tools/approval.ts";
 
 export { entriesToMessages, FileSessionStore, SessionManager, stripAttachedContext } from "./sessions/index.ts";
 export { DatabaseSessionStore } from "./sessions/index.ts";

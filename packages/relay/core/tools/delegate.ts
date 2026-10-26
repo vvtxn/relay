@@ -46,8 +46,8 @@ export interface DelegateToolOptions {
  * to {@link buildSystemPrompt} in `subagent` mode for that registry. Subagent
  * cost is aggregated into `meta.cost` so the server can add it to the session
  * total. The tool is marked `readonly`: it never mutates the workspace, so
- * calls skip approval and run alongside other read-only work; `maxConcurrency`
- * bounds how many subagent loops execute at once.
+ * calls run alongside other read-only work; `maxConcurrency` bounds how many
+ * subagent loops execute at once.
  */
 export function createDelegateTool(options: DelegateToolOptions): Tool {
 	const limit = Semaphore.makeUnsafe(options.maxConcurrency ?? DEFAULT_MAX_CONCURRENCY);

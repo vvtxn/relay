@@ -34,8 +34,8 @@ export {
 } from "./session-state.ts";
 export type { SessionStatus, SessionStreamState } from "./session-state.ts";
 export type {
-	ApprovalDecision,
-	ApprovalRequest,
+	BoxSyncFile,
+	BoxSyncResponse,
 	ConfigResponse,
 	CreateSessionRequest,
 	CreateSessionResponse,
@@ -44,7 +44,6 @@ export type {
 	HealthResponse,
 	MeResponse,
 	OpenSessionResponse,
-	PendingApprovalInfo,
 	RunStateEvent,
 	SendMessageRequest,
 	SendMessageResponse,

@@ -5,7 +5,6 @@ import { configQuery, meQuery, sessionQuery } from "#/api/queries.ts";
 import { RelayError } from "@vvtxn/client/services.ts";
 import { signOut } from "#/auth/auth.ts";
 import { AppShell } from "#/components/AppShell.tsx";
-import { ApprovalDialog } from "#/components/ApprovalDialog.tsx";
 import { BootError, BootScreen } from "#/components/BootScreen.tsx";
 import { ChatView } from "#/components/ChatView.tsx";
 import { Composer } from "#/components/Composer.tsx";
@@ -92,15 +91,14 @@ export function SessionPage() {
 				>
 					<StatusBar
 						branch={session.data!.branch}
+						box={session.data!.box}
 						userName={me.data!.name}
 						avatarUrl={me.data!.avatarUrl}
-						contextWindow={config.data!.contextTokens}
 						canSignOut={me.data!.provider !== "local"}
 						onSignOut={() => void signOut()}
 					/>
 					<ChatView model={config.data!.model} version={VERSION} />
 					<Composer sessionId={sessionId()} />
-					<ApprovalDialog sessionId={sessionId()} />
 					<DiffModal />
 				</AppShell>
 				<Outlet />

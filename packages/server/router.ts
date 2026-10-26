@@ -26,6 +26,7 @@ import {
 	handleResizeBox,
 	handleResumeBox,
 	handleStopBox,
+	handleSyncBox,
 } from "./boxes.ts";
 import { LEGACY_SESSION_COOKIE, resolveRequestUser } from "./identity.ts";
 import {
@@ -50,7 +51,7 @@ import {
 } from "./sessions.ts";
 import { handleEvents } from "./sse.ts";
 import { handleListFiles } from "./files.ts";
-import { handleApprove, handleCancel } from "./approvals.ts";
+import { handleCancel } from "./cancel.ts";
 import {
 	handleRegisterWorkspace,
 	handleUnregisterWorkspace,
@@ -309,15 +310,6 @@ export function createAppLayer(services: ServerServices) {
 			);
 			yield* router.add(
 				"POST",
-				"/api/sessions/:id/approve",
-				respond(
-					authenticated(services, (rs) =>
-						withSessionId((id) => withRequest((request) => handleApprove(rs, id, request))),
-					),
-				),
-			);
-			yield* router.add(
-				"POST",
 				"/api/sessions/:id/cancel",
 				respond(authenticated(services, (rs) => withSessionId((id) => handleCancel(rs, id)))),
 			);
@@ -374,6 +366,11 @@ export function createAppLayer(services: ServerServices) {
 			);
 			yield* router.add(
 				"POST",
+				"/api/boxes/:id/sync",
+				respond(authenticated(services, (rs) => withSessionId((id) => handleSyncBox(rs, id)))),
+			);
+			yield* router.add(
+				"POST",
 				"/api/boxes/:id/pause",
 				respond(authenticated(services, (rs) => withSessionId((id) => handlePauseBox(rs, id)))),
 			);
@@ -409,7 +406,7 @@ export function createAppLayer(services: ServerServices) {
 								return error(403, "Cross-origin request rejected");
 							}
 							const sessionMatch = url.pathname.match(
-								/^\/api\/sessions\/([^/]+)(?:\/(messages|approve|cancel|events|files))?$/,
+								/^\/api\/sessions\/([^/]+)(?:\/(messages|cancel|events|files))?$/,
 							);
 							if (sessionMatch) return error(405, "Method not allowed");
 							return error(404, "Not found");

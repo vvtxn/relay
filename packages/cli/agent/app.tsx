@@ -1,5 +1,5 @@
 import { entriesToUIMessages, getToolDisplayName } from "@vvtxn/relay/core/display.ts";
-import type { ConfigResponse, PendingApprovalInfo, ServerEvent } from "@vvtxn/client/protocol.ts";
+import type { ConfigResponse, ServerEvent } from "@vvtxn/client/protocol.ts";
 import {
 	applyServerEvent,
 	initialSessionStreamState,
@@ -10,18 +10,8 @@ import {
 } from "@vvtxn/client/session-state.ts";
 import { batch, signal } from "@preact/signals-core";
 import { run } from "#/tui/render/index.ts";
-import {
-	ApprovalPrompt,
-	Box,
-	CommandPalette,
-	ScrollArea,
-	Spinner,
-	Text,
-	TextInput,
-	WelcomeScreen,
-} from "#/tui/render/components.tsx";
+import { Box, CommandPalette, ScrollArea, Spinner, Text, TextInput, WelcomeScreen } from "#/tui/render/components.tsx";
 import { getHookKey, hasCleanup, setCleanup, useSignal, useSignalEffect } from "#/tui/render/hooks/signals.ts";
-import { useApprovalPrompt } from "#/tui/render/hooks/approval.ts";
 import { useTextInput, type VimMode } from "#/tui/render/hooks/text-input.ts";
 import { type CommandPaletteItem, useCommandPalette } from "#/tui/render/hooks/command-palette.ts";
 import { inputManager } from "#/tui/core/input.ts";
@@ -94,9 +84,6 @@ interface AppProps {
 }
 
 function App({ onQuit, initialSessionId, info }: AppProps) {
-	// Registered first so a pending approval consumes keys (Esc denies) before
-	// the double-Esc cancel handler below sees them.
-	const approval = useApprovalPrompt();
 	const input = useSignal("");
 	const cursor = useSignal(0);
 	const mode = useSignal<VimMode>("INSERT");
@@ -119,8 +106,6 @@ function App({ onQuit, initialSessionId, info }: AppProps) {
 		timer: null,
 		syncing: false,
 	});
-	const currentAsk = useSignal<{ sessionId: string; toolCallId: string } | null>(null);
-	const remotelyResolved = useSignal<Set<string>>(new Set());
 	/** Session id whose history is still loading — shows a hint instead of the welcome screen. */
 	const loadingSession = useSignal<string | null>(null);
 	/**
@@ -186,63 +171,10 @@ function App({ onQuit, initialSessionId, info }: AppProps) {
 	};
 
 	// -----------------------------------------------------------------------
-	// Approval flow — requests arrive as SSE events; decisions POST back
-	// -----------------------------------------------------------------------
-
-	const handleApprovalRequired = (info: PendingApprovalInfo) => {
-		// The server keeps at most one approval pending per session (side-effect
-		// tools run sequentially), so never replace an open prompt: doing so would
-		// drop its decision and leave the server waiting forever.
-		if (currentAsk.value) return;
-		void (async () => {
-			const askSessionId = sessionId.value;
-			if (!askSessionId) return;
-			currentAsk.value = { sessionId: askSessionId, toolCallId: info.toolCallId };
-			const decision = await approval.ask({
-				toolName: getToolDisplayName(info.toolName),
-				summary: info.summary,
-			});
-			const wasCurrent = currentAsk.value?.toolCallId === info.toolCallId;
-			currentAsk.value = null;
-			if (!wasCurrent) return;
-			if (remotelyResolved.value.has(info.toolCallId)) {
-				remotelyResolved.value.delete(info.toolCallId);
-				return;
-			}
-			if (sessionId.value !== askSessionId) return;
-			try {
-				await getClient().approve(askSessionId, info.toolCallId, decision);
-			} catch {
-				// The server already resolved (or dropped) this approval
-			}
-		})();
-	};
-
-	const dropPendingAsk = (denyOnServer: boolean) => {
-		const ask = currentAsk.value;
-		currentAsk.value = null;
-		if (!ask) return;
-		if (denyOnServer)
-			void getClient()
-				.approve(ask.sessionId, ask.toolCallId, "deny")
-				.catch(() => {});
-		approval.cancel();
-	};
-
-	// -----------------------------------------------------------------------
 	// SSE event folding
 	// -----------------------------------------------------------------------
 
 	const foldEvent = (event: ServerEvent) => {
-		if (event.type === "run_state" && event.pendingApproval) handleApprovalRequired(event.pendingApproval);
-		if (event.type === "approval_required") handleApprovalRequired(event.approval);
-		if (event.type === "approval_resolved") {
-			remotelyResolved.value.add(event.toolCallId);
-			if (currentAsk.value?.toolCallId === event.toolCallId) {
-				currentAsk.value = null;
-				approval.cancel();
-			}
-		}
 		sync.value.pending = applyServerEvent(sync.value.pending, event);
 		syncStream(event.type !== "text_delta");
 		if (event.type === "run_finished") void refreshSession();
@@ -346,7 +278,6 @@ function App({ onQuit, initialSessionId, info }: AppProps) {
 
 	const openSessionById = (id: string) => {
 		if (sessionId.value === id) return;
-		dropPendingAsk(true);
 		closeDiffViewer();
 		sessionId.value = id;
 		sync.value.pending = resetSessionStreamState();
@@ -357,7 +288,6 @@ function App({ onQuit, initialSessionId, info }: AppProps) {
 	};
 
 	const startNewChat = async () => {
-		dropPendingAsk(true);
 		closeDiffViewer();
 		try {
 			const response = await getClient().createSession(workspaceCwd());
@@ -632,7 +562,6 @@ function App({ onQuit, initialSessionId, info }: AppProps) {
 			<CommandPalette palette={palette} />
 			<CommandPalette palette={filePalette} placeholder="Search files..." />
 			<CommandPalette palette={threadsPalette} placeholder="Search threads..." width={80} />
-			<ApprovalPrompt approval={approval} />
 		</Box>
 	);
 }

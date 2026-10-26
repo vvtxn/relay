@@ -11,6 +11,7 @@ import type {
 	BoxProfileName,
 	BoxResizeRequest,
 	BoxResponse,
+	BoxSyncResponse,
 	CreateBoxRequest,
 	StatusResponse,
 } from "@vvtxn/client/protocol.ts";
@@ -162,6 +163,19 @@ export function handleResizeBox(
 		const profile: BoxProfileName = body.profile;
 		return yield* services.boxes.resize(boxId, profile).pipe(
 			Effect.map((box) => json({ box: boxSummary(box) } satisfies BoxResponse)),
+			Effect.catchTag("BoxError", (boxError) => Effect.succeed(boxFailure(boxError))),
+		);
+	});
+}
+
+export function handleSyncBox(
+	services: RequestServices,
+	boxId: string,
+): Effect.Effect<HttpServerResponse.HttpServerResponse, NotFoundError | ForbiddenError | Error> {
+	return Effect.gen(function* () {
+		yield* ownedBox(services, boxId);
+		return yield* services.boxes.sync(boxId).pipe(
+			Effect.map((result) => json(result satisfies BoxSyncResponse)),
 			Effect.catchTag("BoxError", (boxError) => Effect.succeed(boxFailure(boxError))),
 		);
 	});

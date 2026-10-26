@@ -4,6 +4,7 @@ import { cp } from "node:fs/promises";
 import { basename, join, relative, resolve, sep } from "node:path";
 import { BoxError } from "./errors.ts";
 import { sanitizeWorkspace } from "./sanitize.ts";
+import { createWorkspaceBaseline } from "./sync.ts";
 
 const COPY_TIMEOUT_MS = 5 * 60_000;
 const MIN_FREE_BYTES = 512 * 1024 * 1024;
@@ -140,6 +141,16 @@ export async function prepareWorkspace(
 
 		rmSync(join(temp, ".relay"), { recursive: true, force: true });
 		const removed = await sanitizeWorkspace(temp, excludes);
+		try {
+			if (!(await createWorkspaceBaseline(temp))) {
+				console.warn("relay box: sync baseline unavailable (the project is not a Git repository)");
+			}
+		} catch (error) {
+			console.warn(
+				"relay box: could not create the sync baseline; box changes will not sync:",
+				error instanceof Error ? error.message : error,
+			);
+		}
 
 		if (existsSync(boxWorkspace)) {
 			throw new BoxError({ message: `Box workspace already exists: ${boxWorkspace}` });

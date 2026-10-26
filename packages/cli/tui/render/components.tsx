@@ -89,7 +89,6 @@ export function ScrollArea(props: ScrollAreaProps & { autoScroll?: boolean }) {
 
 export { CommandPalette } from "./components/command-palette.tsx";
 export { WelcomeScreen } from "./components/welcome-screen.tsx";
-export { ApprovalPrompt } from "./components/approval-prompt.tsx";
 
 const FORMATTED_CACHE_LIMIT = 256;
 const formattedLinesCache = new Map<string, string[]>();

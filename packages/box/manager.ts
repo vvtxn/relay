@@ -17,6 +17,7 @@ import {
 } from "./paths.ts";
 import { isPreparedBoxImage, PREPARED_BOX_IMAGE } from "./images.ts";
 import { profileRank, profileResources } from "./profiles.ts";
+import { createWorkspaceBaseline, hasWorkspaceBaseline, syncWorkspace } from "./sync.ts";
 import { cleanupTempWorkspaces, prepareWorkspace } from "./workspace.ts";
 import type {
 	BoxAttachment,
@@ -29,6 +30,7 @@ import type {
 	BoxSpec,
 	BoxState,
 	BoxStatus,
+	BoxSyncResult,
 	ExecOptions,
 	ExecResult,
 	GcResult,
@@ -94,12 +96,18 @@ class Lease implements BoxLease {
 	readonly boxId: string;
 	readonly status: BoxStatus;
 	readonly workspace: string;
+	readonly syncAvailable: boolean;
 
 	constructor(manager: BoxManagerImpl, status: BoxStatus, workspace: string) {
 		this.manager = manager;
 		this.boxId = status.boxId;
 		this.status = status;
 		this.workspace = workspace;
+		this.syncAvailable = hasWorkspaceBaseline(workspace);
+	}
+
+	sync(): Effect.Effect<BoxSyncResult, BoxError> {
+		return this.manager.sync(this.boxId);
 	}
 
 	exec(command: string, options?: ExecOptions): Effect.Effect<ExecResult, BoxError> {
@@ -169,6 +177,10 @@ export class DisabledBoxManager implements BoxManager {
 
 	destroy(): Effect.Effect<void, BoxError> {
 		return Effect.void;
+	}
+
+	sync(): Effect.Effect<BoxSyncResult, BoxError> {
+		return Effect.fail(new BoxError({ message: "Boxes are disabled (set RELAY_BOX=1 to enable)" }));
 	}
 
 	gc(): Effect.Effect<GcResult, BoxError> {
@@ -347,6 +359,16 @@ export class BoxManagerImpl implements BoxManager {
 		});
 	}
 
+	sync(boxId: string): Effect.Effect<BoxSyncResult, BoxError> {
+		return Effect.tryPromise({
+			try: async () => {
+				const manifest = this.requireManifest(boxId);
+				return await syncWorkspace(manifest.workspacePath, manifest.projectCwd);
+			},
+			catch: (error) => toBoxError(error, "Could not sync box changes"),
+		});
+	}
+
 	gc(activeSessionIds: ReadonlySet<string>): Effect.Effect<GcResult, BoxError> {
 		return Effect.tryPromise({
 			try: () => this.gcInternal(activeSessionIds),
@@ -437,6 +459,24 @@ export class BoxManagerImpl implements BoxManager {
 				await this.withBoxLock(boxId, () => this.startBox(manifest as BoxManifest));
 				const status = await this.statusInternal(boxId);
 				if (!status) throw new BoxError({ message: `Box ${boxId} disappeared during startup` });
+				// Backfill a baseline for boxes created before sync support. This
+				// cannot recover changes made before this run, but it lets this and
+				// later runs sync cleanly instead of failing forever.
+				if (!hasWorkspaceBaseline(status.workspace)) {
+					try {
+						if (await createWorkspaceBaseline(status.workspace)) {
+							console.warn(
+								`relay box: initialized a sync baseline for legacy box ${boxId}; ` +
+									"earlier changes remain in the box workspace",
+							);
+						}
+					} catch (error) {
+						console.warn(
+							`relay box: could not initialize sync for ${boxId}:`,
+							error instanceof Error ? error.message : error,
+						);
+					}
+				}
 				return new Lease(this, status, status.workspace);
 			} catch (error) {
 				const failed = this.store.load(boxId);

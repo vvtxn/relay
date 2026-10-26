@@ -26,6 +26,8 @@ export interface BuildSystemPromptOptions {
 		/** True when the prepared image has Playwright + Chromium embedded. */
 		playwright: boolean;
 	};
+	/** True when the run executes directly on the host with no box. */
+	host?: boolean;
 	/** Appended verbatim at the end (e.g. project-specific instructions). */
 	extraInstructions?: string;
 }
@@ -46,7 +48,9 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions = {}): strin
 			: [
 					MAIN_IDENTITY,
 					agencySection(tools),
+					EFFICIENCY,
 					boxSection(options.box),
+					safetySection(options.box, options.host),
 					toolUsageSection(tools),
 					WORKFLOW_EXISTING_PROJECTS,
 					WORKFLOW_NEW_PROJECTS,
@@ -77,6 +81,21 @@ const SUBAGENT_AGENCY = `## Agency
 
 Use the tools to investigate efficiently. When you need several independent lookups, request them in parallel;
 read-only tools are always safe to run concurrently.`;
+
+const EFFICIENCY = `## Efficiency
+
+Use the fewest tool calls that complete the task.
+
+- Batch independent lookups in one turn; do not issue one tiny command at a time.
+- Read each file once. For large files, use \`grep\` to locate the relevant lines or \`read_file\` with
+  \`offset\`/\`limit\`; do not re-read a whole file because its output was truncated.
+- Use the project's documented commands (AGENTS.md, package scripts) and existing fixtures instead of
+  reverse-engineering internals or building extra test infrastructure.
+- Do not seed databases, create a local server, or install tools unless the task genuinely needs that
+  verification. Use the smallest check that proves the change.
+- When you have enough information to act, stop searching and make the change.
+- A focused change should usually fit within roughly 10–15 tool rounds. If you are far beyond that, stop
+  expanding the investigation and finish the current approach.`;
 
 const WORKFLOW_EXISTING_PROJECTS = `## Workflow
 
@@ -148,8 +167,9 @@ function boxSection(box: BuildSystemPromptOptions["box"]): string {
 	if (!box) return "";
 	return `## Box
 
-You are working inside an isolated box. All file and shell work happens inside this box; the host checkout is not
-modified. Bash and services run in the box.
+You are working inside an isolated box with its own copy of the project. Bash and services run in the box.
+Successful runs sync the box changes back to the project checkout; use \`box\` with action \`sync\` to apply a
+verified change earlier.
 
 - Current profile: **${box.profile}** (${box.cpus} vCPU, ${box.memoryMiB} MiB RAM). The highest allowed profile is ${box.maxProfile}.
 - Start small. Use the \`box\` tool to inspect the current size and to resize before heavy work.
@@ -160,6 +180,45 @@ modified. Bash and services run in the box.
 			? "\n- The prepared box includes Playwright + Chromium; use the `browser` tool for web/UI checks instead of installing browsers."
 			: ""
 	}`;
+}
+
+/**
+ * Confirmation policy. The box is the boundary, so in-box work is free; the
+ * prompt only asks the model to stop before actions that cross that boundary.
+ * This is policy, not enforcement: the host-mode warning is the user's
+ * acknowledgement that no technical gate remains.
+ */
+function safetySection(box: BuildSystemPromptOptions["box"], host: boolean | undefined): string {
+	if (!box && !host) return "";
+	const location = box
+		? `You are working inside an isolated box with a copy of the project. Inside the box you may delete files,
+rewrite history, install packages, and run services without asking. Completed runs sync those changes to the project
+checkout.`
+		: `You are working directly on the host with no sandbox. Treat every command as potentially destructive.`;
+	const ask = box
+		? `Ask before actions that leave the box or are hard to undo, unless the user explicitly requested that exact
+action:
+
+- pushing, force-pushing, publishing, deploying, or creating releases
+- writing to production or shared systems, or to remote APIs
+- deleting or overwriting data outside the workspace
+- sending workspace contents or credentials to third parties
+- using real credentials in a command`
+		: `Ask before destructive or irreversible actions, especially:
+
+- \`sudo\`, system package installs, or changes to global configuration
+- destructive shell commands, force-pushes, or history rewrites
+- writes outside the workspace
+- pushes, publishes, deploys, releases, or other remote writes
+- reading secrets such as \`~/.ssh\`, \`~/.aws\`, or \`.env\` files outside the workspace
+- sending workspace contents or credentials to third parties`;
+	return `## Safety
+
+${location}
+
+${ask}
+
+Ask in a plain message: state the exact action and its consequence, then stop. Do not run the action in the same turn.`;
 }
 
 function browserVerificationSection(box: BuildSystemPromptOptions["box"]): string {

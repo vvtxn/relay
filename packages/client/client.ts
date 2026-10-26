@@ -1,11 +1,10 @@
 import type {
-	ApprovalDecision,
-	ApprovalRequest,
 	BoxAttachRequest,
 	BoxListResponse,
 	BoxProfileName,
 	BoxResizeRequest,
 	BoxResponse,
+	BoxSyncResponse,
 	ConfigResponse,
 	CreateBoxRequest,
 	CreateSessionRequest,
@@ -163,6 +162,10 @@ export class RelayClient {
 		} satisfies BoxResizeRequest);
 	}
 
+	async syncBox(boxId: string): Promise<BoxSyncResponse> {
+		return await this.post(`/api/boxes/${encodeURIComponent(boxId)}/sync`, {});
+	}
+
 	async pauseBox(boxId: string): Promise<StatusResponse> {
 		return await this.post(`/api/boxes/${encodeURIComponent(boxId)}/pause`, {});
 	}
@@ -181,13 +184,6 @@ export class RelayClient {
 
 	async sendMessage(sessionId: string, content: string): Promise<SendMessageResponse> {
 		return await this.post(`/api/sessions/${sessionId}/messages`, { content } satisfies SendMessageRequest);
-	}
-
-	async approve(sessionId: string, toolCallId: string, decision: ApprovalDecision): Promise<StatusResponse> {
-		return await this.post(`/api/sessions/${sessionId}/approve`, {
-			toolCallId,
-			decision,
-		} satisfies ApprovalRequest);
 	}
 
 	async cancel(sessionId: string): Promise<StatusResponse> {

@@ -92,10 +92,27 @@ export interface ExecResult {
 	truncated: boolean;
 }
 
+/** One path applied from a box workspace to the project checkout. */
+export interface BoxSyncFile {
+	/** Git name-status code (`M`, `A`, `D`, `R100`, ...). */
+	status: string;
+	path: string;
+}
+
+/** Result of applying a box workspace's changes to the project checkout. */
+export interface BoxSyncResult {
+	projectCwd: string;
+	files: BoxSyncFile[];
+	summary: string;
+}
+
 export interface BoxLease {
 	readonly boxId: string;
 	readonly status: BoxStatus;
 	readonly workspace: string;
+	/** True when this box has a sync baseline and can apply changes to the checkout. */
+	readonly syncAvailable: boolean;
+	sync(): Effect.Effect<BoxSyncResult, BoxError>;
 	exec(command: string, options?: ExecOptions): Effect.Effect<ExecResult, BoxError>;
 	release(): Effect.Effect<void>;
 }
@@ -127,6 +144,8 @@ export interface BoxManager {
 	resume(boxId: string): Effect.Effect<void, BoxError>;
 	stop(boxId: string): Effect.Effect<void, BoxError>;
 	destroy(boxId: string): Effect.Effect<void, BoxError>;
+	/** Apply the box workspace's changes to the project checkout. */
+	sync(boxId: string): Effect.Effect<BoxSyncResult, BoxError>;
 	/** Detach missing sessions, retain unattached boxes by TTL, then expire trash. */
 	gc(activeSessionIds: ReadonlySet<string>): Effect.Effect<GcResult, BoxError>;
 	reconcile(): Effect.Effect<void, BoxError>;

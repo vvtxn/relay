@@ -38,6 +38,8 @@ export interface AgentConfig {
 
 const DEFAULT_MAX_TOOL_ROUNDS = 30;
 const REFLECTION_INTERVAL = 12;
+const ROUND_BUDGET_WARNING = 10;
+const ROUND_BUDGET_FINAL = 3;
 const MAX_API_RETRIES = 3;
 const RETRY_BASE_DELAY = Duration.seconds(1);
 const STREAM_TIMEOUT_SECONDS = 60;
@@ -86,6 +88,22 @@ function runLoop(
 				context.push({
 					role: "user",
 					content: `[system note] You have completed ${round} tool rounds. Briefly assess: are you making progress toward the user's goal? If stuck or repeating yourself, try a different approach.`,
+				});
+			}
+
+			// Make the round budget visible before the hard stop. Models otherwise
+			// keep exploring until the loop errors out with no persisted explanation.
+			const remainingRounds = maxRounds - round;
+			if (round > 0 && remainingRounds === ROUND_BUDGET_WARNING) {
+				context.push({
+					role: "user",
+					content: `[system note] You have ${remainingRounds} tool rounds left. Stop broad exploration, finish the current approach, and make the necessary edit. Do not start another investigation.`,
+				});
+			}
+			if (round > 0 && remainingRounds === ROUND_BUDGET_FINAL) {
+				context.push({
+					role: "user",
+					content: `[system note] Only ${remainingRounds} tool rounds remain. Run the smallest necessary verification, then reply with the result. If you cannot finish, summarize exactly what remains.`,
 				});
 			}
 
@@ -148,9 +166,20 @@ function runLoop(
 					yield* emit({ type: "tool_call_end", id: tc.id, name: tc.name, args: tc.args });
 				}
 
-				// Build the completed assistant message
+				// Build the completed assistant message. An empty response with no
+				// tool calls is not a completed task — treat it as transient and
+				// retry rather than persisting a blank assistant turn that ends the
+				// run. Reasoning-only provider responses land here too.
 				const text = textParts.join("");
 				const toolCalls = buildToolCalls(toolCallAccumulator);
+				if (!text.trim() && toolCalls.length === 0) {
+					return yield* Effect.fail(
+						new ProviderError({
+							message: "Provider returned an empty assistant message",
+							retryable: true,
+						}),
+					);
+				}
 				const assistantMessage: Message = {
 					role: "assistant",
 					content: text || null,

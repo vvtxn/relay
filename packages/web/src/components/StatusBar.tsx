@@ -1,28 +1,16 @@
 import { Show } from "solid-js";
+import type { BoxSummary } from "@vvtxn/client/protocol.ts";
 import { streamState } from "#/state/session.ts";
 
-function formatTokens(value: number): string {
-	if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`;
-	if (value >= 1_000) return `${(value / 1_000).toFixed(1)}k`;
-	return String(value);
-}
-
-function TokenBar(props: { tokens: number; contextWindow: number }) {
-	const ratio = () => (props.contextWindow > 0 ? Math.min(props.tokens / props.contextWindow, 1) : 0);
-	const level = () => (ratio() >= 0.8 ? "high" : ratio() >= 0.5 ? "mid" : "low");
-
-	return (
-		<div class="token-track" title="Context window usage">
-			<div class={`token-fill ${level()}`} style={{ width: `${ratio() * 100}%` }} />
-		</div>
-	);
+function boxLabel(box: BoxSummary): string {
+	return `${box.image.replace(/^localhost\//, "")} · ${box.state}`;
 }
 
 export function StatusBar(props: {
 	branch: string | null;
+	box?: BoxSummary | undefined;
 	userName?: string | undefined;
 	avatarUrl?: string | undefined;
-	contextWindow: number;
 	canSignOut: boolean;
 	onSignOut: () => void;
 }) {
@@ -42,14 +30,17 @@ export function StatusBar(props: {
 				</Show>
 			</div>
 			<div class="status-right">
-				<div class="status-stat">
-					<span class="status-stat-key">tokens</span>
-					<TokenBar tokens={streamState().tokens} contextWindow={props.contextWindow} />
-					<span class="status-stat-value">
-						{formatTokens(streamState().tokens)} / {formatTokens(props.contextWindow)}
-					</span>
-				</div>
-				<span class="status-sep" />
+				<Show when={props.box}>
+					{(box) => (
+						<>
+							<div class="status-stat" title={`${box().image} (${box().state})`}>
+								<span class="status-stat-key">box</span>
+								<span class="status-stat-value">{boxLabel(box())}</span>
+							</div>
+							<span class="status-sep" />
+						</>
+					)}
+				</Show>
 				<div class="status-stat">
 					<span class="status-stat-key">cost</span>
 					<span class="status-stat-value">${streamState().cost.toFixed(2)}</span>

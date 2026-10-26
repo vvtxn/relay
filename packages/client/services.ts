@@ -10,7 +10,6 @@
 import { Context, Data, Effect, Layer, Stream } from "effect";
 import { RelayApiError, type RelayClient, type SubscribeOptions } from "./client.ts";
 import type {
-	ApprovalDecision,
 	ConfigResponse,
 	CreateSessionResponse,
 	FileListResponse,
@@ -71,11 +70,6 @@ export interface ApiShape {
 	openSession(id: string): Effect.Effect<OpenSessionResponse, RelayError>;
 	listFiles(sessionId: string): Effect.Effect<FileListResponse, RelayError>;
 	sendMessage(sessionId: string, content: string): Effect.Effect<SendMessageResponse, RelayError>;
-	approve(
-		sessionId: string,
-		toolCallId: string,
-		decision: ApprovalDecision,
-	): Effect.Effect<StatusResponse, RelayError>;
 	cancel(sessionId: string): Effect.Effect<StatusResponse, RelayError>;
 	/** Raw SSE subscription; consumed by {@link SessionStream}. */
 	subscribe(sessionId: string, options: SubscribeOptions): AsyncIterable<ServerEvent>;
@@ -101,7 +95,6 @@ export const ApiLive = (client: RelayClient): Layer.Layer<Api> =>
 		openSession: (id) => tryRelay(() => client.openSession(id)),
 		listFiles: (sessionId) => tryRelay(() => client.listFiles(sessionId)),
 		sendMessage: (sessionId, content) => tryRelay(() => client.sendMessage(sessionId, content)),
-		approve: (sessionId, toolCallId, decision) => tryRelay(() => client.approve(sessionId, toolCallId, decision)),
 		cancel: (sessionId) => tryRelay(() => client.cancel(sessionId)),
 		subscribe: (sessionId, options) => client.subscribe(sessionId, options),
 	});

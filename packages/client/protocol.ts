@@ -174,6 +174,20 @@ export interface BoxResizeRequest {
 	profile: BoxProfileName;
 }
 
+/** One path applied from a box workspace to the project checkout. */
+export interface BoxSyncFile {
+	/** Git name-status code (`M`, `A`, `D`, `R100`, ...). */
+	status: string;
+	path: string;
+}
+
+/** Result of syncing a box workspace back to the project checkout. */
+export interface BoxSyncResponse {
+	projectCwd: string;
+	files: BoxSyncFile[];
+	summary: string;
+}
+
 export interface FileListResponse {
 	cwd: string;
 	files: string[];
@@ -186,13 +200,6 @@ export interface SendMessageRequest {
 export interface SendMessageResponse {
 	status: "started";
 	sessionId: string;
-}
-
-export type ApprovalDecision = "allow" | "always" | "deny";
-
-export interface ApprovalRequest {
-	toolCallId: string;
-	decision: ApprovalDecision;
 }
 
 export interface StatusResponse {
@@ -208,13 +215,6 @@ export interface ErrorResponse {
 // SSE events — `GET /api/sessions/:id/events`
 // ---------------------------------------------------------------------------
 
-/** Server-side display state for a pending approval. */
-export interface PendingApprovalInfo {
-	toolCallId: string;
-	toolName: string;
-	summary: string;
-}
-
 /** Snapshot sent immediately on subscribe while a run is in progress. */
 export interface RunStateEvent {
 	type: "run_state";
@@ -222,7 +222,6 @@ export interface RunStateEvent {
 	draftText: string;
 	/** Tool calls that have completed streaming args (may or may not have results yet). */
 	toolCalls: { id: string; name: string; args: string; result?: ToolResult }[];
-	pendingApproval: PendingApprovalInfo | null;
 	tokens: number;
 	cost: number;
 }
@@ -236,7 +235,5 @@ export type ServerEvent =
 	| { type: "tool_result"; id: string; result: ToolResult }
 	| { type: "message_complete"; usage?: Usage; tokens: number; cost: number }
 	| { type: "turn_complete" }
-	| { type: "approval_required"; approval: PendingApprovalInfo }
-	| { type: "approval_resolved"; toolCallId: string; decision: ApprovalDecision }
 	| { type: "run_finished"; reason: "completed" | "cancelled" | "error" }
 	| { type: "error"; message: string };

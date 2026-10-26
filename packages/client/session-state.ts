@@ -11,7 +11,7 @@
  */
 
 import { createUIToolCall, type UIMessage, type UIToolCall } from "@vvtxn/relay/core/display.ts";
-import type { PendingApprovalInfo, ServerEvent } from "./protocol.ts";
+import type { ServerEvent } from "./protocol.ts";
 
 /** Agent activity shown by a client's status indicator. */
 export type SessionStatus =
@@ -38,8 +38,6 @@ export interface SessionStreamState {
 	tokens: number;
 	/** Authoritative cost total reported by the server. */
 	cost: number;
-	/** Pending tool approval, when the run is waiting on the user. */
-	pendingApproval: PendingApprovalInfo | null;
 }
 
 export const initialSessionStreamState: SessionStreamState = {
@@ -51,7 +49,6 @@ export const initialSessionStreamState: SessionStreamState = {
 	status: { kind: "idle" },
 	tokens: 0,
 	cost: 0,
-	pendingApproval: null,
 };
 
 /** True when the draft holds anything worth rendering. */
@@ -108,7 +105,6 @@ export function applyServerEvent(state: SessionStreamState, event: ServerEvent):
 				status: { kind: "thinking" },
 				tokens: event.tokens,
 				cost: event.cost,
-				pendingApproval: event.pendingApproval,
 			};
 		}
 		case "text_delta":
@@ -153,13 +149,6 @@ export function applyServerEvent(state: SessionStreamState, event: ServerEvent):
 			};
 		case "turn_complete":
 			return { ...flushDraft(state), status: { kind: "thinking" } };
-		case "approval_required":
-			// At most one approval is pending per session; keep an open one rather
-			// than overwrite it (its decision would otherwise be lost).
-			return state.pendingApproval ? state : { ...state, pendingApproval: event.approval };
-		case "approval_resolved":
-			if (state.pendingApproval?.toolCallId !== event.toolCallId) return state;
-			return { ...state, pendingApproval: null };
 		case "error":
 			return {
 				...state,
@@ -171,7 +160,6 @@ export function applyServerEvent(state: SessionStreamState, event: ServerEvent):
 				...flushed,
 				running: false,
 				status: { kind: "idle" },
-				pendingApproval: null,
 			};
 		}
 	}

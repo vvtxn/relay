@@ -15,6 +15,7 @@ function usage(): void {
 			"  relay box new [path] [tiny|small|medium]",
 			"  relay box list",
 			"  relay box pause|resume|stop <boxId>",
+			"  relay box sync <boxId>",
 			"  relay box resize <boxId> <tiny|small|medium>",
 			"  relay box attach <boxId> <sessionId>",
 			"  relay box detach <boxId> <sessionId>",
@@ -75,6 +76,18 @@ async function action(sub: "pause" | "resume" | "stop", args: string[]): Promise
 	});
 }
 
+async function sync(args: string[]): Promise<void> {
+	const boxId = args[0];
+	if (!boxId) {
+		usage();
+		process.exit(1);
+	}
+	await withClient(async (client) => {
+		const result = await client.syncBox(boxId);
+		console.log(result.summary);
+	});
+}
+
 async function resize(args: string[]): Promise<void> {
 	const [boxId, profile] = args;
 	if (!boxId || (profile !== "tiny" && profile !== "small" && profile !== "medium")) {
@@ -127,6 +140,9 @@ export async function runBoxCommand(args: string[]): Promise<void> {
 		case "resume":
 		case "stop":
 			await action(sub, rest);
+			return;
+		case "sync":
+			await sync(rest);
 			return;
 		case "resize":
 			await resize(rest);

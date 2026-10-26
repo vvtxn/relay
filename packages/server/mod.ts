@@ -1,7 +1,7 @@
 /**
  * @vvtxn/server — HTTP + SSE server hosting the Relay agent runtime.
  *
- * Exposes the agent loop, sessions, tools, and approvals over the REST + SSE
+ * Exposes the agent loop, sessions, tools, and boxes over the REST + SSE
  * protocol defined in `@vvtxn/client`. Entry point: `startServer()` (also
  * used by the CLI's `relay serve` subcommand).
  *

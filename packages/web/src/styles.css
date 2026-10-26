@@ -657,28 +657,6 @@ body {
 	color: var(--relay-text, #f2f2f2);
 }
 
-.token-track {
-	width: 84px;
-	height: 5px;
-	background: var(--relay-border, #303030);
-	border-radius: 3px;
-	overflow: hidden;
-}
-
-.token-fill {
-	height: 100%;
-	background: var(--relay-success, #a8b0a8);
-	transition: width 0.2s ease;
-}
-
-.token-fill.mid {
-	background: var(--relay-warning, #b8b0a0);
-}
-
-.token-fill.high {
-	background: var(--relay-error, #b0a0a0);
-}
-
 /* ------------------------------------------------------------------ */
 /* Chat                                                                */
 /* ------------------------------------------------------------------ */
@@ -1333,54 +1311,6 @@ body {
 	width: 100%;
 }
 
-.overlay {
-	position: absolute;
-	inset: 0;
-	background: var(--relay-overlay, rgba(0, 0, 0, 0.6));
-	display: flex;
-	align-items: center;
-	justify-content: center;
-	z-index: 30;
-}
-
-.dialog {
-	width: min(480px, 90vw);
-	background: var(--relay-surface-elevated, #181818);
-	border: 1px solid var(--relay-warning, #b8b0a0);
-	border-radius: 6px;
-	padding: 1rem;
-	display: flex;
-	flex-direction: column;
-	gap: 0.6rem;
-}
-
-.dialog-title {
-	color: var(--relay-warning, #b8b0a0);
-	font-weight: 700;
-	text-transform: uppercase;
-	letter-spacing: 0.1em;
-	font-size: 0.8rem;
-}
-
-.dialog-tool {
-	color: var(--relay-brand, #c0c0c0);
-	font-weight: 700;
-	font-size: 0.85rem;
-	letter-spacing: 0.12em;
-	text-transform: uppercase;
-}
-
-.dialog-summary {
-	color: var(--relay-text-muted, #c0c0c0);
-	word-break: break-word;
-}
-
-.dialog-actions {
-	display: flex;
-	gap: 0.5rem;
-	justify-content: flex-end;
-}
-
 /* ------------------------------------------------------------------ */
 /* Settings                                                            */
 /* ------------------------------------------------------------------ */
@@ -1823,7 +1753,7 @@ body {
 
 .thread-item {
 	display: flex;
-	align-items: baseline;
+	align-items: flex-start;
 	justify-content: space-between;
 	gap: 1rem;
 	text-decoration: none;
@@ -1842,9 +1772,9 @@ body {
 }
 
 .thread-preview {
-	overflow: hidden;
-	text-overflow: ellipsis;
-	white-space: nowrap;
+	flex: 1;
+	min-width: 0;
+	overflow-wrap: anywhere;
 }
 
 .thread-time {
