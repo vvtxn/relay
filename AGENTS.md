@@ -11,6 +11,7 @@ Terminal-based coding agent with custom TUI framework.
 │   │   └── core/           # Agent loop, runner, tools, sessions, context, display
 │   ├── client/             # Wire protocol + RelayClient + Effect service layer (@vvtxn/client)
 │   ├── server/             # HTTP + SSE server hosting the runtime (@vvtxn/server)
+│   ├── box/                # Per-session Microsandbox runtime (@vvtxn/box)
 │   ├── cli/                # TUI client + serve subcommand (@vvtxn/cli)
 │   │   ├── agent/          # App entry point, config, components, hooks
 │   │   └── tui/            # Terminal UI framework (JSX runtime, Yoga layout)
@@ -39,7 +40,8 @@ packages/local        (Linux x64 single executable; packages cli + server)
 
 All clients (CLI, web) talk to the server over the shared protocol in `packages/client`; the agent runtime executes only
 in the server. `packages/relay` powers the server and provides display + theme utilities to clients. Both clients fold
-`ServerEvent`s with the same reducer (`packages/client/session-state.ts`).
+`ServerEvent`s with the same reducer (`packages/client/session-state.ts`). `packages/box` is the optional Microsandbox
+runtime consumed by the server.
 
 ## Effect Runtime Boundaries
 
@@ -187,6 +189,7 @@ Each sub-package has its own AGENTS.md with package-specific details:
 - `packages/relay/core/AGENTS.md` - Agent loop, runner, tools, sessions
 - `packages/client/AGENTS.md` - Wire protocol and HTTP/SSE client
 - `packages/server/AGENTS.md` - HTTP + SSE server hosting the agent runtime
+- `packages/box/AGENTS.md` - Per-session Microsandbox microVMs and workspace manifests
 - `packages/cli/agent/AGENTS.md` - CLI application and TUI components
 - `packages/cli/tui/AGENTS.md` - Terminal UI framework
 - `packages/local/AGENTS.md` - Linux x64 single-executable packaging

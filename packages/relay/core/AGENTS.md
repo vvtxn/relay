@@ -35,10 +35,9 @@ core/
 ├── tools/                # Tool system
 │   ├── index.ts          # Tool exports, defaultTools registry, createWorkspaceTools
 │   ├── types.ts          # Tool, ToolRegistry, ToolResult, ToolError types; defineTool helper
-│   ├── approval.ts       # withApproval wrapper (gate tool execution on an Effect decision)
 │   ├── delegate.ts       # createDelegateTool: read-only subagent factory over the agent loop
 │   ├── bash.ts           # Shell command execution (createBashTool factory, optional cwd, scrubbed env)
-│   ├── read.ts           # File reading
+│   ├── read.ts           # File reading (line-range offset/limit)
 │   ├── write.ts          # File writing
 │   ├── edit.ts           # File editing (find-and-replace)
 │   ├── diff.ts           # Unified diff generation via git diff
@@ -69,7 +68,10 @@ core/
 The stream never fails: provider errors are retried (`Effect.retry` with `Schedule.exponential`, 1s/2s, gated on
 `ProviderError.retryable`), a stalled stream fails after 60s of silence (`Stream.timeoutOrElse`, also retryable), and
 once the budget is exhausted — or any other failure surfaces — an `error` event is emitted and the stream completes.
-Consumers render errors in-band. Features: self-reflection every 12 rounds and repeated-call loop detection.
+Consumers render errors in-band. Features: self-reflection every 12 rounds, round-budget system notes when 10 and 3
+tool rounds remain, repeated-call loop detection, and empty-response retry. An assistant turn with no text and no
+tool calls is treated as a retryable provider failure instead of a blank completion that ends the run. `maxToolRounds`
+defaults to 30; the server passes 40.
 
 ### Agent Runner (`runner.ts`)
 
@@ -133,7 +135,6 @@ Tools are defined using `defineTool()`:
 interface Tool {
 	definition: ToolDefinition;
 	readonly?: boolean;
-	confined?: boolean;
 	usageHint?: string;
 	resourceKey?(input: unknown): string | undefined;
 	execute(input: unknown): Effect.Effect<ToolResult, ToolError>;
@@ -151,32 +152,29 @@ argument against `root` (escapes are rejected with an error result, and paths wh
 resolve against their deepest existing ancestor), `write_file` creates missing parent directories, and bash runs with
 `root` as its cwd and a scrubbed environment (`scrubbedAgentEnv`, no `*_TOKEN`/`*_SECRET`/`RELAY_SECRET_KEY*` — see
 `env.ts`), so `env` in a command cannot hand the model server credentials. Note bash is not truly confined — shell
-commands can still use absolute paths. Wrapped file tools
-are marked `confined` (approval layers treat them as sandboxed) and get a `resourceKey` of their canonical path, so
-concurrent calls to the same file are serialized by the agent loop while calls to different files overlap; bash stays
-exclusive (no key) and unconfined.
+commands can still use absolute paths. Wrapped file tools get a `resourceKey` of their canonical path, so concurrent
+calls to the same file are serialized by the agent loop while calls to different files overlap; bash stays exclusive
+(no key). `read_file` accepts 1-based `offset` and a line `limit` for large files; a normal range is not marked
+truncated, only output that exceeds the 10k character cap.
 
 `createDelegateTool(options)` builds the `delegate` tool: each call runs a fresh, isolated `run()` with the given
 (typically read-only) tool registry — no conversation history, its own round cap, and the parent abort signal. The
 subagent's system prompt defaults to `buildSystemPrompt({ mode: "subagent", tools })` and can be overridden wholesale
 via `systemPrompt`. The final report returns as a `ToolResult`, and subagent cost is aggregated into `meta.cost` so
-the server can roll it into the session total. The tool is `readonly`, so calls skip approval and run in the parallel
-readonly phase; an internal semaphore caps concurrent subagent loops (`maxConcurrency`, default 3). The server wires
-one per run with `read_file` + `grep`.
-
-`withApproval(tools, handler)` wraps each tool's `execute` so calls are gated on an `Effect<boolean>` decision.
-Readonly and workspace-`confined` tools skip approval by default (`skipReadonly` / `skipConfined` to change), so a
-workspace run only prompts for unconfined side-effecting tools (bash). Denials return an `isError` ToolResult, so
-the agent loop needs no changes and the model can react. Handlers waiting on user input should await a `Deferred` (see
-`packages/server/run.ts`) so cancelling the run interrupts the wait.
+the server can roll it into the session total. The tool is `readonly`, so calls run in the parallel readonly phase; an
+internal semaphore caps concurrent subagent loops (`maxConcurrency`, default 3). The server wires one per run with
+`read_file` + `grep`.
 
 ### System Prompt Composition (`prompts.ts`)
 
-`buildSystemPrompt({ mode, tools, extraInstructions })` composes the prompt from named sections:
+`buildSystemPrompt({ mode, tools, box, host, extraInstructions })` composes the prompt from named sections:
 
-- `mode: "main"` (default) renders identity, agency, tool usage, workflow, code quality, self-review, and
-  communication; `mode: "subagent"` renders a focused read-only investigator prompt (identity, parallel-lookup policy,
-  tool usage, report requirements).
+- `mode: "main"` (default) renders identity, agency, efficiency guidance, box/host guidance, safety policy, tool usage,
+  workflow, code quality, self-review, and communication; `mode: "subagent"` renders a focused read-only investigator
+  prompt (identity, parallel-lookup policy, tool usage, report requirements).
+- The Safety section is rendered when the server reports a box or host execution context. It tells the agent that
+  in-box work is unrestricted and that it must ask (in a plain message, then stop) before actions that leave the box
+  or are hard to undo. This is prompt policy, not enforcement: the box and explicit host mode are the boundaries.
 - The Tool Usage section is rendered from `tools` (a `ToolRegistry` or `Tool[]`): each tool contributes a bullet from
   its `usageHint`, falling back to the first sentence of its schema description. The Agency section names the read-only
   tools from the same source, and Self-Review only mentions `read_file` when it is present — the prompt can never drift
@@ -246,8 +244,10 @@ After concluding that a task is complete, always run these commands from the rep
 - Tools have a `readonly` flag for parallel execution optimization, and an optional `resourceKey` so the agent loop can
   serialize side-effect calls that touch the same resource while running independent ones concurrently (`confinePathArg`
   attaches the resolved file path for the workspace file tools; tools without a key are exclusive)
-- Sandboxed tools are marked `confined` (set by the workspace wrappers); `withApproval` skips them, so the sandbox — not
-  the prompt — is the boundary and only unconfined tools (bash) ask for permission
+- There is no per-tool permission wrapper. The box is the execution boundary; host mode (`RELAY_BOX=0`) is
+  explicitly unsandboxed, and the agent asks before actions that leave the box via prompt policy
+- Keep the Efficiency section concrete: batch lookups, read each file once (use `offset`/`limit`), use documented
+  scripts/fixtures, and stop exploring once there is enough information to act
 - Prompt guidance for a tool lives on the tool (`usageHint`) and is rendered by `buildSystemPrompt`; never hardcode
   tool names or availability in prompt prose
 - Use `ToolResult` with `isError` flag for error reporting; unexpected throws become `ToolError`
@@ -256,5 +256,4 @@ After concluding that a task is complete, always run these commands from the rep
 - `run()` is the primary entry point (a `Stream<AgentEvent>`); `runAgentLoop()` adapts it for callback consumers
 - Context trimming uses heuristic token estimation (~4 chars/token)
 - Workspace helpers take an explicit root directory — never rely on the process cwd
-- Gate side-effecting tools with `withApproval()`; keep `defaultTools` ungated only where approvals don't apply
 - Keep `display.ts`/`theme.ts`/`fonts.ts` free of Effect and `node:` imports (browser bundles import them)

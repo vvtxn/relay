@@ -113,6 +113,79 @@ export interface OpenSessionResponse {
 	branch: string | null;
 	/** True while a run is active on this session (another client may be driving it). */
 	running: boolean;
+	/** The box attached to this session, when boxes are enabled. */
+	box?: BoxSummary;
+}
+
+// ---------------------------------------------------------------------------
+// Boxes
+// ---------------------------------------------------------------------------
+
+export type BoxProfileName = "tiny" | "small" | "medium";
+
+export type BoxLifecycleState = "provisioning" | "starting" | "ready" | "busy" | "paused" | "stopped" | "error";
+
+/** A managed execution box. Boxes are independent of sessions; attachments name users. */
+export interface BoxSummary {
+	boxId: string;
+	state: BoxLifecycleState;
+	/** OCI image backing this box (for example `relay-box:local`). */
+	image: string;
+	/** Named profile, or "custom" when a project overrides exact resources. */
+	profile: BoxProfileName | "custom";
+	cpus: number;
+	memoryMiB: number;
+	rootDiskMiB: number;
+	attachments: string[];
+	originSessionId?: string;
+	createdAt: string;
+	lastUsedAt: string;
+	pausedAt?: string;
+	error?: string;
+	capacity?: {
+		maxRunning: number;
+		running: number;
+		maxCpus: number;
+		usedCpus: number;
+		maxMemoryMiB: number;
+		usedMemoryMiB: number;
+	};
+}
+
+export interface BoxListResponse {
+	boxes: BoxSummary[];
+}
+
+export interface BoxResponse {
+	box: BoxSummary;
+}
+
+export interface CreateBoxRequest {
+	/** Project directory to clone. Defaults to the server workspace. */
+	cwd?: string;
+	profile?: BoxProfileName;
+}
+
+export interface BoxAttachRequest {
+	sessionId: string;
+}
+
+export interface BoxResizeRequest {
+	profile: BoxProfileName;
+}
+
+/** One path applied from a box workspace to the project checkout. */
+export interface BoxSyncFile {
+	/** Git name-status code (`M`, `A`, `D`, `R100`, ...). */
+	status: string;
+	path: string;
+}
+
+/** Result of syncing a box workspace back to the project checkout. */
+export interface BoxSyncResponse {
+	projectCwd: string;
+	files: BoxSyncFile[];
+	summary: string;
 }
 
 export interface FileListResponse {
@@ -129,13 +202,6 @@ export interface SendMessageResponse {
 	sessionId: string;
 }
 
-export type ApprovalDecision = "allow" | "always" | "deny";
-
-export interface ApprovalRequest {
-	toolCallId: string;
-	decision: ApprovalDecision;
-}
-
 export interface StatusResponse {
 	status: "ok";
 }
@@ -149,13 +215,6 @@ export interface ErrorResponse {
 // SSE events — `GET /api/sessions/:id/events`
 // ---------------------------------------------------------------------------
 
-/** Server-side display state for a pending approval. */
-export interface PendingApprovalInfo {
-	toolCallId: string;
-	toolName: string;
-	summary: string;
-}
-
 /** Snapshot sent immediately on subscribe while a run is in progress. */
 export interface RunStateEvent {
 	type: "run_state";
@@ -163,7 +222,6 @@ export interface RunStateEvent {
 	draftText: string;
 	/** Tool calls that have completed streaming args (may or may not have results yet). */
 	toolCalls: { id: string; name: string; args: string; result?: ToolResult }[];
-	pendingApproval: PendingApprovalInfo | null;
 	tokens: number;
 	cost: number;
 }
@@ -177,7 +235,5 @@ export type ServerEvent =
 	| { type: "tool_result"; id: string; result: ToolResult }
 	| { type: "message_complete"; usage?: Usage; tokens: number; cost: number }
 	| { type: "turn_complete" }
-	| { type: "approval_required"; approval: PendingApprovalInfo }
-	| { type: "approval_resolved"; toolCallId: string; decision: ApprovalDecision }
 	| { type: "run_finished"; reason: "completed" | "cancelled" | "error" }
 	| { type: "error"; message: string };

@@ -33,8 +33,7 @@ tui/
 │   │   ├── text-input.ts       # useTextInput hook (with vim mode support)
 │   │   ├── text-utils.ts       # Shared text editing utilities (TextState)
 │   │   ├── scroll-area.ts      # useScrollArea hook
-│   │   ├── command-palette.ts  # useCommandPalette hook
-│   │   └── approval.ts         # useApprovalPrompt hook (tool approval decisions)
+│   │   └── command-palette.ts  # useCommandPalette hook
 │   ├── elements/               # Element handlers for rendering
 │   │   ├── index.ts            # Element registry (registerElement, getElement)
 │   │   ├── box.ts              # Box element renderer + layout
@@ -44,7 +43,6 @@ tui/
 │   │   └── scroll-area.ts      # ScrollArea element renderer + layout
 │   ├── components/
 │   │   ├── command-palette.tsx  # CommandPalette component
-│   │   ├── approval-prompt.tsx  # ApprovalPrompt component (tool approval overlay)
 │   │   └── welcome-screen.tsx  # WelcomeScreen component
 │   └── types/
 │       └── index.ts            # TypeScript type definitions, ElementRegistry, props
@@ -100,9 +98,9 @@ of cells, so a fill is **clipped to the outline's interior** and the ring shows 
 nearest painted ancestor's background — instead of the box's own surface: the fill can never bleed outside the outline,
 which is what makes rounded corners safe (an arc cannot mask a partial-cell fill). `borderLabel` (with
 `borderLabelColor`) embeds a label in the top edge (`╭─ LABEL ─────╮`), clipped to the cells between the corners. The
-composer and the modal overlays (command palette, approval prompt) are border-only rounded boxes (no fill, so there is
-nothing to bleed); everywhere else, hierarchy comes from the background steps (`background` → `surface` →
-`surfaceElevated`) plus padding, not outlines.
+composer and the command palette modal are border-only rounded boxes (no fill, so there is nothing to bleed);
+everywhere else, hierarchy comes from the background steps (`background` → `surface` → `surfaceElevated`) plus padding,
+not outlines.
 
 ### Core Classes
 
@@ -176,8 +174,6 @@ All exported from `render/components.tsx`:
   shallow-equal (see Render-Cost Model)
 - **`WelcomeScreen`** - Welcome screen with logo, subtitle, and hints, re-exported from `components/welcome-screen.tsx`
 - **`CommandPalette`** - Re-exported from `components/command-palette.tsx`
-- **`ApprovalPrompt`** - Modal tool-approval overlay (y allow / a always / n deny), re-exported from
-  `components/approval-prompt.tsx`
 
 ## Hooks
 
@@ -190,9 +186,6 @@ All exported from `render/hooks/index.ts`:
   registered once but reads options through a live ref, so `focused`/`scrollStep` changes (e.g. focus moving to a
   modal) take effect while the ScrollArea stays mounted.
 - **`useCommandPalette(options)`** - Command palette state (items, filtering, selection)
-- **`useApprovalPrompt()`** - Tool approval state; `ask(request)` returns a Promise resolving with the decision ("allow"
-  | "always" | "deny"), `cancel()` denies any pending request. Register before other global key handlers so Esc denies a
-  pending prompt instead of triggering cancel.
 
 ## Adding New Features
 

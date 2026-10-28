@@ -8,6 +8,7 @@
 		"web:build": "vp -C packages/web build",
 		"build": "vp -C packages/web build && vp -C packages/cli pack",
 		"build:sea": "node scripts/build-sea.ts",
+		"box:image": "node scripts/box-image.ts",
 		"check": "vp check",
 		"fmt": "vp fmt",
 		"fmt:check": "vp fmt --check",
@@ -22,5 +23,5 @@
 	"engines": {
 		"node": ">=26.11.1"
 	},
-	"packageManager": "pnpm@11.13.0"
+	"packageManager": "pnpm@12.15.0"
 }

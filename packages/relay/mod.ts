@@ -105,7 +105,6 @@ export {
 } from "./core/tools/index.ts";
 export type { DelegateToolOptions, Tool, ToolRegistry, ToolResult } from "./core/tools/index.ts";
 export { ToolError } from "./core/tools/index.ts";
-export { type ApprovalHandler, type ApprovalOptions, withApproval } from "./core/tools/approval.ts";
 
 // Sessions
 export { entriesToMessages, FileSessionStore, SessionManager, stripAttachedContext } from "./core/sessions/index.ts";

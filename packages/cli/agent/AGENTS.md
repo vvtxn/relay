@@ -1,6 +1,6 @@
 # AGENTS.md - Agent
 
-The CLI application: a TUI client of the Relay server. All agent execution (loop, tools, sessions, approvals, tokens)
+The CLI application: a TUI client of the Relay server. All agent execution (loop, tools, sessions, boxes, tokens)
 happens server-side; the CLI talks to it over the `@vvtxn/client` protocol (REST + SSE). The CLI is the entry point: it
 starts (or reuses) a background server before running the TUI.
 
@@ -86,18 +86,12 @@ Edit/write tool results arrive with a unified diff on `UIToolCall.diff` (live fr
 - The open diff list, position, and pre-built full-context rows live in an app-level signal **by value**, so streamed
   deltas behind the overlay cannot close or re-parse it. `DiffBody` is memoized; the app re-renders on every stream
   commit, but the diff rows themselves are not rebuilt.
-- Key registration order matters: approvals first, command palettes next (an open palette owns ctrl+o), the diff viewer
-  next (Escape closes it instead of priming cancellation), then the double-Esc cancel handler. While the overlay is
-  open the composer and chat `ScrollArea` are unfocused, and every non-navigation key is swallowed.
+- Key registration order matters: command palettes first (an open palette owns ctrl+o), the diff viewer next (Escape
+  closes it instead of priming cancellation), then the double-Esc cancel handler. While the overlay is open the
+  composer and chat `ScrollArea` are unfocused, and every non-navigation key is swallowed.
 - `diffs.ts` is pure: `collectSessionDiffs()` folds messages into reviewable diffs and `buildDiffRows()` produces
   compact or full-context rows. Both are unit-tested; the shared `parseDiff()`/`diffStats()` live in
   `@vvtxn/relay/core/display.ts`.
-
-### Approvals
-
-`approval_required` events drive the existing `ApprovalPrompt` hook (`allow`/`always`/`deny`); decisions POST to
-`/api/sessions/:id/approve`. `approval_resolved` events (another client answered, or the run ended) cancel the local
-ask. Switching sessions denies any pending ask server-side so runs never hang.
 
 ### Boot Flow
 
@@ -139,7 +133,7 @@ saved, so the TUI cannot start without one.
 ### UI Components
 
 - `Root` — Switches between BootScreen, BootError, and App based on the boot signal
-- `App` — Signals, event folding, palettes, approval handling; while a thread's history loads it shows a "Loading
+- `App` — Signals, event folding, palettes; while a thread's history loads it shows a "Loading
   thread…" hint instead of the welcome screen (`loadingSession` signal). The composer's top border carries the vim mode
   label (`borderLabel`, rendered as `╭─ INSERT ─────╮` / `╭─ NORMAL ─────╮`), and the bottom-left status line shows the
   running agent status (spinner + `Thinking…`/`Writing…`/`Running <tool>…`, plus the Esc-to-cancel hint), falling back
@@ -205,7 +199,7 @@ After concluding that a task is complete, always run these commands from the rep
 ## Code Patterns
 
 - Business logic lives server-side; this package only folds events into UI state
-- Use signals for reactive UI updates; register the approval hook before the double-Esc handler
+- Use signals for reactive UI updates; register palettes and overlays before the double-Esc handler
 - Session switching resets signals and lets the session `useSignalEffect` re-subscribe + refetch
 - `@mention` file listing comes from `useProjectFiles` (server endpoint), keyed per session
 - `entriesToUIMessages` renders persisted sessions — do not duplicate the conversion locally

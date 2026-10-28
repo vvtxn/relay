@@ -25,7 +25,7 @@ web/
     │   ├── runtime.ts     # ManagedRuntime over @vvtxn/client's appLayer + runApi/fork/interrupt helpers
     │   ├── query-client.ts# QueryClient + query key helpers
     │   ├── queries.ts     # queryOptions for me/config/workspace/workspaces/sessions/session/files
-    │   ├── mutations.ts   # createSession/sendMessage/approve/cancel/register/unregister (Effect-backed)
+    │   ├── mutations.ts   # createSession/sendMessage/cancel/register/unregister (Effect-backed)
     │   ├── open-chat.ts   # startChat(): create + seed a session in a workspace, return its id
     │   ├── workspaces.ts  # addWorkspace(): validate + register + invalidate
     │   └── bootstrap.ts   # Effect program: health → me → config + workspace picker (no session)
@@ -51,8 +51,7 @@ web/
         ├── DiffBlock.tsx       # Unified diffs via @pierre/diffs (plain-line fallback)
         ├── DiffModal.tsx       # Review modal (native dialog, showModal) for one edit/write diff, scrollable
         ├── Composer.tsx        # Textarea + @-mention picker + send/stop
-        ├── ApprovalDialog.tsx  # allow / always / deny overlay
-        ├── StatusBar.tsx       # Branch, tokens, cost, user, sign out
+        ├── StatusBar.tsx       # Branch, box, cost, user, sign out
         └── BootScreen.tsx      # Loading / error / login screens
 ```
 

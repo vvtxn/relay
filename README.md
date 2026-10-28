@@ -29,8 +29,10 @@ over the same wire protocol. Tooling (format, lint, type-check, builds) runs thr
 - **Streaming agent loop** — Async generator that yields events for real-time UI updates as the LLM thinks and uses
   tools
 - **Built-in tools** — Bash, file read/write/edit, and grep for filesystem interaction
+- **Managed boxes (experimental)** — Standalone Microsandbox microVMs with copy-on-write workspaces, live agent-driven
+  resizing, pause/wake, and VM-isolated bash
 - **Shared cloud sessions** — Conversations persist in Turso behind GitHub auth; local self-hosting uses SQLite
-- **Tool approval** — Side-effecting tools wait for an allow/deny decision
+- **Agent-initiated confirmation** — The agent stops and asks before actions that leave the box or are hard to undo
 - **Inline diffs** — File write and edit operations display colored unified diffs with line numbers
 - **Markdown rendering** — Inline markdown display in the terminal
 - **Command palette** — Fuzzy-searchable command menu in the terminal
@@ -192,6 +194,7 @@ canonical (symlink-resolved) path must sit within an allowed root.
 │   │   └── core/           # Agent loop, runner, tools, sessions, context, display
 │   ├── client/             # Wire protocol + RelayClient (@vvtxn/client)
 │   ├── server/             # HTTP + SSE server hosting the runtime (@vvtxn/server)
+│   ├── box/                # Per-session Microsandbox VMs (@vvtxn/box)
 │   ├── cli/                # TUI client + serve subcommand (@vvtxn/cli)
 │   │   ├── agent/          # App entry point, config, components, hooks
 │   │   └── tui/            # Terminal UI framework (JSX runtime, Yoga layout)
@@ -215,7 +218,7 @@ packages/relay  (leaf — no internal deps)
        ↑
 packages/client  (protocol + transport + shared session-state reducer)
        ↑
-packages/server  (HTTP + SSE runtime host)
+packages/server  (HTTP + SSE runtime host) ←── packages/box  (Microsandbox runtime, leaf)
        ↑
 packages/cli  (TUI client + serve subcommand)   packages/web  (Solid SPA client)
        ↑
@@ -224,7 +227,8 @@ packages/local  (Linux x64 single executable; packages cli + server)
 
 The terminal and web clients talk to the server over the shared protocol in `packages/client`. The agent loop, tools,
 and session stores execute only in `packages/server`; `packages/relay` powers it and provides display utilities (message
-mapping, diffs) and the shared Graphite/Silver theme tokens to both clients.
+mapping, diffs) and the shared Graphite/Silver theme tokens to both clients. The server optionally uses `packages/box`
+for VM-isolated sessions.
 
 ### `packages/client/` — Wire Protocol + Client
 
@@ -239,13 +243,65 @@ The single source of truth for the server↔client contract, used by the CLI (No
 
 An HTTP + SSE server built on `effect/http` and `@effect/platform-node`:
 
-- **RunManager** — one active run per session; bridges agent events onto per-session SSE streams; gates side-effecting
-  tools behind approval decisions that arrive over HTTP
+- **RunManager** — one active run per session; bridges agent events onto per-session SSE streams; boxed runs are
+  unrestricted inside the VM and sync their changes back to the project checkout when they complete successfully,
+  while host mode is explicitly unsandboxed
 - **Sessions** — create/open/list against Turso (cloud, primary) or local SQLite (self-hosted); per-session workspace
   cwd (file tools are confined to it)
 - **Auth** — GitHub App OAuth in cloud mode, or a fixed loopback identity in local mode, with per-request identity
   resolution, opaque hashed sessions, and an optional GitHub allowlist
 - **Static serving** — serves the bundled web app by default; `RELAY_STATIC_DIR` overrides its location
+
+### `packages/box/` — Managed Microsandbox VMs
+
+Default isolated execution. Boxes are independent of sessions: a box owns a Microsandbox microVM and a
+copy-on-write clone of a project, and sessions attach to it. The agent can resize the current box live; idle boxes
+pause first (services stay warm), then stop after a longer idle window.
+
+- `manager.ts` — box identity, attachments, leases, live resize, pause/stop, budgets, queue, reconciliation, GC
+- `profiles.ts` — `tiny` (1 vCPU / 2 GB), `small` (2 / 4 GB), `medium` (4 / 8 GB) with disk bundles
+- `workspace.ts` — reflink clone of the current working tree (including dirty/untracked state), linked-worktree handling
+- `sanitize.ts` — removes `.env*`, `.npmrc`, SSH/cloud credentials, and git URL credentials before the box starts
+- `manifest.ts` — versioned `box.json` per box under `RELAY_BOX_DATA_DIR`; sessions are attachments, not identity
+- `microsandbox.ts` — the only module that imports the native Microsandbox SDK
+
+Boxes are enabled by default; set `RELAY_BOX=0` for explicitly unsandboxed host execution. See `.env.example` for
+profiles, budgets, idle timers, and image settings. The runtime prompt requires browser verification of rendered UI
+changes and exposes a `browser` tool that runs Playwright inside the managed box. A project can add
+`.relay/box.json` for its image, profile ceiling, and setup/resume hooks. The agent starts at `tiny` and uses the `box`
+tool to resize before Playwright/browser tests, large builds, or multiple services. The default ceiling is `small`;
+set `RELAY_BOX_MAX_PROFILE=medium` and raise `RELAY_BOX_MEMORY_BUDGET_MIB` above 8 GiB to enable `medium`.
+
+Build the prepared toolchain image once (Node 26, pnpm, Playwright + Chromium, git, ripgrep, build tools, databases):
+
+```bash
+pnpm box:image
+```
+
+With the default `RELAY_BOX_IMAGE=auto`, new boxes use `relay-box:local` when it is loaded and fall back to
+`node:26-bookworm` otherwise. Playwright browsers are embedded at `/opt/playwright`, so the agent can run browser tests
+without downloading Chromium inside every box. When the prepared image is active, the agent's system prompt requires
+real-browser verification of rendered UI changes.
+
+Boxed runs are unrestricted inside the VM: it is the execution boundary. Host mode runs directly on the host with no
+sandbox and no approval prompts; the server logs a warning at startup. In both modes the agent is instructed to stop
+and ask before actions that leave the box or are hard to undo.
+
+Boxes require Linux KVM, macOS Apple Silicon, or Windows WHP. The manager enforces a memory/CPU budget in addition to
+the running-box count, so paused boxes and concurrent sessions cannot oversubscribe the host.
+
+Use `relay box list|new|resize|pause|resume|stop|sync|attach|detach|rm` to manage boxes; `relay box new [path]`
+creates a standalone box without starting a thread.
+
+Boxes are the working copy. A successful boxed run syncs its changes back to the project checkout, and the agent can
+apply them earlier with the `box` tool's `sync` action or `relay box sync <boxId>`. The box records a hidden baseline
+when its workspace is cloned, so only changes made in the box are applied; pre-existing uncommitted changes in the
+checkout are not replayed. A checkout that has diverged since the clone fails the apply instead of being overwritten.
+Boxes created before sync support get a baseline on their next run; changes made before that point stay in the box.
+
+When `RELAY_BOX_GITHUB_TOKEN` (or `GITHUB_TOKEN`) is set, the agent can commit and push from inside the box; the real
+token stays on the host and is substituted only for `RELAY_BOX_GIT_HOST` (default `github.com`). Without a token, local
+commits work but pushes fail.
 
 ### `packages/relay/api/` — LLM Provider Layer
 
@@ -336,7 +392,7 @@ A thin TUI client of the server:
 - Streaming tool call display
 - Vim-mode text input
 - Command palette (`/`) for actions like "New Chat", "Threads", "Open in Browser", and "Quit"
-- Tool approval prompts (`y`/`a`/`n`) for side-effecting tools, with per-process "always allow" memory
+- Agent-initiated confirmation: risky actions are raised as ordinary chat messages, with no modal approval layer
 - Double Esc to cancel in-progress generation
 - `@` file mentions backed by the server's project file listing
 - Ensures (or reuses) the background server, so `relay` works without a separate `serve`
@@ -350,8 +406,7 @@ A SolidJS single-page app served by the server (bundled `packages/web/dist`, or 
   (`/s/:sessionId`) in the URL for deep links and history
 - **Effect** owns the live run: `Api` + `SessionStream` services, a reconnect loop with exponential backoff, and typed
   errors; events fold into Solid state via the shared `session-state.ts` reducer
-- Chat with live drafts and tool cards (rendered diffs), `@`-mention picker, approval dialog, token/cost status bar, and
-  cancel
+- Chat with live drafts and tool cards (rendered diffs), `@`-mention picker, box status, cost status bar, and cancel
 - **Workspaces** — `/` is the root overview (workspace cards plus a "continue last chat" shortcut), `/w/<token>` is a
   workspace pane listing every thread for that directory with a search box, and chats stay at `/s/:id`. The sidebar
   renders workspaces as a collapsible tree showing the latest three threads each (with a `+N more…` link to the pane).

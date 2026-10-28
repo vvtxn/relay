@@ -21,10 +21,7 @@ function formatTimestamp(timestamp: number | string): string {
 }
 
 function preview(session: SessionSummary): string {
-	if (!session.firstUserMessage) return "(empty session)";
-	return session.firstUserMessage.length > 64
-		? `${session.firstUserMessage.slice(0, 64)}…`
-		: session.firstUserMessage;
+	return session.firstUserMessage || "(empty session)";
 }
 
 function missing(workspace: WorkspaceSummary | undefined): boolean {

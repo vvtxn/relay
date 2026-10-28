@@ -5,6 +5,7 @@ import { resolveWorkspacePath } from "./config.ts";
 import { ensureApiKey, ensureAuthenticated, ensureServer, printStatus, runWeb, stopServer } from "./server.ts";
 import { runFontsCommand } from "./fonts.ts";
 import { runWorkspaceCommand } from "./workspace.ts";
+import { runBoxCommand } from "./box.ts";
 
 const args = process.argv.slice(2);
 const command = args[0];
@@ -53,6 +54,9 @@ try {
 			break;
 		case "workspace":
 			await runWorkspaceCommand(args.slice(1));
+			break;
+		case "box":
+			await runBoxCommand(args.slice(1));
 			break;
 		default: {
 			// The CLI is the entry point: guarantee a server, ensure a session,

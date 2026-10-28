@@ -1,6 +1,5 @@
 export { createToolRegistry, defineTool, getDefinitions, ToolError } from "./types.ts";
 export type { Tool, ToolRegistry, ToolResult } from "./types.ts";
-export { type ApprovalHandler, type ApprovalOptions, withApproval } from "./approval.ts";
 export { createDelegateTool, type DelegateToolOptions } from "./delegate.ts";
 
 import { basename, dirname, join } from "node:path";
@@ -45,14 +44,12 @@ function fileResourceKey(root: string, input: unknown): string {
  * rejecting paths that escape it (including via symlinks). Tools without a
  * path argument (only grep, which defaults to ".") search the root itself.
  *
- * The wrapper also marks the tool as `confined` (so approval layers can treat
- * it as sandboxed) and attaches the resolved path as the tool's `resourceKey`,
- * so the agent loop serializes concurrent calls that touch the same file.
+ * The wrapper also attaches the resolved path as the tool's `resourceKey`, so
+ * the agent loop serializes concurrent calls that touch the same file.
  */
 function confinePathArg(tool: Tool, root: string): Tool {
 	return {
 		...tool,
-		confined: true,
 		resourceKey: (input) => fileResourceKey(root, input),
 		execute: (input) =>
 			Effect.gen(function* () {
@@ -73,6 +70,11 @@ function confinePathArg(tool: Tool, root: string): Tool {
 	};
 }
 
+export interface WorkspaceToolsOptions {
+	/** Replace the host bash tool, e.g. with a box executor. */
+	bash?: Tool;
+}
+
 /**
  * Creates the built-in tools rooted at a workspace directory: file tools
  * resolve (and confine) paths against `root`, and bash commands run with
@@ -82,9 +84,9 @@ function confinePathArg(tool: Tool, root: string): Tool {
  * — a shell command can still reference absolute paths outside the root. For
  * untrusted environments, pair with OS-level isolation.
  */
-export function createWorkspaceTools(root: string): Tool[] {
+export function createWorkspaceTools(root: string, options: WorkspaceToolsOptions = {}): Tool[] {
 	return [
-		createBashTool(root),
+		options.bash ?? createBashTool(root),
 		confinePathArg(readFileTool, root),
 		confinePathArg(writeFileTool, root),
 		confinePathArg(editFileTool, root),

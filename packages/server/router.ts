@@ -15,6 +15,19 @@ import { VERSION } from "@vvtxn/relay/version.ts";
 import { causeMessage } from "@vvtxn/relay/core/effect.ts";
 import type { HealthResponse } from "@vvtxn/client/protocol.ts";
 import { handleCallback, handleLogin, handleLogout } from "./auth-routes.ts";
+import {
+	handleAttachBox,
+	handleCreateBox,
+	handleDetachBox,
+	handleGetBox,
+	handleListBoxes,
+	handlePauseBox,
+	handleRemoveBox,
+	handleResizeBox,
+	handleResumeBox,
+	handleStopBox,
+	handleSyncBox,
+} from "./boxes.ts";
 import { LEGACY_SESSION_COOKIE, resolveRequestUser } from "./identity.ts";
 import {
 	BadRequestError,
@@ -38,7 +51,7 @@ import {
 } from "./sessions.ts";
 import { handleEvents } from "./sse.ts";
 import { handleListFiles } from "./files.ts";
-import { handleApprove, handleCancel } from "./approvals.ts";
+import { handleCancel } from "./cancel.ts";
 import {
 	handleRegisterWorkspace,
 	handleUnregisterWorkspace,
@@ -297,15 +310,6 @@ export function createAppLayer(services: ServerServices) {
 			);
 			yield* router.add(
 				"POST",
-				"/api/sessions/:id/approve",
-				respond(
-					authenticated(services, (rs) =>
-						withSessionId((id) => withRequest((request) => handleApprove(rs, id, request))),
-					),
-				),
-			);
-			yield* router.add(
-				"POST",
 				"/api/sessions/:id/cancel",
 				respond(authenticated(services, (rs) => withSessionId((id) => handleCancel(rs, id)))),
 			);
@@ -318,6 +322,72 @@ export function createAppLayer(services: ServerServices) {
 				"GET",
 				"/api/sessions/:id/files",
 				respond(authenticated(services, (rs) => withSessionId((id) => handleListFiles(rs, id)))),
+			);
+
+			// Boxes are first-class: sessions attach to them, but their lifecycle
+			// is independent of any thread.
+			yield* router.add("GET", "/api/boxes", respond(authenticated(services, (rs) => handleListBoxes(rs))));
+			yield* router.add(
+				"POST",
+				"/api/boxes",
+				respond(authenticated(services, (rs) => withRequest((request) => handleCreateBox(rs, request)))),
+			);
+			yield* router.add(
+				"GET",
+				"/api/boxes/:id",
+				respond(authenticated(services, (rs) => withSessionId((id) => handleGetBox(rs, id)))),
+			);
+			yield* router.add(
+				"POST",
+				"/api/boxes/:id/attach",
+				respond(
+					authenticated(services, (rs) =>
+						withSessionId((id) => withRequest((request) => handleAttachBox(rs, id, request))),
+					),
+				),
+			);
+			yield* router.add(
+				"POST",
+				"/api/boxes/:id/detach",
+				respond(
+					authenticated(services, (rs) =>
+						withSessionId((id) => withRequest((request) => handleDetachBox(rs, id, request))),
+					),
+				),
+			);
+			yield* router.add(
+				"POST",
+				"/api/boxes/:id/resize",
+				respond(
+					authenticated(services, (rs) =>
+						withSessionId((id) => withRequest((request) => handleResizeBox(rs, id, request))),
+					),
+				),
+			);
+			yield* router.add(
+				"POST",
+				"/api/boxes/:id/sync",
+				respond(authenticated(services, (rs) => withSessionId((id) => handleSyncBox(rs, id)))),
+			);
+			yield* router.add(
+				"POST",
+				"/api/boxes/:id/pause",
+				respond(authenticated(services, (rs) => withSessionId((id) => handlePauseBox(rs, id)))),
+			);
+			yield* router.add(
+				"POST",
+				"/api/boxes/:id/resume",
+				respond(authenticated(services, (rs) => withSessionId((id) => handleResumeBox(rs, id)))),
+			);
+			yield* router.add(
+				"POST",
+				"/api/boxes/:id/stop",
+				respond(authenticated(services, (rs) => withSessionId((id) => handleStopBox(rs, id)))),
+			);
+			yield* router.add(
+				"DELETE",
+				"/api/boxes/:id",
+				respond(authenticated(services, (rs) => withSessionId((id) => handleRemoveBox(rs, id)))),
 			);
 
 			// Everything else: API fallbacks (JSON 404/405) and the static SPA for
@@ -336,7 +406,7 @@ export function createAppLayer(services: ServerServices) {
 								return error(403, "Cross-origin request rejected");
 							}
 							const sessionMatch = url.pathname.match(
-								/^\/api\/sessions\/([^/]+)(?:\/(messages|approve|cancel|events|files))?$/,
+								/^\/api\/sessions\/([^/]+)(?:\/(messages|cancel|events|files))?$/,
 							);
 							if (sessionMatch) return error(405, "Method not allowed");
 							return error(404, "Not found");

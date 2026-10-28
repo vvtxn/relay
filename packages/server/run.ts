@@ -1,30 +1,37 @@
-import { Cause, Deferred, Effect, Exit, Fiber, Queue, Ref, Semaphore, Stream } from "effect";
+import { Cause, Effect, Exit, Fiber, Queue, Ref, Stream } from "effect";
 import type { LLMProvider } from "@vvtxn/relay/api/types.ts";
-import {
-	createDelegateTool,
-	createToolRegistry,
-	createWorkspaceTools,
-	withApproval,
-} from "@vvtxn/relay/core/tools/index.ts";
-import { summarizeToolArgs } from "@vvtxn/relay/core/display.ts";
+import type { BoxLease, BoxManager } from "@vvtxn/box/types.ts";
+import { DisabledBoxManager } from "@vvtxn/box/manager.ts";
+import { resolveProjectBoxSettings } from "@vvtxn/box/config.ts";
+import { isPreparedBoxImage } from "@vvtxn/box/images.ts";
+import { profileForSettings } from "@vvtxn/box/profiles.ts";
+import { createDelegateTool, createToolRegistry, createWorkspaceTools } from "@vvtxn/relay/core/tools/index.ts";
 import { expandMentions, validateWorkspacePath } from "@vvtxn/relay/core/workspace.ts";
 import { entriesToMessages, type SessionHandle, stripAttachedContext } from "@vvtxn/relay/core/sessions/index.ts";
 import { type AgentEvent, run } from "@vvtxn/relay/core/agent.ts";
 import { attempt, causeMessage, type StoreError } from "@vvtxn/relay/core/effect.ts";
 import { buildSystemPrompt } from "@vvtxn/relay/core/prompts.ts";
-import type { ApprovalDecision, PendingApprovalInfo, RunStateEvent, ServerEvent } from "@vvtxn/client/protocol.ts";
+import type { RunStateEvent, ServerEvent } from "@vvtxn/client/protocol.ts";
 import type { ServerConfig } from "./config.ts";
+import { createBoxBashTool, createBoxTool } from "./box-tools.ts";
+import { createBrowserTool } from "./browser-tool.ts";
 
 type Subscriber = (event: ServerEvent) => void;
 type RunFinishReason = Extract<ServerEvent, { type: "run_finished" }>["reason"];
 type DraftToolCall = RunStateEvent["toolCalls"][number];
+
+/**
+ * Box work often includes a few environment/setup rounds before the actual
+ * edit. The core default stays conservative; server runs get headroom, and the
+ * agent loop emits budget warnings near the end.
+ */
+const SERVER_MAX_TOOL_ROUNDS = 40;
 
 /** Mutable run state, owned by the run's fiber and read by snapshot/handlers. */
 interface RunState {
 	draftText: string;
 	draftToolCalls: DraftToolCall[];
 	draftIndex: Map<string, number>;
-	pendingApprovals: Map<string, { deferred: Deferred.Deferred<ApprovalDecision>; info: PendingApprovalInfo }>;
 	hadError: boolean;
 }
 
@@ -36,21 +43,13 @@ interface ActiveRun {
 }
 
 /**
- * Per-session record: the cached handle, per-session approval memory, token /
- * cost totals, the active run (if any), and the SSE subscriber queues.
+ * Per-session record: the cached handle, token / cost totals, the active run
+ * (if any), and the SSE subscriber queues.
  */
 interface SessionRecord {
 	handle: SessionHandle | null;
 	ownerId: string | null;
 	readonly subscribers: Set<Queue.Queue<ServerEvent>>;
-	readonly alwaysApproved: Set<string>;
-	/**
-	 * Serializes approval prompts. Side-effect tools may execute in parallel
-	 * (the agent loop runs them concurrently across distinct resources), but
-	 * the protocol surfaces one pending approval at a time, so the prompt
-	 * section of `requestApproval` holds this permit.
-	 */
-	readonly approvalLock: Semaphore.Semaphore;
 	tokens: number;
 	cost: number;
 	run: ActiveRun | null;
@@ -63,8 +62,6 @@ interface SessionRecord {
  * - One fiber per run; `cancel` interrupts it and the finish reason comes from
  *   the run's `Exit` (`completed` / `error` / `cancelled`)
  * - Draft state lives in a `Ref` owned by the run
- * - Approvals are `Deferred`s; a finalizer denies whatever is still pending so
- *   the promises can never leak
  * - SSE fan-out goes through per-subscriber `Queue`s, registered synchronously
  *   so no event can slip between a subscriber's snapshot and its subscription
  *
@@ -74,15 +71,18 @@ interface SessionRecord {
 export class RunManager {
 	private readonly config: ServerConfig;
 	private readonly providerFor: (ownerId: string) => Effect.Effect<LLMProvider | null, StoreError>;
+	private readonly boxes: BoxManager;
 
 	private readonly sessions = new Map<string, SessionRecord>();
 
 	constructor(options: {
 		config: ServerConfig;
 		providerFor: (ownerId: string) => Effect.Effect<LLMProvider | null, StoreError>;
+		boxes?: BoxManager;
 	}) {
 		this.config = options.config;
 		this.providerFor = options.providerFor;
+		this.boxes = options.boxes ?? new DisabledBoxManager();
 	}
 
 	isRunning(sessionId: string): boolean {
@@ -155,38 +155,13 @@ export class RunManager {
 		const run = session?.run;
 		if (!session || !run) return null;
 		const state = Ref.getUnsafe(run.ref);
-		const firstPending = state.pendingApprovals.values().next().value;
 		return {
 			type: "run_state",
 			draftText: state.draftText,
 			toolCalls: [...state.draftToolCalls],
-			pendingApproval: firstPending ? firstPending.info : null,
 			tokens: session.tokens,
 			cost: session.cost,
 		};
-	}
-
-	/** Resolve a pending approval; returns false when no approval is pending for that tool call. */
-	resolveApproval(sessionId: string, toolCallId: string, decision: ApprovalDecision): boolean {
-		const run = this.sessions.get(sessionId)?.run;
-		if (!run) return false;
-
-		// Take the Deferred out atomically so a concurrent finalizer cannot
-		// resolve it twice.
-		const deferred = Effect.runSync(
-			Ref.modify(run.ref, (state): readonly [Deferred.Deferred<ApprovalDecision> | null, RunState] => {
-				const pending = state.pendingApprovals.get(toolCallId);
-				if (!pending) return [null, state];
-				const pendingApprovals = new Map(state.pendingApprovals);
-				pendingApprovals.delete(toolCallId);
-				return [pending.deferred, { ...state, pendingApprovals }];
-			}),
-		);
-		if (!deferred) return false;
-
-		this.publish(sessionId, { type: "approval_resolved", toolCallId, decision });
-		Deferred.doneUnsafe(deferred, Effect.succeed(decision));
-		return true;
 	}
 
 	cancel(sessionId: string): boolean {
@@ -246,7 +221,6 @@ export class RunManager {
 			draftText: "",
 			draftToolCalls: [],
 			draftIndex: new Map(),
-			pendingApprovals: new Map(),
 			hadError: false,
 		});
 		const abort = new AbortController();
@@ -264,10 +238,9 @@ export class RunManager {
 	): Effect.Effect<RunFinishReason, never> {
 		const config = this.config;
 		const providerFor = this.providerFor;
+		const boxes = this.boxes;
 		const getSession = () => this.sessions.get(sessionId);
 		const publish = (event: ServerEvent): void => this.publish(sessionId, event);
-		const requestApproval = (tool: { definition: { function: { name: string } } }, input: unknown) =>
-			this.requestApproval(sessionId, runRef, tool, input);
 		const handleEvent = (event: AgentEvent): Effect.Effect<void, Error> =>
 			this.handleAgentEvent(sessionId, runRef, abort, event);
 
@@ -287,58 +260,75 @@ export class RunManager {
 
 			// Re-validate the workspace before every run: the directory may have
 			// been deleted or replaced by a symlink since the session was created.
+			// With boxes enabled, the box manifest is the durable workspace; the
+			// project path is only needed to create the first clone.
 			const storedCwd = handle.getHeader().cwd;
-			const workspace = yield* attempt(() => validateWorkspacePath(storedCwd, config.workspaceRoots));
-			if (!workspace.ok) {
-				return yield* Effect.fail(new Error(`Workspace "${storedCwd}" is not usable: ${workspace.message}`));
-			}
-			const cwd = workspace.path;
+			const ownerId = session.ownerId ?? "";
+			let cwd: string;
+			let lease: BoxLease | null = null;
 
-			// Expand @mentions against the session workspace, persist the stripped version
-			const expanded = yield* attempt(() => expandMentions(content, cwd));
-			yield* handle.append({ type: "message", role: "user", content: stripAttachedContext(expanded) });
-			const messages = entriesToMessages(handle.getEntries());
-
-			// The LLM sees the expanded content for the latest user message
-			for (let i = messages.length - 1; i >= 0; i--) {
-				const message = messages[i];
-				if (message?.role === "user") {
-					messages[i] = { ...message, content: expanded };
-					break;
+			if (boxes.enabled) {
+				const existing = yield* boxes.findBySession(sessionId);
+				if (existing) {
+					lease = yield* boxes.acquire({
+						sessionId,
+						ownerId,
+						projectCwd: existing.projectCwd,
+						settings: existing.settings,
+						signal: abort.signal,
+					});
+				} else {
+					const workspace = yield* attempt(() => validateWorkspacePath(storedCwd, config.workspaceRoots));
+					if (!workspace.ok) {
+						return yield* Effect.fail(
+							new Error(`Workspace "${storedCwd}" is not usable: ${workspace.message}`),
+						);
+					}
+					const settings = yield* attempt(() =>
+						resolveProjectBoxSettings(workspace.path, config.box.defaults),
+					);
+					lease = yield* boxes.acquire({
+						sessionId,
+						ownerId,
+						projectCwd: workspace.path,
+						settings,
+						signal: abort.signal,
+					});
 				}
+				cwd = lease.workspace;
+			} else {
+				const workspace = yield* attempt(() => validateWorkspacePath(storedCwd, config.workspaceRoots));
+				if (!workspace.ok) {
+					return yield* Effect.fail(
+						new Error(`Workspace "${storedCwd}" is not usable: ${workspace.message}`),
+					);
+				}
+				cwd = workspace.path;
 			}
 
-			const workspaceTools = createWorkspaceTools(cwd);
-			// Subagents get a fresh loop with read-only workspace tools and no
-			// access to this conversation; their cost rolls into the session below.
-			const delegate = createDelegateTool({
-				provider,
-				model: config.model,
-				tools: createToolRegistry(workspaceTools.filter((tool) => tool.readonly)),
-				maxToolRounds: 10,
-				temperature: config.temperature,
-				contextLimit: {
-					maxTokens: config.maxTokens,
-					preserveRecentTurns: config.preserveRecentTurns,
-				},
-				maxTokens: config.maxCompletionTokens,
-				signal: abort.signal,
-			});
-			const tools = createToolRegistry(
-				withApproval([...workspaceTools, delegate], (tool, input) => requestApproval(tool, input)),
-			);
-			// Rendered from the registry the run actually exposes, so the tool
-			// guidance can never drift from the available tools.
-			const systemPrompt = buildSystemPrompt({ mode: "main", tools });
+			const execute = Effect.gen(function* () {
+				// Expand @mentions against the session workspace, persist the stripped version
+				const expanded = yield* attempt(() => expandMentions(content, cwd));
+				yield* handle.append({ type: "message", role: "user", content: stripAttachedContext(expanded) });
+				const messages = entriesToMessages(handle.getEntries());
 
-			// The agent loop is a Stream of events; the run fiber consumes it and
-			// mirrors each event onto the session draft state + SSE subscribers.
-			yield* Stream.runForEach(
-				run(messages, {
+				// The LLM sees the expanded content for the latest user message
+				for (let i = messages.length - 1; i >= 0; i--) {
+					const message = messages[i];
+					if (message?.role === "user") {
+						messages[i] = { ...message, content: expanded };
+						break;
+					}
+				}
+
+				const workspaceTools = createWorkspaceTools(cwd, lease ? { bash: createBoxBashTool(lease) } : {});
+				// Subagents get a fresh loop with read-only workspace tools and no
+				// access to this conversation; their cost rolls into the session below.
+				const delegate = createDelegateTool({
 					provider,
-					tools,
 					model: config.model,
-					systemPrompt,
+					tools: createToolRegistry(workspaceTools.filter((tool) => tool.readonly)),
+					maxToolRounds: 10,
 					temperature: config.temperature,
 					contextLimit: {
 						maxTokens: config.maxTokens,
@@ -346,12 +336,87 @@ export class RunManager {
 					},
 					maxTokens: config.maxCompletionTokens,
 					signal: abort.signal,
-				}),
-				handleEvent,
-			);
+				});
+				const baseTools = [...workspaceTools, delegate];
+				const browserTools =
+					lease && isPreparedBoxImage(lease.status.settings.image)
+						? [createBoxTool(boxes, lease), createBrowserTool(lease)]
+						: lease
+							? [createBoxTool(boxes, lease)]
+							: [];
+				// The box is the security boundary: boxed runs are unrestricted inside
+				// it, and host runs are explicitly unsandboxed. The prompt policy asks
+				// the agent to stop before actions that leave the box.
+				const tools = createToolRegistry([...baseTools, ...browserTools]);
+				// Rendered from the registry the run actually exposes, so the tool
+				// guidance can never drift from the available tools.
+				const systemPrompt = buildSystemPrompt({
+					mode: "main",
+					tools,
+					...(lease
+						? {
+								box: {
+									profile: profileForSettings(lease.status.settings),
+									cpus: lease.status.settings.cpus,
+									memoryMiB: lease.status.settings.memoryMiB,
+									maxProfile: lease.status.settings.maxProfile,
+									playwright: isPreparedBoxImage(lease.status.settings.image),
+								},
+							}
+						: { host: true }),
+				});
 
-			if (abort.signal.aborted) return "cancelled";
-			return Ref.getUnsafe(runRef).hadError ? "error" : "completed";
+				// The agent loop is a Stream of events; the run fiber consumes it and
+				// mirrors each event onto the session draft state + SSE subscribers.
+				yield* Stream.runForEach(
+					run(messages, {
+						provider,
+						tools,
+						model: config.model,
+						systemPrompt,
+						temperature: config.temperature,
+						contextLimit: {
+							maxTokens: config.maxTokens,
+							preserveRecentTurns: config.preserveRecentTurns,
+						},
+						maxTokens: config.maxCompletionTokens,
+						maxToolRounds: SERVER_MAX_TOOL_ROUNDS,
+						signal: abort.signal,
+					}),
+					handleEvent,
+				);
+
+				if (abort.signal.aborted) return "cancelled";
+				if (Ref.getUnsafe(runRef).hadError) return "error";
+
+				// A successful boxed run lands its changes in the project checkout.
+				// The box tool can sync mid-run too; this is the safety net for the
+				// agent forgetting to call it. A failed sync is a run error because
+				// the user's checkout did not receive the work.
+				if (lease?.syncAvailable) {
+					const synced = yield* lease.sync().pipe(
+						Effect.map((result) => ({ ok: true as const, result })),
+						Effect.catchTag("BoxError", (error) => Effect.succeed({ ok: false as const, error })),
+					);
+					if (!synced.ok) {
+						publish({
+							type: "error",
+							message: `Could not sync the box changes to the project checkout: ${synced.error.message}`,
+						});
+						return "error";
+					}
+					if (synced.result.files.length > 0) {
+						console.log(
+							`relay box: synced ${synced.result.files.length} change(s) to ${synced.result.projectCwd}`,
+						);
+					}
+				} else if (lease) {
+					console.warn(`relay box: ${lease.boxId} has no sync baseline; changes stay in the box workspace`);
+				}
+				return "completed";
+			});
+
+			return yield* lease ? execute.pipe(Effect.ensuring(lease.release())) : execute;
 		});
 
 		const program = runLoop.pipe(
@@ -495,6 +560,7 @@ export class RunManager {
 				case "error": {
 					if (abort.signal.aborted) return;
 					updateRun((state) => ({ ...state, hadError: true }));
+					console.warn(`relay run ${sessionId}: ${event.error.message}`);
 					publish({ type: "error", message: event.error.message });
 					return;
 				}
@@ -504,9 +570,8 @@ export class RunManager {
 
 	/**
 	 * Run teardown, guaranteed to execute on completion, failure, and
-	 * interruption: abort any in-flight provider call, deny still-pending
-	 * approvals (their promises must never leak), flush the session, announce
-	 * `run_finished`, and drop the session if nobody is watching.
+	 * interruption: abort any in-flight provider call, flush the session,
+	 * announce `run_finished`, and drop the session if nobody is watching.
 	 */
 	private finalizeRun(sessionId: string, reason: RunFinishReason): Effect.Effect<void> {
 		const getSession = () => this.sessions.get(sessionId);
@@ -517,13 +582,7 @@ export class RunManager {
 			if (!session) return;
 			const run = session.run;
 			session.run = null;
-			if (run) {
-				if (reason === "cancelled") run.abort.abort();
-				for (const [toolCallId, pending] of Ref.getUnsafe(run.ref).pendingApprovals) {
-					publish({ type: "approval_resolved", toolCallId, decision: "deny" });
-					Deferred.doneUnsafe(pending.deferred, Effect.succeed<ApprovalDecision>("deny"));
-				}
-			}
+			if (run && reason === "cancelled") run.abort.abort();
 			const handle = session.handle;
 			if (handle) {
 				yield* handle.flush().pipe(Effect.catchCause(() => Effect.void));
@@ -549,8 +608,6 @@ export class RunManager {
 				handle: null,
 				ownerId: null,
 				subscribers: new Set(),
-				alwaysApproved: new Set(),
-				approvalLock: Semaphore.makeUnsafe(1),
 				tokens: 0,
 				cost: 0,
 				run: null,
@@ -558,59 +615,6 @@ export class RunManager {
 			this.sessions.set(sessionId, session);
 		}
 		return session;
-	}
-
-	/**
-	 * Ask the user for permission to run an unconfined side-effecting tool
-	 * (in a workspace run: bash; readonly and `confined` tools never get here).
-	 * The wait is a `Deferred` that `resolveApproval` completes and that
-	 * {@link finalizeRun} denies if the run ends first; because the wait sits
-	 * inside the run fiber, interruption cancels it automatically.
-	 *
-	 * Prompts are serialized per session: tool sets that gate parallel
-	 * side-effects may reach this point together, while the protocol surfaces
-	 * one pending approval at a time. Queued calls re-check `alwaysApproved`
-	 * and the abort signal, so an "always" decision (or a cancellation) skips
-	 * the prompt for everything still waiting behind it.
-	 */
-	private requestApproval(
-		sessionId: string,
-		runRef: Ref.Ref<RunState>,
-		tool: { definition: { function: { name: string } } },
-		input: unknown,
-	): Effect.Effect<boolean> {
-		const name = tool.definition.function.name;
-		const session = this.sessions.get(sessionId);
-		if (session?.alwaysApproved.has(name)) return Effect.succeed(true);
-		if (session?.run?.abort.signal.aborted) return Effect.succeed(false);
-
-		const publish = (event: ServerEvent): void => this.publish(sessionId, event);
-		const request = Effect.gen(function* () {
-			// Re-check after acquiring the lock: while this call was queued, an
-			// earlier prompt may have been answered "always" — or the run cancelled.
-			if (session?.alwaysApproved.has(name)) return true;
-			if (session?.run?.abort.signal.aborted) return false;
-
-			const deferred = Deferred.makeUnsafe<ApprovalDecision>();
-			const toolCallId = crypto.randomUUID();
-			const info: PendingApprovalInfo = {
-				toolCallId,
-				toolName: name,
-				summary: summarizeToolArgs(name, JSON.stringify(input)),
-			};
-
-			yield* Ref.update(runRef, (state) => {
-				const pendingApprovals = new Map(state.pendingApprovals);
-				pendingApprovals.set(toolCallId, { deferred, info });
-				return { ...state, pendingApprovals };
-			});
-			publish({ type: "approval_required", approval: info });
-
-			const decision = yield* Deferred.await(deferred);
-			if (decision === "always") session?.alwaysApproved.add(name);
-			return decision !== "deny";
-		});
-		return session ? Semaphore.withPermit(session.approvalLock)(request) : request;
 	}
 }
 

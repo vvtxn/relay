@@ -2,6 +2,8 @@ import { Context, Effect, Layer } from "effect";
 import { chmodSync, mkdirSync } from "node:fs";
 import { userInfo } from "node:os";
 import { dirname, join } from "node:path";
+import type { BoxManager } from "@vvtxn/box/types.ts";
+import { Boxes, boxesLayer } from "@vvtxn/box/service.ts";
 import type { AuthenticatedUser, AuthIdentity } from "@vvtxn/relay/core/index.ts";
 import {
 	createSecretCipher,
@@ -40,6 +42,7 @@ export interface ServerServices {
 	runs: RunManager;
 	/** The fixed identity used by local auth; null in GitHub mode. */
 	localUser: AuthenticatedUser | null;
+	boxes: BoxManager;
 }
 
 /** Base services plus the caller resolved for this request. */
@@ -177,12 +180,13 @@ const runsLayer = Layer.effect(
 	Effect.gen(function* () {
 		const config = yield* Config;
 		const userSettings = yield* UserSettings;
+		const boxes = yield* Boxes;
 		const providerFor = (ownerId: string) =>
 			Effect.gen(function* () {
 				const apiKey = yield* userSettings.getApiKey(ownerId);
 				return apiKey ? new CompletionsProvider({ apiKey, baseURL: config.baseURL }) : null;
 			});
-		return new RunManager({ config, providerFor });
+		return new RunManager({ config, providerFor, boxes });
 	}),
 );
 
@@ -217,13 +221,14 @@ function resolveLocalUser(userStore: DatabaseUserStore): Effect.Effect<Authentic
 
 /**
  * The full server environment. The `provideMerge` chains keep acquisition
- * sequential (config → database → stores → runs) and keep every layer's
+ * sequential (config → database → stores → boxes → runs) and keep every layer's
  * output available to consumers downstream.
  */
 export const serverLayer = (config: ServerConfig) => {
 	const base = databaseLayer.pipe(Layer.provideMerge(configLayer(config)));
 	const stores = storesLayer.pipe(Layer.provideMerge(base));
-	return runsLayer.pipe(Layer.provideMerge(stores));
+	const boxes = boxesLayer(config.box).pipe(Layer.provideMerge(stores));
+	return runsLayer.pipe(Layer.provideMerge(boxes));
 };
 
 /**
@@ -240,8 +245,26 @@ export async function createServices(config: ServerConfig): Promise<ServerServic
 			const authSessions = yield* AuthSessions;
 			const sessionStore = yield* SessionStore;
 			const runs = yield* Runs;
+			const boxes = yield* Boxes;
+			// Pruning happens inside the session store's write batch; detach the
+			// affected boxes asynchronously so retention can collect them later.
+			sessionStore.onPruned = (sessionIds) => {
+				void Effect.runPromise(boxes.detachSessions(new Set(sessionIds))).catch((error: unknown) => {
+					console.warn("relay box: could not detach pruned sessions:", error);
+				});
+			};
 			const localUser = serverConfig.authMode === "local" ? yield* resolveLocalUser(userStore) : null;
-			return { config: serverConfig, db, userStore, userSettings, authSessions, sessionStore, runs, localUser };
+			return {
+				config: serverConfig,
+				db,
+				userStore,
+				userSettings,
+				authSessions,
+				sessionStore,
+				runs,
+				localUser,
+				boxes,
+			};
 		}).pipe(Effect.provide(serverLayer(config))),
 	);
 }

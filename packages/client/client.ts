@@ -1,7 +1,12 @@
 import type {
-	ApprovalDecision,
-	ApprovalRequest,
+	BoxAttachRequest,
+	BoxListResponse,
+	BoxProfileName,
+	BoxResizeRequest,
+	BoxResponse,
+	BoxSyncResponse,
 	ConfigResponse,
+	CreateBoxRequest,
 	CreateSessionRequest,
 	CreateSessionResponse,
 	ErrorResponse,
@@ -124,15 +129,61 @@ export class RelayClient {
 		return await this.get(`/api/sessions/${sessionId}/files`);
 	}
 
-	async sendMessage(sessionId: string, content: string): Promise<SendMessageResponse> {
-		return await this.post(`/api/sessions/${sessionId}/messages`, { content } satisfies SendMessageRequest);
+	async listBoxes(): Promise<BoxListResponse> {
+		return await this.get("/api/boxes");
 	}
 
-	async approve(sessionId: string, toolCallId: string, decision: ApprovalDecision): Promise<StatusResponse> {
-		return await this.post(`/api/sessions/${sessionId}/approve`, {
-			toolCallId,
-			decision,
-		} satisfies ApprovalRequest);
+	async createBox(cwd?: string, profile?: BoxProfileName): Promise<BoxResponse> {
+		return await this.post("/api/boxes", {
+			...(cwd ? { cwd } : {}),
+			...(profile ? { profile } : {}),
+		} satisfies CreateBoxRequest);
+	}
+
+	async getBox(boxId: string): Promise<BoxResponse> {
+		return await this.get(`/api/boxes/${encodeURIComponent(boxId)}`);
+	}
+
+	async attachBox(boxId: string, sessionId: string): Promise<BoxResponse> {
+		return await this.post(`/api/boxes/${encodeURIComponent(boxId)}/attach`, {
+			sessionId,
+		} satisfies BoxAttachRequest);
+	}
+
+	async detachBox(boxId: string, sessionId: string): Promise<StatusResponse> {
+		return await this.post(`/api/boxes/${encodeURIComponent(boxId)}/detach`, {
+			sessionId,
+		} satisfies BoxAttachRequest);
+	}
+
+	async resizeBox(boxId: string, profile: BoxProfileName): Promise<BoxResponse> {
+		return await this.post(`/api/boxes/${encodeURIComponent(boxId)}/resize`, {
+			profile,
+		} satisfies BoxResizeRequest);
+	}
+
+	async syncBox(boxId: string): Promise<BoxSyncResponse> {
+		return await this.post(`/api/boxes/${encodeURIComponent(boxId)}/sync`, {});
+	}
+
+	async pauseBox(boxId: string): Promise<StatusResponse> {
+		return await this.post(`/api/boxes/${encodeURIComponent(boxId)}/pause`, {});
+	}
+
+	async resumeBox(boxId: string): Promise<StatusResponse> {
+		return await this.post(`/api/boxes/${encodeURIComponent(boxId)}/resume`, {});
+	}
+
+	async stopBox(boxId: string): Promise<StatusResponse> {
+		return await this.post(`/api/boxes/${encodeURIComponent(boxId)}/stop`, {});
+	}
+
+	async removeBox(boxId: string): Promise<StatusResponse> {
+		return await this.delete(`/api/boxes/${encodeURIComponent(boxId)}`);
+	}
+
+	async sendMessage(sessionId: string, content: string): Promise<SendMessageResponse> {
+		return await this.post(`/api/sessions/${sessionId}/messages`, { content } satisfies SendMessageRequest);
 	}
 
 	async cancel(sessionId: string): Promise<StatusResponse> {

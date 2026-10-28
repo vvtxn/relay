@@ -81,6 +81,28 @@ export async function startServer(): Promise<void> {
 	if (config.authMode === "local") clearStoredSession();
 	const services = await createServices(config);
 
+	if (services.boxes.enabled) {
+		try {
+			await Effect.runPromise(services.boxes.reconcile());
+			const image = config.box.defaults.image === "auto" ? "auto image" : config.box.defaults.image;
+			console.log(
+				`Boxes: enabled (${image}, ${config.box.defaults.profile} default, ` +
+					`max ${config.box.maxRunning} running, ${config.box.maxMemoryMiB} MiB budget)`,
+			);
+		} catch (error) {
+			console.error(
+				"Box reconcile failed:",
+				error instanceof Error ? error.message : error,
+				"— box runs will fail until the runtime is available.",
+			);
+		}
+	} else {
+		console.warn(
+			"Boxes: disabled — agent commands run directly on the host with no sandbox and no approval prompts. " +
+				"Use RELAY_BOX=0 only when you trust the agent and the workspace.",
+		);
+	}
+
 	console.log(`Flavor: ${config.flavor}`);
 	console.log(`Workspace: ${config.defaultCwd}`);
 	console.log(
@@ -95,18 +117,25 @@ export async function startServer(): Promise<void> {
 	}
 	if (config.staticDir) console.log(`Serving web app from ${config.staticDir}`);
 
-	// Close the database before exiting so SQLite checkpoints its WAL. The
-	// process is stopped by `relay stop` (SIGTERM) or Ctrl-C.
+	// Stop running VMs, then close the database so SQLite checkpoints its WAL.
+	// The process is stopped by `relay stop` (SIGTERM) or Ctrl-C; a crash still
+	// leaves the VMs for `reconcile()` on the next start.
 	let shuttingDown = false;
 	const shutdown = (): void => {
 		if (shuttingDown) return;
 		shuttingDown = true;
-		try {
-			services.db.close();
-		} catch (error) {
-			console.error("Failed to close the database:", error instanceof Error ? error.message : error);
-		}
-		process.exit(0);
+		void Effect.runPromise(services.boxes.shutdown())
+			.catch(() => {
+				// Best effort: the DB still needs to close and the process must exit.
+			})
+			.finally(() => {
+				try {
+					services.db.close();
+				} catch (error) {
+					console.error("Failed to close the database:", error instanceof Error ? error.message : error);
+				}
+				process.exit(0);
+			});
 	};
 	process.once("SIGTERM", shutdown);
 	process.once("SIGINT", shutdown);
@@ -125,6 +154,23 @@ export async function startServer(): Promise<void> {
 			"Failed to enforce the per-workspace session limit:",
 			error instanceof Error ? error.message : error,
 		);
+	}
+
+	// Reconcile box attachments with the sessions that survived pruning. Boxes
+	// without attachments are retained by TTL, not deleted on sight.
+	if (services.boxes.enabled) {
+		try {
+			const active = await Effect.runPromise(services.sessionStore.allSessionIds());
+			const collected = await Effect.runPromise(services.boxes.gc(active));
+			if (collected.detached > 0 || collected.trashed > 0 || collected.removed > 0) {
+				console.log(
+					`Box GC: detached ${collected.detached}, trashed ${collected.trashed}, ` +
+						`removed ${collected.removed} old workspace(s).`,
+				);
+			}
+		} catch (error) {
+			console.error("Box GC failed:", error instanceof Error ? error.message : error);
+		}
 	}
 
 	const app = createAppLayer(services);
