@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, rmSync } from "node:fs";
 import { writeFile } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve } from "node:path";
 import { Effect } from "effect";
@@ -40,6 +40,7 @@ import type {
 
 const SWEEP_INTERVAL_MS = 30_000;
 const GC_INTERVAL_MS = 5 * 60_000;
+const EVICTION_RETRY_MS = 30_000;
 const TRASH_TTL_MS = 7 * 24 * 60 * 60_000;
 const MICROSANDBOX_VERSION = "0.7.8";
 
@@ -69,6 +70,12 @@ interface PendingAcquire {
 	timer: NodeJS.Timeout | null;
 	settled: boolean;
 	cleanup: () => void;
+}
+
+function combineSignals(first: AbortSignal | undefined, second: AbortSignal | undefined): AbortSignal | undefined {
+	if (!first) return second;
+	if (!second) return first;
+	return AbortSignal.any([first, second]);
 }
 
 class Mutex {
@@ -143,7 +150,7 @@ export class DisabledBoxManager implements BoxManager {
 		return Effect.succeed(null);
 	}
 
-	list(): Effect.Effect<BoxStatus[], BoxError> {
+	list(_ownerId?: string): Effect.Effect<BoxStatus[], BoxError> {
 		return Effect.succeed([]);
 	}
 
@@ -206,6 +213,9 @@ export class BoxManagerImpl implements BoxManager {
 	private readonly resident = new Map<string, Resident>();
 	private readonly boxesLock = new Map<string, Mutex>();
 	private readonly sessionsLock = new Map<string, Mutex>();
+	private readonly manifestLocks = new Map<string, Mutex>();
+	/** Last failed eviction per box; used to avoid retrying the same victim in a tight loop. */
+	private readonly evictionFailures = new Map<string, number>();
 	private readonly schedulerLock = new Mutex();
 	private readonly queue: PendingAcquire[] = [];
 	private readonly sessionIndex = new Map<string, Set<string>>();
@@ -234,8 +244,8 @@ export class BoxManagerImpl implements BoxManager {
 			try: async () => {
 				const boxId = this.nextBoxId();
 				const normalized: BoxSpec = { ...spec, settings: this.normalizeSettings(spec.settings) };
-				await this.withBoxLock(boxId, () => this.createManifest(normalized, boxId));
-				const status = await this.statusInternal(boxId);
+				const manifest = await this.withBoxLock(boxId, () => this.createManifest(normalized, boxId));
+				const status = await this.statusInternal(boxId, manifest);
 				if (!status) throw new BoxError({ message: `Box ${boxId} disappeared after creation` });
 				return status;
 			},
@@ -245,7 +255,7 @@ export class BoxManagerImpl implements BoxManager {
 
 	acquire(spec: BoxSpec): Effect.Effect<BoxLease, BoxError> {
 		return Effect.tryPromise({
-			try: () => this.acquireInternal(spec),
+			try: (signal) => this.acquireInternal(spec, signal),
 			catch: (error) => toBoxError(error, "Could not acquire box"),
 		});
 	}
@@ -254,7 +264,7 @@ export class BoxManagerImpl implements BoxManager {
 		return Effect.tryPromise({
 			try: async () => {
 				const manifest = this.manifestForSession(sessionId);
-				return manifest ? await this.statusInternal(manifest.boxId) : null;
+				return manifest ? await this.statusInternal(manifest.boxId, manifest) : null;
 			},
 			catch: (error) => toBoxError(error, "Could not find box"),
 		});
@@ -267,12 +277,13 @@ export class BoxManagerImpl implements BoxManager {
 		});
 	}
 
-	list(): Effect.Effect<BoxStatus[], BoxError> {
+	list(ownerId?: string): Effect.Effect<BoxStatus[], BoxError> {
 		return Effect.tryPromise({
 			try: async () => {
 				const statuses: BoxStatus[] = [];
 				for (const manifest of this.store.list()) {
-					const status = await this.statusInternal(manifest.boxId);
+					if (ownerId !== undefined && manifest.ownerId !== ownerId) continue;
+					const status = await this.statusInternal(manifest.boxId, manifest);
 					if (status) statuses.push(status);
 				}
 				return statuses.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
@@ -285,7 +296,8 @@ export class BoxManagerImpl implements BoxManager {
 		return Effect.tryPromise({
 			try: async () => {
 				await this.withBoxLock(boxId, async () => {
-					await this.attachInternal(this.requireManifest(boxId), sessionId);
+					this.requireManifest(boxId);
+					await this.attachInternal(boxId, sessionId);
 				});
 				const status = await this.statusInternal(boxId);
 				if (!status) throw new BoxError({ message: `Box ${boxId} disappeared` });
@@ -303,14 +315,18 @@ export class BoxManagerImpl implements BoxManager {
 					if (resident && resident.leases > 0) {
 						throw new BoxError({ message: "Cannot detach a box while a run is using it" });
 					}
-					const manifest = this.requireManifest(boxId);
-					if (!manifest.attachments.some((attachment) => attachment.sessionId === sessionId)) return;
-					const next: BoxManifest = {
-						...manifest,
-						attachments: manifest.attachments.filter((attachment) => attachment.sessionId !== sessionId),
-					};
-					this.store.write(next);
-					this.unindexSession(sessionId, boxId);
+					this.requireManifest(boxId);
+					await this.updateManifest(boxId, (manifest) => {
+						if (!manifest.attachments.some((attachment) => attachment.sessionId === sessionId)) {
+							return null;
+						}
+						return {
+							...manifest,
+							attachments: manifest.attachments.filter(
+								(attachment) => attachment.sessionId !== sessionId,
+							),
+						};
+					});
 				});
 			},
 			catch: (error) => toBoxError(error, "Could not detach box"),
@@ -326,7 +342,7 @@ export class BoxManagerImpl implements BoxManager {
 
 	resize(boxId: string, profile: BoxProfile): Effect.Effect<BoxStatus, BoxError> {
 		return Effect.tryPromise({
-			try: () => this.resizeInternal(boxId, profile),
+			try: () => this.withBoxLock(boxId, () => this.resizeInternal(boxId, profile)),
 			catch: (error) => toBoxError(error, "Could not resize box"),
 		});
 	}
@@ -363,7 +379,12 @@ export class BoxManagerImpl implements BoxManager {
 		return Effect.tryPromise({
 			try: async () => {
 				const manifest = this.requireManifest(boxId);
-				return await syncWorkspace(manifest.workspacePath, manifest.projectCwd);
+				const result = await syncWorkspace(manifest.workspacePath, manifest.projectCwd);
+				await this.updateManifest(boxId, (current) => ({
+					...current,
+					lastUsedAt: new Date().toISOString(),
+				}));
+				return result;
 			},
 			catch: (error) => toBoxError(error, "Could not sync box changes"),
 		});
@@ -392,18 +413,19 @@ export class BoxManagerImpl implements BoxManager {
 
 	exec(boxId: string, command: string, options: ExecOptions = {}): Effect.Effect<ExecResult, BoxError> {
 		return Effect.tryPromise({
-			try: async () => {
+			try: async (interruptSignal) => {
 				const manifest = this.store.load(boxId);
 				if (!manifest) throw new BoxError({ message: `No box found: ${boxId}` });
 				const resident = this.resident.get(boxId);
 				if (!resident || resident.state === "paused") {
 					throw new BoxError({ message: `Box ${boxId} is not running` });
 				}
+				const signal = combineSignals(options.signal, interruptSignal);
 				return await this.runtime.exec(manifest.sandboxName, command, {
 					cwd: options.cwd ?? "/workspace",
 					env: boxExecEnv(manifest.settings, options.env),
 					timeoutMs: options.timeoutMs ?? 30_000,
-					...(options.signal ? { signal: options.signal } : {}),
+					...(signal ? { signal } : {}),
 				});
 			},
 			catch: (error) => toBoxError(error, "Command failed"),
@@ -411,6 +433,7 @@ export class BoxManagerImpl implements BoxManager {
 	}
 
 	async release(boxId: string): Promise<void> {
+		let lastLease = false;
 		await this.schedulerLock.run(() => {
 			const resident = this.resident.get(boxId);
 			if (!resident) return;
@@ -418,26 +441,35 @@ export class BoxManagerImpl implements BoxManager {
 			if (resident.leases === 0) {
 				resident.state = "ready";
 				resident.lastUsedAt = Date.now();
+				lastLease = true;
 			}
 		});
-		const manifest = this.store.load(boxId);
-		if (manifest) {
-			this.store.write({ ...manifest, state: "ready", lastUsedAt: new Date().toISOString() });
+		if (lastLease) {
+			await this.updateManifest(boxId, (manifest) => ({
+				...manifest,
+				state: "ready",
+				lastUsedAt: new Date().toISOString(),
+			}));
 		}
 		this.schedulePump();
 	}
 
-	private async acquireInternal(spec: BoxSpec): Promise<BoxLease> {
+	private async acquireInternal(spec: BoxSpec, interruptSignal: AbortSignal): Promise<BoxLease> {
+		const signal = combineSignals(spec.signal, interruptSignal);
 		const key = spec.sessionId ?? `standalone:${createBoxId()}`;
 		return await this.withSessionLock(key, async () => {
-			if (spec.signal?.aborted) throw new BoxError({ message: "Box acquisition was cancelled" });
+			if (signal?.aborted) throw new BoxError({ message: "Box acquisition was cancelled" });
 			let manifest = spec.sessionId ? this.manifestForSession(spec.sessionId) : null;
 			if (manifest && manifest.ownerId !== spec.ownerId) {
 				throw new BoxError({ message: "This box belongs to a different user" });
 			}
 			const isNew = manifest === null;
 			const boxId = manifest?.boxId ?? this.nextBoxId();
-			const settings = this.normalizeSettings(manifest?.settings ?? spec.settings);
+			// A resident box is already consuming its configured resources, so
+			// reserve what is actually running. A stopped/new box uses the
+			// settings clamped to the current server ceiling.
+			const normalized = this.normalizeSettings(manifest?.settings ?? spec.settings);
+			const settings = manifest && this.resident.has(boxId) ? manifest.settings : normalized;
 			const resources = { cpus: settings.cpus, memoryMiB: settings.memoryMiB };
 
 			await this.waitForGrant({
@@ -445,19 +477,20 @@ export class BoxManagerImpl implements BoxManager {
 				spec: { ...spec, settings },
 				resources,
 				isNew,
-				...(spec.signal ? { signal: spec.signal } : {}),
+				...(signal ? { signal } : {}),
 			});
-			if (spec.signal?.aborted) {
-				await this.releaseReservation(boxId, true);
+			if (signal?.aborted) {
+				await this.releaseReservation(boxId, this.isStartingReservation(boxId));
 				throw new BoxError({ message: "Box acquisition was cancelled" });
 			}
 
 			try {
 				manifest = isNew
-					? await this.withBoxLock(boxId, () => this.createManifest(spec, boxId))
-					: this.requireManifest(boxId);
-				await this.withBoxLock(boxId, () => this.startBox(manifest as BoxManifest));
-				const status = await this.statusInternal(boxId);
+					? await this.withBoxLock(boxId, () => this.createManifest({ ...spec, settings }, boxId))
+					: { ...this.requireManifest(boxId), settings };
+				const started = await this.withBoxLock(boxId, () => this.startBox(manifest as BoxManifest, signal));
+				if (signal?.aborted) throw new BoxError({ message: "Box acquisition was cancelled" });
+				const status = await this.statusInternal(boxId, started);
 				if (!status) throw new BoxError({ message: `Box ${boxId} disappeared during startup` });
 				// Backfill a baseline for boxes created before sync support. This
 				// cannot recover changes made before this run, but it lets this and
@@ -477,17 +510,30 @@ export class BoxManagerImpl implements BoxManager {
 						);
 					}
 				}
+				if (signal?.aborted) throw new BoxError({ message: "Box acquisition was cancelled" });
 				return new Lease(this, status, status.workspace);
 			} catch (error) {
+				const cancelled = signal?.aborted === true;
 				const failed = this.store.load(boxId);
 				if (failed) {
 					await this.runtime.stop(failed.sandboxName).catch(() => {});
-					this.store.write({ ...failed, state: "error", error: toBoxError(error).message });
+					await this.updateManifest(boxId, (current) =>
+						cancelled
+							? this.stoppedManifest(current)
+							: { ...current, state: "error", error: toBoxError(error).message },
+					);
 				}
 				await this.releaseReservation(boxId, true);
+				if (cancelled) throw new BoxError({ message: "Box acquisition was cancelled" });
 				throw toBoxError(error, "Could not start box");
 			}
 		});
+	}
+
+	/** True when the granted resident was created by this acquisition, not reused. */
+	private isStartingReservation(boxId: string): boolean {
+		const resident = this.resident.get(boxId);
+		return !resident || resident.state === "starting";
 	}
 
 	private async waitForGrant(
@@ -514,6 +560,9 @@ export class BoxManagerImpl implements BoxManager {
 				const index = this.queue.indexOf(pending);
 				if (index >= 0) this.queue.splice(index, 1);
 				rejectPromise(error);
+				// A cancelled/timed-out head waiter must not leave later
+				// requests blocked behind it.
+				this.schedulePump();
 			};
 			const onAbort = (): void => fail(new BoxError({ message: "Box acquisition was cancelled" }));
 			pending.cleanup = cleanup;
@@ -523,6 +572,12 @@ export class BoxManagerImpl implements BoxManager {
 			);
 			pending.timer.unref();
 			pending.signal?.addEventListener("abort", onAbort, { once: true });
+			// The signal may have aborted between the caller's check and the
+			// listener registration.
+			if (pending.signal?.aborted) {
+				fail(new BoxError({ message: "Box acquisition was cancelled" }));
+				return;
+			}
 			this.queue.push(pending);
 			void this.pump();
 		});
@@ -551,12 +606,18 @@ export class BoxManagerImpl implements BoxManager {
 				}
 				const resident = this.resident.get(pending.boxId);
 				if (resident) {
-					if (resident.stopping) break;
-					if (resident.leases > 0) break;
+					if (resident.stopping || resident.leases > 0) {
+						// This box is busy/stopping, but unrelated boxes later in
+						// the queue can still start. Keep the blocked request at
+						// the head so it keeps its FIFO priority.
+						index += 1;
+						continue;
+					}
 					resident.leases = 1;
 					resident.state = "busy";
 					resident.lastUsedAt = Date.now();
 					this.queue.splice(index, 1);
+					pending.settled = true;
 					grants.push(pending);
 					continue;
 				}
@@ -580,11 +641,11 @@ export class BoxManagerImpl implements BoxManager {
 					stopping: false,
 				});
 				this.queue.splice(index, 1);
+				pending.settled = true;
 				grants.push(pending);
 			}
 		});
 		for (const pending of grants) {
-			pending.settled = true;
 			pending.cleanup();
 			pending.resolve();
 		}
@@ -605,11 +666,15 @@ export class BoxManagerImpl implements BoxManager {
 		);
 	}
 
-	private pickVictim(excludeBoxId?: string): Resident | null {
+	private pickVictim(excludeBoxId?: string, excluded?: ReadonlySet<string>): Resident | null {
+		const now = Date.now();
 		let victim: Resident | null = null;
 		for (const resident of this.resident.values()) {
 			if (resident.boxId === excludeBoxId) continue;
+			if (excluded?.has(resident.boxId)) continue;
 			if (resident.leases > 0 || resident.stopping) continue;
+			const failedAt = this.evictionFailures.get(resident.boxId);
+			if (failedAt !== undefined && now - failedAt < EVICTION_RETRY_MS) continue;
 			if (!victim) {
 				victim = resident;
 				continue;
@@ -625,24 +690,35 @@ export class BoxManagerImpl implements BoxManager {
 		return victim;
 	}
 
-	private async evict(boxId: string): Promise<void> {
+	private async evict(boxId: string): Promise<boolean> {
 		const manifest = this.store.load(boxId);
+		let evicted = false;
 		try {
 			if (manifest) await this.runtime.stop(manifest.sandboxName);
+			if (manifest) {
+				await this.updateManifest(boxId, (current) => this.stoppedManifest(current));
+			}
 			await this.schedulerLock.run(() => {
 				this.resident.delete(boxId);
 			});
-			if (manifest) {
-				this.store.write({ ...manifest, state: "stopped", lastUsedAt: new Date().toISOString() });
-			}
+			this.evictionFailures.delete(boxId);
+			evicted = true;
+			return true;
 		} catch (error) {
+			this.evictionFailures.set(boxId, Date.now());
 			console.warn(`relay box: could not evict ${boxId}: ${toBoxError(error).message}`);
 			await this.schedulerLock.run(() => {
 				const resident = this.resident.get(boxId);
 				if (resident) resident.stopping = false;
 			});
+			return false;
 		} finally {
-			this.schedulePump();
+			if (evicted) {
+				this.schedulePump();
+			} else {
+				const timer = setTimeout(() => this.schedulePump(), EVICTION_RETRY_MS);
+				timer.unref();
+			}
 		}
 	}
 
@@ -651,69 +727,105 @@ export class BoxManagerImpl implements BoxManager {
 			const resident = this.resident.get(boxId);
 			if (!resident) return;
 			resident.leases = Math.max(0, resident.leases - 1);
-			if (remove || resident.leases === 0) {
+			if (remove || (resident.leases === 0 && resident.state === "starting")) {
 				this.resident.delete(boxId);
 				return;
 			}
-			resident.state = "ready";
-			resident.lastUsedAt = Date.now();
+			if (resident.leases === 0) {
+				resident.state = "ready";
+				resident.lastUsedAt = Date.now();
+			}
 		});
 		this.schedulePump();
 	}
 
 	private async createManifest(spec: BoxSpec, boxId: string): Promise<BoxManifest> {
 		const normalized = this.normalizeSettings(spec.settings);
-		const settings = normalized.image === "auto" ? { ...normalized, image: await this.resolveImage() } : normalized;
 		const dir = boxDir(this.config.dataDir, boxId);
 		const workspace = workspacePath(this.config.dataDir, boxId);
 		if (isPathInside(spec.projectCwd, this.config.dataDir)) {
 			throw new BoxError({ message: "The project directory must not be inside the box data directory" });
 		}
-		ensureBoxDirs(this.config.dataDir, boxId);
-		cleanupTempWorkspaces(dir);
-		if (!existsSync(workspace)) {
-			await prepareWorkspace(spec.projectCwd, dir, workspace, settings.exclude);
+		if (isPathInside(this.config.dataDir, spec.projectCwd)) {
+			throw new BoxError({ message: "The box data directory must not be inside the project directory" });
 		}
-		const now = new Date().toISOString();
-		const attachments: BoxAttachment[] = spec.sessionId ? [{ sessionId: spec.sessionId, attachedAt: now }] : [];
-		const manifest: BoxManifest = {
-			version: MANIFEST_VERSION,
-			boxId,
-			...(spec.sessionId ? { originSessionId: spec.sessionId } : {}),
-			attachments,
-			ownerId: spec.ownerId,
-			projectCwd: spec.projectCwd,
-			workspacePath: workspace,
-			sandboxName: sandboxNameFor(this.config.dataDir, boxId),
-			runtime: { kind: this.runtime.kind, version: MICROSANDBOX_VERSION },
-			settings,
-			state: "provisioning",
-			setupState: "pending",
-			createdAt: now,
-			lastUsedAt: now,
-		};
-		this.store.write(manifest);
-		this.indexManifest(manifest);
-		console.log(`relay box: created ${boxId} at ${workspace}`);
-		return manifest;
+		const settings = normalized.image === "auto" ? { ...normalized, image: await this.resolveImage() } : normalized;
+		let wrote = false;
+		try {
+			ensureBoxDirs(this.config.dataDir, boxId);
+			cleanupTempWorkspaces(dir);
+			if (!existsSync(workspace)) {
+				const removed = await prepareWorkspace(spec.projectCwd, dir, workspace, settings.exclude);
+				if (removed.length > 0) {
+					console.log(`relay box: removed ${removed.length} host-specific file(s) from ${boxId}`);
+				}
+			}
+			const now = new Date().toISOString();
+			const attachments: BoxAttachment[] = spec.sessionId ? [{ sessionId: spec.sessionId, attachedAt: now }] : [];
+			const manifest: BoxManifest = {
+				version: MANIFEST_VERSION,
+				boxId,
+				...(spec.sessionId ? { originSessionId: spec.sessionId } : {}),
+				attachments,
+				ownerId: spec.ownerId,
+				projectCwd: spec.projectCwd,
+				workspacePath: workspace,
+				sandboxName: sandboxNameFor(this.config.dataDir, boxId),
+				runtime: { kind: this.runtime.kind, version: MICROSANDBOX_VERSION },
+				settings,
+				state: "provisioning",
+				setupState: "pending",
+				createdAt: now,
+				lastUsedAt: now,
+			};
+			this.store.write(manifest);
+			wrote = true;
+			this.indexManifest(manifest);
+			console.log(`relay box: created ${boxId} at ${workspace}`);
+			return manifest;
+		} catch (error) {
+			if (!wrote) {
+				try {
+					rmSync(dir, { recursive: true, force: true });
+				} catch {
+					// The failed box is behind a random id; leave it for a later cleanup.
+				}
+			}
+			throw error;
+		}
 	}
 
-	private async startBox(initial: BoxManifest): Promise<BoxManifest> {
+	private async startBox(initial: BoxManifest, signal?: AbortSignal): Promise<BoxManifest> {
+		const checkAborted = (): void => {
+			if (signal?.aborted) throw new BoxError({ message: "Box start was cancelled" });
+		};
+		checkAborted();
 		let manifest = initial;
 		if (manifest.settings.image === "auto") {
 			manifest = { ...manifest, settings: { ...manifest.settings, image: await this.resolveImage() } };
-			this.store.write(manifest);
+			checkAborted();
 		}
+		// Persist the effective settings (and preserve any attachments added while
+		// the box was being acquired) before the runtime sees them.
+		const persisted = await this.updateManifest(manifest.boxId, (current) => ({
+			...current,
+			settings: manifest.settings,
+		}));
+		if (!persisted) throw new BoxError({ message: `Box ${manifest.boxId} disappeared during startup` });
+		manifest = persisted;
+		checkAborted();
+
 		if (!existsSync(manifest.workspacePath)) {
-			const failed = this.withState(manifest, "error", "Box workspace is missing");
-			this.store.write(failed);
+			await this.markBoxError(manifest.boxId, "Box workspace is missing");
 			throw new BoxError({ message: `Box workspace is missing: ${manifest.workspacePath}` });
 		}
 
 		const before = await this.runtime.status(manifest.sandboxName);
+		checkAborted();
 		let coldStart = false;
 		if (before === "paused") {
 			await this.runtime.resume(manifest.sandboxName);
+			checkAborted();
 		} else {
 			const needsStart = before !== "running" && before !== "starting" && before !== "draining";
 			if (before === "absent") {
@@ -722,21 +834,21 @@ export class BoxManagerImpl implements BoxManager {
 						name: manifest.sandboxName,
 						settings: manifest.settings,
 						workspace: manifest.workspacePath,
-						cacheDir: this.config.cacheDir,
 						labels: this.labels(manifest.boxId),
 						secrets: this.config.secrets,
 						maxCpus: this.config.maxCpus,
 						maxMemoryMiB: this.config.maxMemoryMiB,
 					});
 					coldStart = true;
+					checkAborted();
 				} catch (error) {
 					const current = await this.runtime.status(manifest.sandboxName).catch(() => "absent" as const);
 					if (current !== "absent") {
 						await this.runtime.start(manifest.sandboxName);
 						coldStart = true;
+						checkAborted();
 					} else {
-						const failed = this.withState(manifest, "error", toBoxError(error).message);
-						this.store.write(failed);
+						await this.markBoxError(manifest.boxId, toBoxError(error).message);
 						throw error;
 					}
 				}
@@ -744,6 +856,7 @@ export class BoxManagerImpl implements BoxManager {
 				try {
 					await this.runtime.start(manifest.sandboxName);
 					coldStart = true;
+					checkAborted();
 				} catch (error) {
 					if (before === "crashed") {
 						await this.runtime.destroy(manifest.sandboxName).catch(() => {});
@@ -751,16 +864,15 @@ export class BoxManagerImpl implements BoxManager {
 							name: manifest.sandboxName,
 							settings: manifest.settings,
 							workspace: manifest.workspacePath,
-							cacheDir: this.config.cacheDir,
 							labels: this.labels(manifest.boxId),
 							secrets: this.config.secrets,
 							maxCpus: this.config.maxCpus,
 							maxMemoryMiB: this.config.maxMemoryMiB,
 						});
 						coldStart = true;
+						checkAborted();
 					} else {
-						const failed = this.withState(manifest, "error", toBoxError(error).message);
-						this.store.write(failed);
+						await this.markBoxError(manifest.boxId, toBoxError(error).message);
 						throw error;
 					}
 				}
@@ -768,12 +880,13 @@ export class BoxManagerImpl implements BoxManager {
 		}
 
 		if (manifest.setupState !== "ok" && manifest.settings.setup) {
-			const setupState = await this.runHook(manifest, "setup", manifest.settings.setup, true);
-			manifest = { ...manifest, setupState };
-			this.store.write(manifest);
+			const setupState = await this.runHook(manifest, "setup", manifest.settings.setup, true, signal);
+			checkAborted();
+			const updated = await this.updateManifest(manifest.boxId, (current) => ({ ...current, setupState }));
+			if (!updated) throw new BoxError({ message: `Box ${manifest.boxId} disappeared during setup` });
+			manifest = updated;
 			if (setupState === "failed") {
-				const failed = this.withState(manifest, "error", "Box setup failed; see logs/setup.log");
-				this.store.write(failed);
+				await this.markBoxError(manifest.boxId, "Box setup failed; see logs/setup.log");
 				throw new BoxError({ message: "Box setup failed; see logs/setup.log" });
 			}
 		}
@@ -781,18 +894,22 @@ export class BoxManagerImpl implements BoxManager {
 			manifest = { ...manifest, setupState: "ok" };
 		}
 		if (manifest.setupState === "failed") {
-			const failed = this.withState(manifest, "error", "Box setup failed; see logs/setup.log");
-			this.store.write(failed);
+			await this.markBoxError(manifest.boxId, "Box setup failed; see logs/setup.log");
 			throw new BoxError({ message: "Box setup failed; see logs/setup.log" });
 		}
 
 		if (coldStart && manifest.settings.resume) {
-			await this.runHook(manifest, "resume", manifest.settings.resume, false);
+			await this.runHook(manifest, "resume", manifest.settings.resume, false, signal);
+			checkAborted();
 		}
 
-		const ready = this.withState(manifest, "busy");
-		delete ready.pausedAt;
-		this.store.write(ready);
+		checkAborted();
+		const busy = await this.updateManifest(manifest.boxId, (current) => {
+			const next = this.withState({ ...current, setupState: manifest.setupState }, "busy");
+			delete next.pausedAt;
+			return next;
+		});
+		if (!busy) throw new BoxError({ message: `Box ${manifest.boxId} disappeared during startup` });
 		await this.schedulerLock.run(() => {
 			const resident = this.resident.get(manifest.boxId);
 			if (resident) {
@@ -802,7 +919,7 @@ export class BoxManagerImpl implements BoxManager {
 				resident.lastUsedAt = Date.now();
 			}
 		});
-		return ready;
+		return busy;
 	}
 
 	private async runHook(
@@ -810,11 +927,13 @@ export class BoxManagerImpl implements BoxManager {
 		name: "setup" | "resume",
 		command: string,
 		fatal: boolean,
+		signal?: AbortSignal,
 	): Promise<SetupState> {
 		const result = await this.runtime.exec(manifest.sandboxName, command, {
 			cwd: "/workspace",
 			env: boxExecEnv(manifest.settings),
 			timeoutMs: this.config.setupTimeoutMs,
+			...(signal ? { signal } : {}),
 		});
 		const output = [
 			`$ ${command}`,
@@ -836,16 +955,20 @@ export class BoxManagerImpl implements BoxManager {
 		return "ok";
 	}
 
-	private async statusInternal(boxId: string): Promise<BoxStatus | null> {
-		const manifest = this.store.load(boxId);
+	private async statusInternal(boxId: string, known?: BoxManifest): Promise<BoxStatus | null> {
+		const manifest = known ?? this.store.load(boxId);
 		if (!manifest) return null;
-		let runtimeStatus: RuntimeStatus = "absent";
-		try {
-			runtimeStatus = await this.runtime.status(manifest.sandboxName);
-		} catch {
-			runtimeStatus = manifest.state === "error" ? "crashed" : "absent";
-		}
 		const resident = this.resident.get(boxId);
+		// The manager is the only lifecycle writer. A resident box reports from
+		// the scheduler, and a terminal stopped box does not need a runtime probe.
+		let runtimeStatus: RuntimeStatus = "absent";
+		if (!resident && manifest.state !== "stopped" && manifest.state !== "provisioning") {
+			try {
+				runtimeStatus = await this.runtime.status(manifest.sandboxName);
+			} catch {
+				runtimeStatus = manifest.state === "error" ? "crashed" : "absent";
+			}
+		}
 		let state: BoxState;
 		if (manifest.setupState === "failed") {
 			state = "error";
@@ -929,7 +1052,12 @@ export class BoxManagerImpl implements BoxManager {
 				resident.stopping = false;
 			});
 			const pausedAt = new Date().toISOString();
-			this.store.write({ ...manifest, state: "paused", pausedAt, lastUsedAt: manifest.lastUsedAt });
+			await this.updateManifest(boxId, (current) => ({
+				...current,
+				state: "paused",
+				pausedAt,
+				lastUsedAt: current.lastUsedAt,
+			}));
 		} catch (error) {
 			console.warn(`relay box: pause failed for ${boxId}; stopping instead: ${toBoxError(error).message}`);
 			await this.stopResident(boxId, resident);
@@ -955,9 +1083,11 @@ export class BoxManagerImpl implements BoxManager {
 				resident.stopping = false;
 				resident.lastUsedAt = Date.now();
 			});
-			const ready = { ...manifest, state: "ready" as const, lastUsedAt: new Date().toISOString() };
-			delete ready.pausedAt;
-			this.store.write(ready);
+			await this.updateManifest(boxId, (current) => {
+				const ready = { ...current, state: "ready" as const, lastUsedAt: new Date().toISOString() };
+				delete ready.pausedAt;
+				return ready;
+			});
 		} catch (error) {
 			await this.schedulerLock.run(() => {
 				resident.stopping = false;
@@ -973,8 +1103,13 @@ export class BoxManagerImpl implements BoxManager {
 		if (!manifest) return;
 		const resident = this.resident.get(boxId);
 		if (!resident) {
-			await this.runtime.stop(manifest.sandboxName).catch(() => {});
-			this.store.write({ ...manifest, state: "stopped", lastUsedAt: new Date().toISOString() });
+			try {
+				await this.runtime.stop(manifest.sandboxName);
+			} catch (error) {
+				throw toBoxError(error, `Could not stop box ${boxId}`);
+			}
+			await this.updateManifest(boxId, (current) => this.stoppedManifest(current));
+			this.evictionFailures.delete(boxId);
 			return;
 		}
 		await this.schedulerLock.run(() => {
@@ -988,12 +1123,13 @@ export class BoxManagerImpl implements BoxManager {
 		const manifest = this.store.load(boxId);
 		try {
 			if (manifest) await this.runtime.stop(manifest.sandboxName);
+			if (manifest) {
+				await this.updateManifest(boxId, (current) => this.stoppedManifest(current));
+			}
 			await this.schedulerLock.run(() => {
 				this.resident.delete(boxId);
 			});
-			if (manifest) {
-				this.store.write({ ...manifest, state: "stopped", lastUsedAt: new Date().toISOString() });
-			}
+			this.evictionFailures.delete(boxId);
 		} catch (error) {
 			await this.schedulerLock.run(() => {
 				resident.stopping = false;
@@ -1019,10 +1155,18 @@ export class BoxManagerImpl implements BoxManager {
 		}
 		try {
 			await this.runtime.destroy(manifest.sandboxName);
+			await this.withManifestLock(boxId, () => {
+				const current = this.store.load(boxId);
+				if (!current) return;
+				if (current.attachments.length > 0) {
+					throw new BoxError({ message: "Detach all sessions before removing a box" });
+				}
+				this.store.trash(current);
+			});
 			await this.schedulerLock.run(() => {
 				this.resident.delete(boxId);
 			});
-			this.store.trash(manifest);
+			this.evictionFailures.delete(boxId);
 		} catch (error) {
 			if (resident) {
 				await this.schedulerLock.run(() => {
@@ -1054,8 +1198,9 @@ export class BoxManagerImpl implements BoxManager {
 		};
 		const resident = this.resident.get(boxId);
 		if (!resident) {
-			this.store.write({ ...manifest, settings });
-			const status = await this.statusInternal(boxId);
+			const updated = await this.updateManifest(boxId, (current) => ({ ...current, settings }));
+			if (!updated) throw new BoxError({ message: `Box ${boxId} disappeared` });
+			const status = await this.statusInternal(boxId, updated);
 			if (!status) throw new BoxError({ message: `Box ${boxId} disappeared` });
 			return status;
 		}
@@ -1072,8 +1217,13 @@ export class BoxManagerImpl implements BoxManager {
 			resident.resources.memoryMiB === nextResources.memoryMiB &&
 			manifest.settings.rootDiskMiB === rootDiskMiB;
 		if (unchanged) {
-			this.store.write({ ...manifest, settings, lastUsedAt: new Date().toISOString() });
-			const status = await this.statusInternal(boxId);
+			const updated = await this.updateManifest(boxId, (current) => ({
+				...current,
+				settings,
+				lastUsedAt: new Date().toISOString(),
+			}));
+			if (!updated) throw new BoxError({ message: `Box ${boxId} disappeared` });
+			const status = await this.statusInternal(boxId, updated);
 			if (!status) throw new BoxError({ message: `Box ${boxId} disappeared` });
 			return status;
 		}
@@ -1083,7 +1233,9 @@ export class BoxManagerImpl implements BoxManager {
 		let reserved = false;
 		if (deltaCpus > 0 || deltaMemory > 0) {
 			// Evict idle boxes one at a time until the resize fits or nothing else
-			// can be reclaimed. Never evict the box being resized.
+			// can be reclaimed. Never evict the box being resized, and never retry
+			// a victim whose stop just failed.
+			const attempted = new Set<string>();
 			while (!reserved) {
 				await this.schedulerLock.run(() => {
 					let cpus = 0;
@@ -1101,7 +1253,7 @@ export class BoxManagerImpl implements BoxManager {
 					}
 				});
 				if (reserved) break;
-				const victim = await this.pickAndEvictVictim(boxId);
+				const victim = await this.pickAndEvictVictim(boxId, attempted);
 				if (!victim) {
 					throw new BoxError({
 						message: `Not enough box capacity for ${profile}; stop or shrink another box first`,
@@ -1121,20 +1273,24 @@ export class BoxManagerImpl implements BoxManager {
 				rootDiskMiB,
 			});
 			this.assertResizeApplied(result);
-			const updated = { ...manifest, settings, lastUsedAt: new Date().toISOString() };
-			this.store.write(updated);
+			const updated = await this.updateManifest(boxId, (current) => ({
+				...current,
+				settings,
+				lastUsedAt: new Date().toISOString(),
+			}));
+			if (!updated) throw new BoxError({ message: `Box ${boxId} disappeared` });
 			await this.schedulerLock.run(() => {
 				resident.resources = nextResources;
 			});
+			const status = await this.statusInternal(boxId, updated);
+			if (!status) throw new BoxError({ message: `Box ${boxId} disappeared` });
+			return status;
 		} catch (error) {
 			await this.schedulerLock.run(() => {
 				resident.resources = { cpus: manifest.settings.cpus, memoryMiB: manifest.settings.memoryMiB };
 			});
 			throw error;
 		}
-		const status = await this.statusInternal(boxId);
-		if (!status) throw new BoxError({ message: `Box ${boxId} disappeared` });
-		return status;
 	}
 
 	private assertResizeApplied(result: RuntimeResizeResult): void {
@@ -1151,16 +1307,20 @@ export class BoxManagerImpl implements BoxManager {
 		}
 	}
 
-	private async pickAndEvictVictim(excludeBoxId?: string): Promise<string | null> {
-		let victim: Resident | null = null;
-		await this.schedulerLock.run(() => {
-			victim = this.pickVictim(excludeBoxId);
-			if (victim) victim.stopping = true;
-		});
-		if (!victim) return null;
-		const boxId = (victim as Resident).boxId;
-		await this.evict(boxId);
-		return boxId;
+	private async pickAndEvictVictim(
+		excludeBoxId?: string,
+		attempted: Set<string> = new Set(),
+	): Promise<string | null> {
+		for (;;) {
+			const victim = await this.schedulerLock.run(() => {
+				const selected = this.pickVictim(excludeBoxId, attempted);
+				if (selected) selected.stopping = true;
+				return selected;
+			});
+			if (!victim) return null;
+			if (await this.evict(victim.boxId)) return victim.boxId;
+			attempted.add(victim.boxId);
+		}
 	}
 
 	private async detachSessionsInternal(sessionIds: ReadonlySet<string>): Promise<number> {
@@ -1168,13 +1328,14 @@ export class BoxManagerImpl implements BoxManager {
 		for (const manifest of this.store.list()) {
 			const resident = this.resident.get(manifest.boxId);
 			if (resident && resident.leases > 0) continue;
-			const attachments = manifest.attachments.filter((attachment) => !sessionIds.has(attachment.sessionId));
-			if (attachments.length === manifest.attachments.length) continue;
-			for (const attachment of manifest.attachments) {
-				if (sessionIds.has(attachment.sessionId)) this.unindexSession(attachment.sessionId, manifest.boxId);
-			}
-			this.store.write({ ...manifest, attachments });
-			detached += manifest.attachments.length - attachments.length;
+			let removed = 0;
+			const updated = await this.updateManifest(manifest.boxId, (current) => {
+				const attachments = current.attachments.filter((attachment) => !sessionIds.has(attachment.sessionId));
+				if (attachments.length === current.attachments.length) return null;
+				removed = current.attachments.length - attachments.length;
+				return { ...current, attachments };
+			});
+			if (updated && removed > 0) detached += removed;
 		}
 		return detached;
 	}
@@ -1184,16 +1345,16 @@ export class BoxManagerImpl implements BoxManager {
 		for (const manifest of this.store.list()) {
 			const resident = this.resident.get(manifest.boxId);
 			if (resident && resident.leases > 0) continue;
-			const attachments = manifest.attachments.filter((attachment) => activeSessionIds.has(attachment.sessionId));
-			if (attachments.length !== manifest.attachments.length) {
-				for (const attachment of manifest.attachments) {
-					if (!attachments.some((kept) => kept.sessionId === attachment.sessionId)) {
-						this.unindexSession(attachment.sessionId, manifest.boxId);
-					}
-				}
-				this.store.write({ ...manifest, attachments });
-				detached += manifest.attachments.length - attachments.length;
-			}
+			let removed = 0;
+			const updated = await this.updateManifest(manifest.boxId, (current) => {
+				const attachments = current.attachments.filter((attachment) =>
+					activeSessionIds.has(attachment.sessionId),
+				);
+				if (attachments.length === current.attachments.length) return null;
+				removed = current.attachments.length - attachments.length;
+				return { ...current, attachments };
+			});
+			if (updated && removed > 0) detached += removed;
 		}
 
 		const trashed = await this.collectExpiredInternal();
@@ -1220,14 +1381,10 @@ export class BoxManagerImpl implements BoxManager {
 					const lastUsed = Date.parse(current.lastUsedAt);
 					if (!Number.isFinite(lastUsed) || lastUsed > cutoff) return false;
 					if (resident) await this.stopInternal(manifest.boxId);
-					const stopped = this.store.load(manifest.boxId);
+					const stopped = await this.updateManifest(manifest.boxId, (current) =>
+						current.attachments.length === 0 ? null : { ...current, attachments: [] },
+					);
 					if (!stopped) return false;
-					if (stopped.attachments.length > 0) {
-						for (const attachment of stopped.attachments) {
-							this.unindexSession(attachment.sessionId, stopped.boxId);
-						}
-						this.store.write({ ...stopped, attachments: [] });
-					}
 					await this.destroyInternal(manifest.boxId);
 					return true;
 				});
@@ -1243,13 +1400,17 @@ export class BoxManagerImpl implements BoxManager {
 		for (const manifest of this.store.list()) {
 			cleanupTempWorkspaces(this.store.dir(manifest.boxId));
 		}
+		const failedStops = new Set<string>();
+		let listed = false;
 		try {
 			const boxes = await this.runtime.list(this.labelsForList());
+			listed = true;
 			for (const box of boxes) {
 				if (box.status === "stopped" || box.status === "absent" || box.status === "crashed") continue;
 				try {
 					await this.runtime.stop(box.name);
 				} catch (error) {
+					failedStops.add(box.name);
 					console.warn(
 						`relay box: could not stop ${box.name} during reconcile: ${toBoxError(error).message}`,
 					);
@@ -1261,11 +1422,18 @@ export class BoxManagerImpl implements BoxManager {
 		await this.schedulerLock.run(() => {
 			this.resident.clear();
 		});
-		for (const manifest of this.store.list()) {
-			if (manifest.state === "error") continue;
-			const rest = { ...manifest, state: "stopped" as const };
-			delete rest.pausedAt;
-			this.store.write(rest);
+		this.evictionFailures.clear();
+		if (listed) {
+			for (const manifest of this.store.list()) {
+				if (manifest.state === "error") continue;
+				if (failedStops.has(manifest.sandboxName)) {
+					// Keep the state non-terminal so status still probes the runtime
+					// instead of claiming a VM we failed to stop is stopped.
+					await this.updateManifest(manifest.boxId, (current) => this.withState(current, "ready"));
+					continue;
+				}
+				await this.updateManifest(manifest.boxId, (current) => this.stoppedManifest(current));
+			}
 		}
 		this.rebuildSessionIndex();
 		this.schedulePump();
@@ -1280,7 +1448,9 @@ export class BoxManagerImpl implements BoxManager {
 			const manifest = this.store.load(boxId);
 			try {
 				if (manifest) await this.runtime.stop(manifest.sandboxName);
-				if (manifest) this.store.write({ ...manifest, state: "stopped", lastUsedAt: new Date().toISOString() });
+				if (manifest) {
+					await this.updateManifest(boxId, (current) => this.stoppedManifest(current));
+				}
 			} catch (error) {
 				console.warn(`relay box: could not stop ${boxId}: ${toBoxError(error).message}`);
 			}
@@ -1404,7 +1574,7 @@ export class BoxManagerImpl implements BoxManager {
 		let best: BoxManifest | null = null;
 		for (const boxId of ids) {
 			const manifest = this.store.load(boxId);
-			if (!manifest) {
+			if (!manifest || !manifest.attachments.some((attachment) => attachment.sessionId === sessionId)) {
 				this.unindexSession(sessionId, boxId);
 				continue;
 			}
@@ -1419,14 +1589,16 @@ export class BoxManagerImpl implements BoxManager {
 	}
 
 	private indexManifest(manifest: BoxManifest): void {
-		for (const attachment of manifest.attachments) {
-			let ids = this.sessionIndex.get(attachment.sessionId);
-			if (!ids) {
-				ids = new Set();
-				this.sessionIndex.set(attachment.sessionId, ids);
-			}
-			ids.add(manifest.boxId);
+		for (const attachment of manifest.attachments) this.indexSession(attachment.sessionId, manifest.boxId);
+	}
+
+	private indexSession(sessionId: string, boxId: string): void {
+		let ids = this.sessionIndex.get(sessionId);
+		if (!ids) {
+			ids = new Set();
+			this.sessionIndex.set(sessionId, ids);
 		}
+		ids.add(boxId);
 	}
 
 	private unindexSession(sessionId: string, boxId: string): void {
@@ -1436,14 +1608,59 @@ export class BoxManagerImpl implements BoxManager {
 		if (ids.size === 0) this.sessionIndex.delete(sessionId);
 	}
 
-	private async attachInternal(manifest: BoxManifest, sessionId: string): Promise<void> {
-		if (manifest.attachments.some((attachment) => attachment.sessionId === sessionId)) return;
-		const next: BoxManifest = {
-			...manifest,
-			attachments: [...manifest.attachments, { sessionId, attachedAt: new Date().toISOString() }],
-		};
-		this.store.write(next);
-		this.indexManifest(next);
+	private syncSessionIndex(previous: BoxManifest, next: BoxManifest): void {
+		const before = new Set(previous.attachments.map((attachment) => attachment.sessionId));
+		const after = new Set(next.attachments.map((attachment) => attachment.sessionId));
+		for (const sessionId of before) {
+			if (!after.has(sessionId)) this.unindexSession(sessionId, next.boxId);
+		}
+		for (const sessionId of after) {
+			if (!before.has(sessionId)) this.indexSession(sessionId, next.boxId);
+		}
+	}
+
+	private async attachInternal(boxId: string, sessionId: string): Promise<void> {
+		await this.updateManifest(boxId, (manifest) => {
+			if (manifest.attachments.some((attachment) => attachment.sessionId === sessionId)) return null;
+			return {
+				...manifest,
+				attachments: [...manifest.attachments, { sessionId, attachedAt: new Date().toISOString() }],
+				lastUsedAt: new Date().toISOString(),
+			};
+		});
+	}
+
+	/**
+	 * Serializes whole-manifest read-modify-write cycles. Runtime calls must stay
+	 * outside this lock; it is a leaf lock so it can be taken after the box and
+	 * scheduler locks without inverting their order.
+	 */
+	private withManifestLock<T>(boxId: string, fn: () => T): Promise<T> {
+		let mutex = this.manifestLocks.get(boxId);
+		if (!mutex) {
+			mutex = new Mutex();
+			this.manifestLocks.set(boxId, mutex);
+		}
+		return mutex.run(fn);
+	}
+
+	private async updateManifest(
+		boxId: string,
+		mutate: (manifest: BoxManifest) => BoxManifest | null,
+	): Promise<BoxManifest | null> {
+		return await this.withManifestLock(boxId, () => {
+			const current = this.store.load(boxId);
+			if (!current) return null;
+			const next = mutate(current);
+			if (!next) return current;
+			this.store.write(next);
+			this.syncSessionIndex(current, next);
+			return next;
+		});
+	}
+
+	private async markBoxError(boxId: string, message: string): Promise<void> {
+		await this.updateManifest(boxId, (current) => this.withState(current, "error", message));
 	}
 
 	private withBoxLock<T>(boxId: string, fn: () => Promise<T>): Promise<T> {
@@ -1475,12 +1692,23 @@ export class BoxManagerImpl implements BoxManager {
 		return { "relay.dataDir": dataDirHash(this.config.dataDir) };
 	}
 
+	private stoppedManifest(manifest: BoxManifest): BoxManifest {
+		const next = {
+			...manifest,
+			state: "stopped" as const,
+			lastUsedAt: new Date().toISOString(),
+		};
+		delete next.pausedAt;
+		return next;
+	}
+
 	private withState(manifest: BoxManifest, state: BoxState, error?: string): BoxManifest {
 		const next: BoxManifest = {
 			...manifest,
 			state,
 			lastUsedAt: new Date().toISOString(),
 		};
+		if (state !== "paused") delete next.pausedAt;
 		if (error) next.error = error;
 		else delete next.error;
 		return next;
