@@ -1,4 +1,4 @@
-export { BoxError, BoxUnavailableError, toBoxError } from "./errors.ts";
+export { BoxError, toBoxError } from "./errors.ts";
 export { BoxManagerImpl, DisabledBoxManager, createBoxManager } from "./manager.ts";
 export { Boxes, boxesLayer } from "./service.ts";
 export { MicrosandboxRuntime } from "./microsandbox.ts";
@@ -15,7 +15,7 @@ export {
 } from "./profiles.ts";
 export { FileBoxStore, MANIFEST_VERSION } from "./manifest.ts";
 export { isPreparedBoxImage, PREPARED_BOX_IMAGE } from "./images.ts";
-export { createBoxId, dataDirHash, legacyBoxIdFor, sandboxNameFor } from "./paths.ts";
+export { createBoxId, dataDirHash, sandboxNameFor } from "./paths.ts";
 export { prepareWorkspace, cleanupTempWorkspaces } from "./workspace.ts";
 export { sanitizeWorkspace } from "./sanitize.ts";
 export type * from "./types.ts";
