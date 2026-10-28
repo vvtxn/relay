@@ -732,8 +732,15 @@ export class BoxManagerImpl implements BoxManager {
 				return;
 			}
 			if (resident.leases === 0) {
-				resident.state = "ready";
-				resident.lastUsedAt = Date.now();
+				const manifest = this.store.load(boxId);
+				if (manifest?.state === "paused") {
+					const pausedAt = manifest.pausedAt ? Date.parse(manifest.pausedAt) : Number.NaN;
+					resident.state = "paused";
+					resident.pausedAt = Number.isFinite(pausedAt) ? pausedAt : Date.now();
+				} else {
+					resident.state = "ready";
+					resident.lastUsedAt = Date.now();
+				}
 			}
 		});
 		this.schedulePump();
