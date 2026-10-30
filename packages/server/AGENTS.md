@@ -116,12 +116,13 @@ Two transports:
 
 - **Local (secondary)** — the server seeds a stable `local` identity through the user store and every loopback request
   resolves to it without a token. The authenticated wrapper rejects non-loopback `Host` headers (DNS-rebinding guard),
-  clears the legacy pre-split cookie, and does not mount OAuth routes. Startup removes the CLI token handoff file.
+  clears the legacy pre-split cookie, and does not mount OAuth routes.
   Cloud/GitHub mode uses the separate `relay_cloud_session` cookie.
 - **GitHub** — the browser completes a **GitHub App** code + PKCE flow; the server maps the profile through
   `GitHubAuthProvider` → `DatabaseUserStore` and issues an opaque session token (hashed at rest in `auth_sessions`).
   Non-browser clients send `Authorization: Bearer <token>` (the CLI reads the token handed over to
-  `~/.relay/session.json` by a loopback login). Credentials are required in this mode.
+  `~/.relay/session.json`: a loopback login writes it, and so does any cookie-authenticated request while it is
+  missing or stale). Credentials are required in this mode.
 
 `createServices()` returns long-lived services with `localUser` resolved in local mode (null in GitHub mode).
 `handleRequest` resolves the caller per request (`resolveRequestUser` in `identity.ts`) and passes
