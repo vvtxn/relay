@@ -14,7 +14,7 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import { VERSION } from "@vvtxn/relay/version.ts";
 import { causeMessage } from "@vvtxn/relay/core/effect.ts";
 import type { HealthResponse } from "@vvtxn/client/protocol.ts";
-import { handleCallback, handleLogin, handleLogout } from "./auth-routes.ts";
+import { handleCallback, handleLogin, handleLogout, handOffBrowserSession } from "./auth-routes.ts";
 import {
 	handleAttachBox,
 	handleCreateBox,
@@ -142,6 +142,7 @@ function authenticated(services: ServerServices, build: (services: RequestServic
 			}
 			const user = yield* resolveRequestUser(services, request);
 			if (!user) return error(401, "Unauthorized");
+			yield* handOffBrowserSession(services, request).pipe(Effect.catchCause(() => Effect.void));
 			const response = yield* build({ ...services, user });
 			if (services.config.authMode !== "local") return response;
 			// A browser that previously signed into cloud mode may still hold the

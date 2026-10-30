@@ -3,12 +3,13 @@
  *
  * Browsers and the terminal don't share cookies, so a GitHub login in the web
  * client would leave the CLI unauthenticated. When the server is bound to
- * loopback it writes the issued session token here (mode `0600`); the CLI reads
- * it and authenticates with `Authorization: Bearer`, so both clients act as the
- * same user.
+ * loopback it writes the browser's session token here (mode `0600`) at login,
+ * and again whenever a signed-in browser loads the app while this file is
+ * missing or stale. The CLI reads it and authenticates with
+ * `Authorization: Bearer`, so both clients act as the same user.
  */
 
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { relayDir } from "../paths.ts";
 
@@ -24,11 +25,20 @@ function sessionPath(): string {
 }
 
 export function writeStoredSession(session: StoredSession): void {
+	const path = sessionPath();
+	// Write-then-rename: the CLI polls this file and must never read a partial token.
+	const tmp = `${path}.${process.pid}.tmp`;
 	try {
 		mkdirSync(relayDir(), { recursive: true });
-		writeFileSync(sessionPath(), JSON.stringify(session, null, "\t") + "\n", { mode: 0o600 });
+		writeFileSync(tmp, JSON.stringify(session, null, "\t") + "\n", { mode: 0o600 });
+		renameSync(tmp, path);
 	} catch {
 		// Best effort — the web session still works without the CLI handoff.
+		try {
+			rmSync(tmp, { force: true });
+		} catch {
+			// Nothing more to clean up.
+		}
 	}
 }
 

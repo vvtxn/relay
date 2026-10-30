@@ -168,7 +168,7 @@ The rest of this section describes the cloud/GitHub deployment.
 3. Start cloud mode with `pnpm relay` (or `pnpm relay serve` for a foreground server) and sign in with two accounts to
    verify isolation.
 
-The CLI authenticates with the bearer session token a loopback browser login hands over in `~/.relay/session.json`, so
+The CLI authenticates with the bearer session token a loopback browser session hands over in `~/.relay/session.json`, so
 the terminal and the browser act as the same user without extra configuration.
 
 ### Hardening
