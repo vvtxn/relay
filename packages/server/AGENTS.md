@@ -19,10 +19,11 @@ server/
 ├── github-oauth.ts  # GitHub authorize/token/profile calls + PKCE (promise-based fetch leaf)
 ├── cookies.ts       # Cookie serialization helpers
 ├── http.ts          # json()/error() helpers, requestUrl, readJsonBody, HTTP error classes
-├── sessions.ts      # /api/me, /api/config, session CRUD, message submission
+├── sessions.ts      # /api/me, /api/config, session CRUD, message submission, /api/runs
 ├── run.ts           # RunManager: one fiber per run, SSE fan-out, box/host execution
+├── sandbox.ts       # lazy BoxLease provider shared by bash/browser/future sandbox tools
 ├── box-tools.ts     # box bash executor + model-facing status/resize/sync tool
-├── browser-tool.ts  # one-shot Playwright check inside the current box
+├── browser-tool.ts  # one-shot Playwright check inside a leased box
 ├── boxes.ts         # /api/boxes routes (create/list/attach/resize/pause/stop/rm)
 ├── box-summary.ts   # BoxStatus -> wire BoxSummary projection
 ├── cancel.ts        # /api/sessions/:id/cancel handler
@@ -36,8 +37,9 @@ server/
 
 ### Composition seam (`services.ts`)
 
-`serverLayer(config)` composes tagged services (`Config`, `Database`, the stores, `Runs`) as Effect Layers; acquisition
-is sequential (config → database → stores → RunManager) and the store layer awaits each schema `ready` in order
+`serverLayer(config)` composes tagged services (`Config`, `Database`, the stores, `Boxes`, `Workspaces`, `Runs`) as
+Effect Layers; acquisition is sequential (config → database → stores → workspaces → RunManager) and the store layer
+awaits each schema `ready` in order
 (`users` backs the `auth_sessions` foreign key, so that schema is created first). `UserSettings` is built by
 `createUserSettingsStore`: the file backend plus a one-shot migration of database keys, or the encrypted database
 store. `createServices(config)` materializes the bundle once for `main.ts`. The shared `Database` client is the libSQL
@@ -63,43 +65,55 @@ SIGTERM/SIGINT so SQLite checkpoints its WAL.
 
 Owns active runs, one per session:
 
-- `startMessage()` claims the slot synchronously (409-equivalent via `RunConflictError`) then forks the run fiber
+- `startMessage()` claims the slot synchronously (409-equivalent via `RunConflictError`), assigns a stable `runId`,
+  then forks the run fiber
 - The fiber consumes the agent `run()` stream and mirrors events onto a run `Ref` and per-subscriber `Queue`s
   (registered synchronously, so the SSE snapshot-then-subscribe sequence cannot drop events)
 - `cancel()` interrupts the fiber; a single uninterruptible finalizer aborts the provider call, flushes the session
   handle, publishes `run_finished`, and releases the session when idle and unwatched
-- Boxed runs are unrestricted inside the VM: the box is the boundary. A successful boxed run syncs its workspace
-  changes to the project checkout before `run_finished`; the agent can also call the `box` tool's `sync` action to
-  apply verified changes mid-run. A sync conflict marks the run as an error instead of overwriting a diverged checkout.
-  Legacy boxes backfill a baseline on their next acquisition; changes made before that point stay in the box. Host
-  runs (`RELAY_BOX=0`) execute directly on the host
-  with no sandbox and no approval prompts; `main.ts` logs a warning at startup. In both modes the system prompt adds a
-  Safety section telling the agent to stop and ask before actions that leave the box or are hard to undo
+- Runs publish a `run_status` phase (`preparing-workspace`, `queued`, `starting-box`, `running`, `syncing`) and the
+  catch-up `run_state` snapshot carries the phase, box id, and queue position
+- With boxes enabled, a run owns a durable session workspace. File tools run on the host against it; `sandbox.ts`
+  leases a box lazily on the first bash/browser call and pins that lease until the run finalizer, so services and
+  browser checks share one VM. A run with no sandbox tool never holds a box. A successful run syncs the workspace
+  before `run_finished`; the agent can call the `box` tool's `sync` action earlier. With `RELAY_THREAD_BRANCHES=1`
+  (default) the patch is committed to `relay/thread/<sessionId>` in the project repo without touching the checkout;
+  set it to `0` for checkout sync. A sync conflict marks the run as an error instead of overwriting a diverged
+  checkout. Legacy v2 boxes remain session-affine and always use checkout sync until retired.
+- Host runs (`RELAY_BOX=0`) execute directly on the host with no sandbox and no approval prompts; `main.ts` logs a
+  warning at startup. In both modes the system prompt adds a Safety section telling the agent to stop and ask before
+  actions that leave the box or are hard to undo
 - Runs pass `maxToolRounds: 40` to the agent loop (the core default stays 30). The loop emits system notes when 10 and
   3 rounds remain so the model wraps up instead of silently hitting the cap; agent error events are logged with the
   session id for diagnosis.
-- Each run registers a `delegate` subagent tool (relay core) with the read-only workspace tools, and builds its system
-  prompt from the run's registry (`buildSystemPrompt`); subagent cost rides on the tool result's `meta.cost` and is
-  added to the session total. When the prepared box image is active, the prompt adds a firm Browser Verification
-  section: UI changes must be checked with the embedded Playwright/Chromium before completion. The `browser` tool
-  runs that check through the current box lease; it must never spawn a second sandbox.
-- `subscribe`/`subscribeStream` register SSE consumers; `getRunState` serves the catch-up `run_state` snapshot
+- Each run registers a `delegate` subagent tool (relay core) with the read-only workspace tools, and builds its
+  system prompt from the run's registry (`buildSystemPrompt`); subagent cost rides on the tool result's `meta.cost`
+  and is added to the session total. When the prepared box image is active, the prompt adds a firm Browser
+  Verification section: UI changes must be checked with the embedded Playwright/Chromium before completion. The
+  `browser` tool leases a box through the same generic sandbox provider, sharing the run's pinned lease; it must never
+  spawn a second sandbox.
+- `subscribe`/`subscribeStream` register SSE consumers; `getRunState` serves the catch-up snapshot, and
+  `listActive`/`GET /api/runs` expose owner-scoped run state to every client.
 
 ### Sessions
 
 Store contracts are Effect-native (`SessionHandle`/`SessionStore`, `StoreError`); synchronous in-memory reads
 (`getEntries`, `getHeader`, tokens/cost) stay synchronous. Database stores insert sessions lazily (on first append), so
 sessions created in-process are not yet visible to `store.open()`; all session routes go through `openSessionHandle()`
-(sessions.ts), which falls back to the live RunManager handle.
+(sessions.ts), which prefers the live RunManager handle while a run is active and otherwise falls back to the store.
+`attachHandle` never swaps an active run's handle or resets unflushed tokens/cost, so multiple viewers and reconnects
+are safe.
 
 The database store keeps at most `RELAY_MAX_SESSIONS_PER_WORKSPACE` sessions per owner/workspace. `0` means unlimited
 (the local default); Turso deployments default to 10. When a user message is persisted with a finite limit, the
 insert/update and the delete of older sessions plus their entries run in one atomic batch. `pruneAll()` trims
 pre-existing overflow on startup, before any runs are active. `DatabaseSessionStore.onPruned` reports removed session
-ids; `createServices` wires it to `boxes.detachSessions` so pruned threads do not keep box attachments alive.
+ids; `createServices` wires it to `boxes.detachSessions` and `workspaces.removeSessions` so pruned threads do not keep
+box attachments or workspace clones alive. Active runs are never removed.
 
-The per-session workspace cwd comes from the client (CLI sends its terminal cwd). File tools are confined to that cwd;
-bash is not (documented in relay core AGENTS.md).
+The per-session project cwd comes from the client (CLI sends its terminal cwd); the durable session workspace is
+created lazily under `RELAY_SESSION_WORKSPACE_ROOT` and mounted into the project's box pool. File tools are confined to
+that workspace; bash is not (documented in relay core AGENTS.md).
 
 Workspace creation and registration run through `validateWorkspacePath` (core): the path must be an absolute, existing
 directory whose canonical (symlink-resolved) path sits within `config.workspaceRoots`. `handleCreateSession` stores the
@@ -108,7 +122,8 @@ a symlinked path matches the stored workspace. `handleListWorkspaces` marks dele
 only injects the server default when nothing else is known; a removed workspace is tombstoned (`hidden_workspaces`) and
 comes back when it is re-registered or a new session is created in it. Because empty sessions are not persisted until
 their first message, `handleCreateSession` reuses an idle empty session from the RunManager instead of creating a new
-one. `RunManager` re-validates the cwd before every run.
+one, unless the request sets `forceNew` or the empty session already has a live subscriber. `RunManager` re-validates
+the cwd before every run.
 
 ### Auth
 
@@ -166,8 +181,9 @@ starting": it adopts a healthy winner, otherwise it reports the bind error. The 
 | `/api/workspaces`            | POST   | Validate + register a workspace                       |
 | `/api/workspaces`            | DELETE | Hide a workspace (sessions kept; re-add or a new session restores it) |
 | `/api/workspaces/validate`   | GET    | Validate a candidate cwd without registering it       |
+| `/api/runs`                  | GET    | Active runs for the caller (phase, box, queue)        |
 | `/api/sessions?cwd=`         | GET    | Session summaries for a workspace                     |
-| `/api/sessions`              | POST   | Create session                                        |
+| `/api/sessions`              | POST   | Create session (`forceNew` skips empty reuse)         |
 | `/api/sessions/:id`          | GET    | Open (header, entries, tokens, cost, branch, running) |
 | `/api/sessions/:id/messages` | POST   | Submit user message (starts a run)                    |
 | `/api/sessions/:id/cancel`   | POST   | Abort active run                                      |
@@ -176,10 +192,10 @@ starting": it adopts a healthy winner, otherwise it reports the bind error. The 
 | `/api/boxes`                 | GET    | List the caller's boxes + capacity                    |
 | `/api/boxes`                 | POST   | Create a standalone box (optional cwd/profile)        |
 | `/api/boxes/:id`             | GET    | Box status                                            |
-| `/api/boxes/:id/attach`      | POST   | Attach a session                                      |
-| `/api/boxes/:id/detach`      | POST   | Detach a session                                      |
+| `/api/boxes/:id/attach`      | POST   | Attach a session (legacy v2 boxes only)               |
+| `/api/boxes/:id/detach`      | POST   | Detach a session (legacy v2 boxes only)               |
 | `/api/boxes/:id/resize`      | POST   | Live-resize to tiny/small/medium                      |
-| `/api/boxes/:id/sync`        | POST   | Apply box workspace changes to the project checkout   |
+| `/api/boxes/:id/sync`        | POST   | Legacy box sync (pooled boxes sync via the run)       |
 | `/api/boxes/:id/pause`       | POST   | Pause an idle box (services stay warm)                |
 | `/api/boxes/:id/resume`      | POST   | Resume a paused box                                   |
 | `/api/boxes/:id/stop`        | POST   | Stop an idle box                                      |
@@ -213,6 +229,7 @@ when boxes are enabled.
   `RELAY_BOX_MAX_CPUS`, `RELAY_BOX_MEMORY_BUDGET_MIB`,
   `RELAY_BOX_VM_OVERHEAD_MIB`, `RELAY_BOX_PAUSE_MS`, `RELAY_BOX_STOP_MS`, `RELAY_BOX_RETENTION_MS`,
   `RELAY_BOX_ACQUIRE_TIMEOUT_MS`, `RELAY_BOX_SETUP_TIMEOUT_MS`, `RELAY_BOX_DATA_DIR`, `RELAY_BOX_CACHE_DIR`,
+  `RELAY_SESSION_WORKSPACE_ROOT`, `RELAY_THREAD_BRANCHES`,
   `RELAY_BOX_SETUP`, `RELAY_BOX_RESUME`, `RELAY_BOX_GITHUB_TOKEN`, `RELAY_BOX_GIT_HOST`
 
 ## Running

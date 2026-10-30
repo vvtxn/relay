@@ -6,10 +6,18 @@
  * agent runner callbacks one-to-one, plus server-side lifecycle events.
  */
 
-import type { Entry, SessionHeader, SessionSummary, WorkspaceSummary } from "@vvtxn/relay/core/sessions/index.ts";
+import type {
+	Entry,
+	RunPhase,
+	SessionHeader,
+	SessionSummary,
+	WorkspaceSummary,
+} from "@vvtxn/relay/core/sessions/index.ts";
 import type { WorkspaceRejection } from "@vvtxn/relay/core/workspace.ts";
 import type { ToolResult } from "@vvtxn/relay/core/tools/index.ts";
 import type { Usage } from "@vvtxn/relay/api/types.ts";
+
+export type { RunPhase, SessionSummary };
 
 // ---------------------------------------------------------------------------
 // REST payloads
@@ -69,6 +77,23 @@ export interface SessionListResponse {
 	sessions: SessionSummary[];
 }
 
+/** One active agent run, owned by the server's RunManager. */
+export interface RunSummary {
+	runId: string;
+	/** Session key accepted by the session routes. */
+	sessionId: string;
+	cwd: string;
+	phase: RunPhase;
+	startedAt: string;
+	boxId?: string;
+	/** Position in the box-acquisition queue when `phase` is "queued". */
+	queuePosition?: number;
+}
+
+export interface RunListResponse {
+	runs: RunSummary[];
+}
+
 /** Distinct workspaces (project directories) with sessions for the user. */
 export interface WorkspacesResponse {
 	workspaces: WorkspaceSummary[];
@@ -97,6 +122,8 @@ export interface RegisterWorkspaceResponse {
 
 export interface CreateSessionRequest {
 	cwd: string;
+	/** Skip idle-empty reuse and force a fresh thread. */
+	forceNew?: boolean;
 }
 
 export interface CreateSessionResponse {
@@ -111,8 +138,12 @@ export interface OpenSessionResponse {
 	cost: number;
 	/** Current git branch of the session workspace, when available. */
 	branch: string | null;
+	/** Branch where this thread's changes are committed, when thread branches are enabled. */
+	threadBranch?: string;
 	/** True while a run is active on this session (another client may be driving it). */
 	running: boolean;
+	/** Phase of the active run, when `running` is true. */
+	runPhase?: RunPhase;
 	/** The box attached to this session, when boxes are enabled. */
 	box?: BoxSummary;
 }
@@ -145,6 +176,8 @@ export interface BoxSummary {
 	capacity?: {
 		maxRunning: number;
 		running: number;
+		/** Runs waiting for a box lease. */
+		queued?: number;
 		maxCpus: number;
 		usedCpus: number;
 		maxMemoryMiB: number;
@@ -186,6 +219,9 @@ export interface BoxSyncResponse {
 	projectCwd: string;
 	files: BoxSyncFile[];
 	summary: string;
+	/** Set when the changes were committed to a thread branch. */
+	branch?: string;
+	commit?: string;
 }
 
 export interface FileListResponse {
@@ -218,16 +254,27 @@ export interface ErrorResponse {
 /** Snapshot sent immediately on subscribe while a run is in progress. */
 export interface RunStateEvent {
 	type: "run_state";
+	runId: string;
+	phase: RunPhase;
 	/** Text streamed so far for the in-flight assistant message. */
 	draftText: string;
 	/** Tool calls that have completed streaming args (may or may not have results yet). */
 	toolCalls: { id: string; name: string; args: string; result?: ToolResult }[];
 	tokens: number;
 	cost: number;
+	boxId?: string;
+	queuePosition?: number;
 }
 
 export type ServerEvent =
 	| RunStateEvent
+	| {
+			type: "run_status";
+			runId: string;
+			phase: RunPhase;
+			boxId?: string;
+			queuePosition?: number;
+	  }
 	| { type: "text_delta"; content: string }
 	| { type: "tool_call_start"; id: string; name: string }
 	| { type: "tool_call_args_delta"; id: string; args: string }

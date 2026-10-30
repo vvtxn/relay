@@ -43,6 +43,7 @@ import type { RequestServices, ServerServices } from "./services.ts";
 import {
 	handleConfig,
 	handleCreateSession,
+	handleListRuns,
 	handleListSessions,
 	handleListWorkspaces,
 	handleMe,
@@ -282,6 +283,9 @@ export function createAppLayer(services: ServerServices) {
 					authenticated(services, (rs) => withRequest((request) => handleUnregisterWorkspace(rs, request))),
 				),
 			);
+
+			// Runs are server-owned; clients attach to their sessions.
+			yield* router.add("GET", "/api/runs", respond(authenticated(services, (rs) => handleListRuns(rs))));
 
 			// Sessions
 			yield* router.add(

@@ -1,5 +1,6 @@
 import { createMemo, createSignal, For, Show } from "solid-js";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/solid-query";
+import type { SessionStreamState } from "@vvtxn/client/session-state.ts";
 import { filesQuery } from "#/api/queries.ts";
 import { cancelRun, sendMessage } from "#/api/mutations.ts";
 import { appendError, appendUserMessage, setRunning, streamState } from "#/state/session.ts";
@@ -162,7 +163,7 @@ export function Composer(props: { sessionId: string }) {
 				/>
 				<div class="composer-actions">
 					<span class="composer-hint">
-						{streamState().running ? statusLabel(streamState().status) : "Enter to send • @ for files"}
+						{streamState().running ? statusLabel(streamState()) : "Enter to send • @ for files"}
 					</span>
 					<Show
 						when={running()}
@@ -182,14 +183,24 @@ export function Composer(props: { sessionId: string }) {
 	);
 }
 
-function statusLabel(status: { kind: string; toolName?: string }): string {
-	switch (status.kind) {
+function statusLabel(state: SessionStreamState): string {
+	switch (state.phase) {
+		case "preparing-workspace":
+			return "Preparing workspace...";
+		case "queued":
+			return state.queuePosition !== null ? `Waiting for box (#${state.queuePosition})...` : "Waiting for box...";
+		case "starting-box":
+			return "Starting box...";
+		case "syncing":
+			return "Syncing changes...";
+	}
+	switch (state.status.kind) {
 		case "thinking":
 			return "Thinking...";
 		case "writing":
 			return "Writing...";
 		case "running_tool":
-			return `Running ${status.toolName}...`;
+			return `Running ${state.status.toolName}...`;
 		default:
 			return "";
 	}

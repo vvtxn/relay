@@ -66,7 +66,7 @@ export interface ApiShape {
 	validateWorkspace(cwd: string): Effect.Effect<WorkspaceValidateResponse, RelayError>;
 	registerWorkspace(cwd: string): Effect.Effect<RegisterWorkspaceResponse, RelayError>;
 	unregisterWorkspace(cwd: string): Effect.Effect<StatusResponse, RelayError>;
-	createSession(cwd: string): Effect.Effect<CreateSessionResponse, RelayError>;
+	createSession(cwd: string, options?: { forceNew?: boolean }): Effect.Effect<CreateSessionResponse, RelayError>;
 	openSession(id: string): Effect.Effect<OpenSessionResponse, RelayError>;
 	listFiles(sessionId: string): Effect.Effect<FileListResponse, RelayError>;
 	sendMessage(sessionId: string, content: string): Effect.Effect<SendMessageResponse, RelayError>;
@@ -91,7 +91,7 @@ export const ApiLive = (client: RelayClient): Layer.Layer<Api> =>
 		validateWorkspace: (cwd) => tryRelay(() => client.validateWorkspace(cwd)),
 		registerWorkspace: (cwd) => tryRelay(() => client.registerWorkspace(cwd)),
 		unregisterWorkspace: (cwd) => tryRelay(() => client.unregisterWorkspace(cwd)),
-		createSession: (cwd) => tryRelay(() => client.createSession(cwd)),
+		createSession: (cwd, options) => tryRelay(() => client.createSession(cwd, options)),
 		openSession: (id) => tryRelay(() => client.openSession(id)),
 		listFiles: (sessionId) => tryRelay(() => client.listFiles(sessionId)),
 		sendMessage: (sessionId, content) => tryRelay(() => client.sendMessage(sessionId, content)),

@@ -16,6 +16,7 @@ import type {
 	OpenSessionResponse,
 	RegisterWorkspaceRequest,
 	RegisterWorkspaceResponse,
+	RunListResponse,
 	SendMessageRequest,
 	SendMessageResponse,
 	ServerEvent,
@@ -98,6 +99,11 @@ export class RelayClient {
 		return await this.get(`/api/sessions?cwd=${encodeURIComponent(cwd)}`);
 	}
 
+	/** Active runs across the caller's threads. */
+	async listRuns(): Promise<RunListResponse> {
+		return await this.get("/api/runs");
+	}
+
 	async listWorkspaces(): Promise<WorkspacesResponse> {
 		return await this.get("/api/workspaces");
 	}
@@ -117,8 +123,11 @@ export class RelayClient {
 		return await this.delete(`/api/workspaces?cwd=${encodeURIComponent(cwd)}`);
 	}
 
-	async createSession(cwd: string): Promise<CreateSessionResponse> {
-		return await this.post("/api/sessions", { cwd } satisfies CreateSessionRequest);
+	async createSession(cwd: string, options: { forceNew?: boolean } = {}): Promise<CreateSessionResponse> {
+		return await this.post("/api/sessions", {
+			cwd,
+			...(options.forceNew ? { forceNew: true } : {}),
+		} satisfies CreateSessionRequest);
 	}
 
 	async openSession(id: string): Promise<OpenSessionResponse> {

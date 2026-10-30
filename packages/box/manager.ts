@@ -6,21 +6,13 @@ import { boxExecEnv } from "./env.ts";
 import { BoxError, toBoxError } from "./errors.ts";
 import { FileBoxStore, MANIFEST_VERSION, type BoxManifest, type SetupState } from "./manifest.ts";
 import { MicrosandboxRuntime } from "./microsandbox.ts";
-import {
-	acquireDataDirLock,
-	boxDir,
-	createBoxId,
-	dataDirHash,
-	ensureBoxDirs,
-	sandboxNameFor,
-	workspacePath,
-} from "./paths.ts";
+import { acquireDataDirLock, boxDir, createBoxId, dataDirHash, ensureBoxDirs, sandboxNameFor } from "./paths.ts";
 import { isPreparedBoxImage, PREPARED_BOX_IMAGE } from "./images.ts";
-import { profileRank, profileResources } from "./profiles.ts";
+import { clampBoxSettings, profileRank, profileResources } from "./profiles.ts";
 import { createWorkspaceBaseline, hasWorkspaceBaseline, syncWorkspace } from "./sync.ts";
-import { cleanupTempWorkspaces, prepareWorkspace } from "./workspace.ts";
+import { cleanupTempWorkspaces } from "./workspace.ts";
+import { projectWorkspaceRoot } from "./workspaces.ts";
 import type {
-	BoxAttachment,
 	BoxLease,
 	BoxManager,
 	BoxManagerConfig,
@@ -58,13 +50,34 @@ interface Resident {
 	stopping: boolean;
 }
 
+interface Grant {
+	boxId: string;
+	isNew: boolean;
+	/** True when the grant created the resident entry, so an abort must drop the reservation. */
+	removeOnAbort: boolean;
+}
+
+function sameEnv(left: Record<string, string> | undefined, right: Record<string, string> | undefined): boolean {
+	const a = left ?? {};
+	const b = right ?? {};
+	const keys = Object.keys(a);
+	if (keys.length !== Object.keys(b).length) return false;
+	return keys.every((key) => b[key] === a[key]);
+}
+
 interface PendingAcquire {
 	boxId: string;
 	spec: BoxSpec;
+	/** Normalized project settings, used when the candidate is taken and a fresh worker is needed. */
+	requestedSettings: BoxSettings;
 	resources: BoxResources;
+	ownerId: string;
+	projectCwd: string;
 	isNew: boolean;
+	legacy: boolean;
 	signal?: AbortSignal;
-	resolve: () => void;
+	lastQueuedPosition: number | null;
+	resolve: (grant: Grant) => void;
 	reject: (error: BoxError) => void;
 	timer: NodeJS.Timeout | null;
 	settled: boolean;
@@ -93,25 +106,37 @@ class Mutex {
 class Lease implements BoxLease {
 	private released = false;
 	private readonly manager: BoxManagerImpl;
+	private readonly projectCwd: string;
 	readonly boxId: string;
 	readonly status: BoxStatus;
 	readonly workspace: string;
+	readonly execPath: string;
 	readonly syncAvailable: boolean;
 
-	constructor(manager: BoxManagerImpl, status: BoxStatus, workspace: string) {
+	constructor(manager: BoxManagerImpl, status: BoxStatus, workspace: string, execPath: string, projectCwd: string) {
 		this.manager = manager;
 		this.boxId = status.boxId;
 		this.status = status;
 		this.workspace = workspace;
+		this.execPath = execPath;
+		this.projectCwd = projectCwd;
 		this.syncAvailable = hasWorkspaceBaseline(workspace);
 	}
 
 	sync(): Effect.Effect<BoxSyncResult, BoxError> {
-		return this.manager.sync(this.boxId);
+		if (!this.status.legacy) {
+			return Effect.fail(
+				new BoxError({ message: "This box is a pooled worker; sync the session workspace instead." }),
+			);
+		}
+		return Effect.tryPromise({
+			try: () => syncWorkspace(this.workspace, this.projectCwd),
+			catch: (error) => toBoxError(error, "Could not sync the box workspace"),
+		});
 	}
 
 	exec(command: string, options?: ExecOptions): Effect.Effect<ExecResult, BoxError> {
-		return this.manager.exec(this.boxId, command, options);
+		return this.manager.exec(this.boxId, command, { ...options, cwd: options?.cwd ?? this.execPath });
 	}
 
 	release(): Effect.Effect<void> {
@@ -183,6 +208,10 @@ export class DisabledBoxManager implements BoxManager {
 		return Effect.fail(new BoxError({ message: "Boxes are disabled (set RELAY_BOX=1 to enable)" }));
 	}
 
+	resolveImage(): Effect.Effect<string, BoxError> {
+		return Effect.fail(new BoxError({ message: "Boxes are disabled (set RELAY_BOX=1 to enable)" }));
+	}
+
 	gc(): Effect.Effect<GcResult, BoxError> {
 		return Effect.succeed({ removed: 0, trashed: 0, detached: 0 });
 	}
@@ -213,6 +242,7 @@ export class BoxManagerImpl implements BoxManager {
 	private sweeping = false;
 	private shuttingDown = false;
 	private pumpScheduled = false;
+	private queuePositionsScheduled = false;
 	private imageFallbackWarned = false;
 	private lastGcAt = 0;
 
@@ -304,6 +334,12 @@ export class BoxManagerImpl implements BoxManager {
 						throw new BoxError({ message: "Cannot detach a box while a run is using it" });
 					}
 					const manifest = this.requireManifest(boxId);
+					if (!manifest.legacy) {
+						throw new BoxError({
+							message:
+								"Pooled boxes are shared by project sessions; detach is only supported for legacy v2 boxes.",
+						});
+					}
 					if (!manifest.attachments.some((attachment) => attachment.sessionId === sessionId)) return;
 					const next: BoxManifest = {
 						...manifest,
@@ -363,6 +399,11 @@ export class BoxManagerImpl implements BoxManager {
 		return Effect.tryPromise({
 			try: async () => {
 				const manifest = this.requireManifest(boxId);
+				if (!manifest.legacy) {
+					throw new BoxError({
+						message: "This box is a pooled worker; sync the session workspace instead.",
+					});
+				}
 				return await syncWorkspace(manifest.workspacePath, manifest.projectCwd);
 			},
 			catch: (error) => toBoxError(error, "Could not sync box changes"),
@@ -431,75 +472,114 @@ export class BoxManagerImpl implements BoxManager {
 		const key = spec.sessionId ?? `standalone:${createBoxId()}`;
 		return await this.withSessionLock(key, async () => {
 			if (spec.signal?.aborted) throw new BoxError({ message: "Box acquisition was cancelled" });
-			let manifest = spec.sessionId ? this.manifestForSession(spec.sessionId) : null;
-			if (manifest && manifest.ownerId !== spec.ownerId) {
+			const legacy = spec.sessionId ? this.manifestForSession(spec.sessionId) : null;
+			if (legacy && legacy.ownerId !== spec.ownerId) {
 				throw new BoxError({ message: "This box belongs to a different user" });
 			}
-			const isNew = manifest === null;
-			const boxId = manifest?.boxId ?? this.nextBoxId();
-			const settings = this.normalizeSettings(manifest?.settings ?? spec.settings);
+			const isLegacy = legacy?.legacy === true;
+			let requestedSettings = this.normalizeSettings(spec.settings);
+			if (!isLegacy && requestedSettings.image === "auto") {
+				requestedSettings = { ...requestedSettings, image: await this.resolveImageValue() };
+			}
+			const candidate = isLegacy ? legacy : this.findFreeBox(spec.ownerId, spec.projectCwd, requestedSettings);
+			const settings = this.normalizeSettings(candidate?.settings ?? requestedSettings);
 			const resources = { cpus: settings.cpus, memoryMiB: settings.memoryMiB };
+			const boxId = candidate?.boxId ?? this.nextBoxId();
 
-			await this.waitForGrant({
+			const grant = await this.waitForGrant({
 				boxId,
 				spec: { ...spec, settings },
+				requestedSettings,
 				resources,
-				isNew,
+				ownerId: spec.ownerId,
+				projectCwd: spec.projectCwd,
+				isNew: candidate === null,
+				legacy: isLegacy,
 				...(spec.signal ? { signal: spec.signal } : {}),
 			});
 			if (spec.signal?.aborted) {
-				await this.releaseReservation(boxId, true);
+				await this.releaseReservation(grant.boxId, grant.removeOnAbort);
 				throw new BoxError({ message: "Box acquisition was cancelled" });
 			}
 
+			const grantedBoxId = grant.boxId;
 			try {
-				manifest = isNew
-					? await this.withBoxLock(boxId, () => this.createManifest(spec, boxId))
-					: this.requireManifest(boxId);
-				await this.withBoxLock(boxId, () => this.startBox(manifest as BoxManifest));
-				const status = await this.statusInternal(boxId);
-				if (!status) throw new BoxError({ message: `Box ${boxId} disappeared during startup` });
-				// Backfill a baseline for boxes created before sync support. This
-				// cannot recover changes made before this run, but it lets this and
-				// later runs sync cleanly instead of failing forever.
-				if (!hasWorkspaceBaseline(status.workspace)) {
+				let manifest = this.store.load(grantedBoxId);
+				if (!manifest) {
+					const created = grant.isNew ? requestedSettings : settings;
+					manifest = await this.withBoxLock(grantedBoxId, () =>
+						this.createManifest({ ...spec, settings: created }, grantedBoxId),
+					);
+				}
+				await this.withBoxLock(grantedBoxId, () => this.startBox(manifest as BoxManifest));
+				const status = await this.statusInternal(grantedBoxId);
+				if (!status) throw new BoxError({ message: `Box ${grantedBoxId} disappeared during startup` });
+				// Backfill a baseline for legacy boxes that predate sync support.
+				// Pooled v3 boxes carry no project workspace; the session manager
+				// creates and baselines the workspace instead.
+				if (manifest.legacy && !hasWorkspaceBaseline(status.workspace)) {
 					try {
 						if (await createWorkspaceBaseline(status.workspace)) {
 							console.warn(
-								`relay box: initialized a sync baseline for legacy box ${boxId}; ` +
+								`relay box: initialized a sync baseline for legacy box ${grantedBoxId}; ` +
 									"earlier changes remain in the box workspace",
 							);
 						}
 					} catch (error) {
 						console.warn(
-							`relay box: could not initialize sync for ${boxId}:`,
+							`relay box: could not initialize sync for ${grantedBoxId}:`,
 							error instanceof Error ? error.message : error,
 						);
 					}
 				}
-				return new Lease(this, status, status.workspace);
+				const workspace = manifest.legacy ? status.workspace : (spec.workspace ?? status.workspace);
+				const execPath = manifest.legacy ? "/workspace" : (spec.execPath ?? "/workspace");
+				return new Lease(this, status, workspace, execPath, spec.projectCwd);
 			} catch (error) {
-				const failed = this.store.load(boxId);
+				const failed = this.store.load(grantedBoxId);
 				if (failed) {
 					await this.runtime.stop(failed.sandboxName).catch(() => {});
 					this.store.write({ ...failed, state: "error", error: toBoxError(error).message });
 				}
-				await this.releaseReservation(boxId, true);
+				await this.releaseReservation(grantedBoxId, true);
 				throw toBoxError(error, "Could not start box");
 			}
 		});
 	}
 
+	/** A stopped or idle box for this project that can be leased again. */
+	private findFreeBox(ownerId: string, projectCwd: string, settings: BoxSettings): BoxManifest | null {
+		const workspace = projectWorkspaceRoot(this.config.workspaceRoot, ownerId, projectCwd);
+		let best: BoxManifest | null = null;
+		for (const manifest of this.store.list()) {
+			if (manifest.legacy) continue;
+			if (manifest.ownerId !== ownerId || manifest.projectCwd !== projectCwd) continue;
+			if (manifest.workspacePath !== workspace) continue;
+			if (manifest.settings.image !== settings.image) continue;
+			if (manifest.settings.maxProfile !== settings.maxProfile) continue;
+			if (manifest.settings.cpus !== settings.cpus || manifest.settings.memoryMiB !== settings.memoryMiB)
+				continue;
+			if (manifest.settings.rootDiskMiB !== settings.rootDiskMiB) continue;
+			if (!sameEnv(manifest.settings.env, settings.env)) continue;
+			if (manifest.state === "error" || manifest.setupState === "failed") continue;
+			const resident = this.resident.get(manifest.boxId);
+			if (resident && (resident.leases > 0 || resident.stopping || resident.state === "starting")) continue;
+			if (!best || manifest.lastUsedAt < best.lastUsedAt) best = manifest;
+		}
+		return best;
+	}
+
 	private async waitForGrant(
-		item: Omit<PendingAcquire, "resolve" | "reject" | "timer" | "settled" | "cleanup">,
-	): Promise<void> {
-		return await new Promise<void>((resolvePromise, rejectPromise) => {
+		item: Omit<PendingAcquire, "resolve" | "reject" | "timer" | "settled" | "cleanup" | "lastQueuedPosition">,
+	): Promise<Grant> {
+		return await new Promise<Grant>((resolvePromise, rejectPromise) => {
 			const pending: PendingAcquire = {
 				...item,
 				resolve: resolvePromise,
 				reject: rejectPromise,
 				timer: null,
 				settled: false,
+				lastQueuedPosition: null,
 				cleanup: () => {},
 			};
 			const cleanup = (): void => {
@@ -513,6 +593,8 @@ export class BoxManagerImpl implements BoxManager {
 				cleanup();
 				const index = this.queue.indexOf(pending);
 				if (index >= 0) this.queue.splice(index, 1);
+				this.publishQueuePositions();
+				this.schedulePump();
 				rejectPromise(error);
 			};
 			const onAbort = (): void => fail(new BoxError({ message: "Box acquisition was cancelled" }));
@@ -524,7 +606,29 @@ export class BoxManagerImpl implements BoxManager {
 			pending.timer.unref();
 			pending.signal?.addEventListener("abort", onAbort, { once: true });
 			this.queue.push(pending);
+			this.publishQueuePositions();
 			void this.pump();
+		});
+	}
+
+	/**
+	 * Publish 1-based queue positions after the queue changes. Deferred so a
+	 * request that is granted immediately never flickers through "queued", and
+	 * deduplicated so a request only hears about its position when it changes.
+	 */
+	private publishQueuePositions(): void {
+		if (this.queuePositionsScheduled) return;
+		this.queuePositionsScheduled = true;
+		setImmediate(() => {
+			this.queuePositionsScheduled = false;
+			for (let index = 0; index < this.queue.length; index++) {
+				const pending = this.queue[index];
+				if (!pending || pending.settled) continue;
+				const position = index + 1;
+				if (pending.lastQueuedPosition === position) continue;
+				pending.lastQueuedPosition = position;
+				pending.spec.onQueued?.(position);
+			}
 		});
 	}
 
@@ -538,7 +642,7 @@ export class BoxManagerImpl implements BoxManager {
 	}
 
 	private async pump(): Promise<void> {
-		const grants: PendingAcquire[] = [];
+		const grants: (Grant & { pending: PendingAcquire })[] = [];
 		const evictions: string[] = [];
 		await this.schedulerLock.run(() => {
 			if (this.shuttingDown) return;
@@ -549,18 +653,47 @@ export class BoxManagerImpl implements BoxManager {
 					this.queue.splice(index, 1);
 					continue;
 				}
-				const resident = this.resident.get(pending.boxId);
-				if (resident) {
-					if (resident.stopping) break;
-					if (resident.leases > 0) break;
-					resident.leases = 1;
-					resident.state = "busy";
-					resident.lastUsedAt = Date.now();
+				const exact = this.resident.get(pending.boxId);
+				if (exact && !exact.stopping && exact.state !== "starting" && exact.leases === 0) {
+					exact.leases = 1;
+					exact.state = "busy";
+					exact.lastUsedAt = Date.now();
 					this.queue.splice(index, 1);
-					grants.push(pending);
+					pending.isNew = false;
+					grants.push({ pending, boxId: exact.boxId, isNew: false, removeOnAbort: false });
 					continue;
 				}
-				if (!this.canFit(pending.resources)) {
+				if (pending.legacy) {
+					// A legacy box is session-affine. If it is resident but busy,
+					// wait for the lease to end; if it is stopped, the capacity path
+					// below starts it.
+					if (exact) break;
+				} else {
+					const free = this.findFreeResident(
+						pending.ownerId,
+						pending.projectCwd,
+						pending.boxId,
+						pending.requestedSettings,
+					);
+					if (free) {
+						free.leases = 1;
+						free.state = "busy";
+						free.lastUsedAt = Date.now();
+						this.queue.splice(index, 1);
+						pending.boxId = free.boxId;
+						pending.isNew = false;
+						grants.push({ pending, boxId: free.boxId, isNew: false, removeOnAbort: false });
+						continue;
+					}
+				}
+				// The candidate was re-used by another acquisition. Allocate a fresh
+				// worker instead of overwriting its resident entry; never grant one
+				// box to two leases.
+				const fresh = !pending.legacy && exact !== undefined;
+				const resources = fresh
+					? { cpus: pending.requestedSettings.cpus, memoryMiB: pending.requestedSettings.memoryMiB }
+					: pending.resources;
+				if (!this.canFit(resources)) {
 					const victim = this.pickVictim();
 					if (victim) {
 						victim.stopping = true;
@@ -569,6 +702,12 @@ export class BoxManagerImpl implements BoxManager {
 					// Preserve FIFO: a large request blocks later requests until the
 					// capacity situation changes.
 					break;
+				}
+				if (fresh) {
+					pending.boxId = this.nextBoxId();
+					pending.spec = { ...pending.spec, settings: pending.requestedSettings };
+					pending.resources = resources;
+					pending.isNew = true;
 				}
 				this.resident.set(pending.boxId, {
 					boxId: pending.boxId,
@@ -580,15 +719,43 @@ export class BoxManagerImpl implements BoxManager {
 					stopping: false,
 				});
 				this.queue.splice(index, 1);
-				grants.push(pending);
+				grants.push({ pending, boxId: pending.boxId, isNew: pending.isNew, removeOnAbort: true });
 			}
 		});
-		for (const pending of grants) {
+		for (const { pending, boxId, isNew, removeOnAbort } of grants) {
 			pending.settled = true;
 			pending.cleanup();
-			pending.resolve();
+			pending.resolve({ boxId, isNew, removeOnAbort });
 		}
+		this.publishQueuePositions();
 		for (const boxId of evictions) void this.evict(boxId);
+	}
+
+	/** An idle resident box for the same project that is not the request's first choice. */
+	private findFreeResident(
+		ownerId: string,
+		projectCwd: string,
+		excludeBoxId: string,
+		settings: BoxSettings,
+	): Resident | null {
+		const workspace = projectWorkspaceRoot(this.config.workspaceRoot, ownerId, projectCwd);
+		for (const resident of this.resident.values()) {
+			if (resident.boxId === excludeBoxId) continue;
+			if (resident.leases > 0 || resident.stopping || resident.state === "starting") continue;
+			const manifest = this.store.load(resident.boxId);
+			if (!manifest || manifest.legacy) continue;
+			if (manifest.state === "error" || manifest.setupState === "failed") continue;
+			if (manifest.ownerId !== ownerId || manifest.projectCwd !== projectCwd) continue;
+			if (manifest.workspacePath !== workspace) continue;
+			if (manifest.settings.image !== settings.image) continue;
+			if (manifest.settings.maxProfile !== settings.maxProfile) continue;
+			if (manifest.settings.cpus !== settings.cpus || manifest.settings.memoryMiB !== settings.memoryMiB)
+				continue;
+			if (manifest.settings.rootDiskMiB !== settings.rootDiskMiB) continue;
+			if (!sameEnv(manifest.settings.env, settings.env)) continue;
+			return resident;
+		}
+		return null;
 	}
 
 	private canFit(resources: BoxResources): boolean {
@@ -651,36 +818,38 @@ export class BoxManagerImpl implements BoxManager {
 			const resident = this.resident.get(boxId);
 			if (!resident) return;
 			resident.leases = Math.max(0, resident.leases - 1);
-			if (remove || resident.leases === 0) {
+			if (remove) {
 				this.resident.delete(boxId);
 				return;
 			}
-			resident.state = "ready";
-			resident.lastUsedAt = Date.now();
+			if (resident.leases === 0) {
+				resident.state = resident.pausedAt !== null ? "paused" : "ready";
+				resident.lastUsedAt = Date.now();
+			}
 		});
 		this.schedulePump();
 	}
 
 	private async createManifest(spec: BoxSpec, boxId: string): Promise<BoxManifest> {
 		const normalized = this.normalizeSettings(spec.settings);
-		const settings = normalized.image === "auto" ? { ...normalized, image: await this.resolveImage() } : normalized;
+		const settings =
+			normalized.image === "auto" ? { ...normalized, image: await this.resolveImageValue() } : normalized;
 		const dir = boxDir(this.config.dataDir, boxId);
-		const workspace = workspacePath(this.config.dataDir, boxId);
+		const workspace = projectWorkspaceRoot(this.config.workspaceRoot, spec.ownerId, spec.projectCwd);
 		if (isPathInside(spec.projectCwd, this.config.dataDir)) {
 			throw new BoxError({ message: "The project directory must not be inside the box data directory" });
 		}
+		if (isPathInside(this.config.workspaceRoot, spec.projectCwd)) {
+			throw new BoxError({ message: "The session workspace root must not be inside the project directory" });
+		}
 		ensureBoxDirs(this.config.dataDir, boxId);
 		cleanupTempWorkspaces(dir);
-		if (!existsSync(workspace)) {
-			await prepareWorkspace(spec.projectCwd, dir, workspace, settings.exclude);
-		}
+		mkdirSync(workspace, { recursive: true, mode: 0o700 });
 		const now = new Date().toISOString();
-		const attachments: BoxAttachment[] = spec.sessionId ? [{ sessionId: spec.sessionId, attachedAt: now }] : [];
 		const manifest: BoxManifest = {
 			version: MANIFEST_VERSION,
 			boxId,
-			...(spec.sessionId ? { originSessionId: spec.sessionId } : {}),
-			attachments,
+			attachments: [],
 			ownerId: spec.ownerId,
 			projectCwd: spec.projectCwd,
 			workspacePath: workspace,
@@ -701,13 +870,19 @@ export class BoxManagerImpl implements BoxManager {
 	private async startBox(initial: BoxManifest): Promise<BoxManifest> {
 		let manifest = initial;
 		if (manifest.settings.image === "auto") {
-			manifest = { ...manifest, settings: { ...manifest.settings, image: await this.resolveImage() } };
+			manifest = { ...manifest, settings: { ...manifest.settings, image: await this.resolveImageValue() } };
 			this.store.write(manifest);
 		}
 		if (!existsSync(manifest.workspacePath)) {
-			const failed = this.withState(manifest, "error", "Box workspace is missing");
-			this.store.write(failed);
-			throw new BoxError({ message: `Box workspace is missing: ${manifest.workspacePath}` });
+			if (manifest.legacy) {
+				const failed = this.withState(manifest, "error", "Box workspace is missing");
+				this.store.write(failed);
+				throw new BoxError({ message: `Box workspace is missing: ${manifest.workspacePath}` });
+			}
+			// Pooled boxes mount a project workspace root that can be removed
+			// once every session in the project is gone. Recreate the empty root;
+			// the session workspace is materialized by the run path.
+			mkdirSync(manifest.workspacePath, { recursive: true, mode: 0o700 });
 		}
 
 		const before = await this.runtime.status(manifest.sandboxName);
@@ -767,7 +942,10 @@ export class BoxManagerImpl implements BoxManager {
 			}
 		}
 
-		if (manifest.setupState !== "ok" && manifest.settings.setup) {
+		// Pooled v3 boxes mount a project workspace root, not a single project.
+		// Project setup/resume hooks are session-workspace work; only legacy v2
+		// boxes run them inside the box clone.
+		if (manifest.legacy && manifest.setupState !== "ok" && manifest.settings.setup) {
 			const setupState = await this.runHook(manifest, "setup", manifest.settings.setup, true);
 			manifest = { ...manifest, setupState };
 			this.store.write(manifest);
@@ -777,7 +955,13 @@ export class BoxManagerImpl implements BoxManager {
 				throw new BoxError({ message: "Box setup failed; see logs/setup.log" });
 			}
 		}
-		if (manifest.setupState === "pending" && !manifest.settings.setup) {
+		if (manifest.setupState === "pending" && (!manifest.legacy || !manifest.settings.setup)) {
+			if (manifest.settings.setup && !manifest.legacy) {
+				console.warn(
+					`relay box: project setup hooks are ignored for pooled box ${manifest.boxId}; ` +
+						"run setup in the session workspace or use a legacy box.",
+				);
+			}
 			manifest = { ...manifest, setupState: "ok" };
 		}
 		if (manifest.setupState === "failed") {
@@ -786,7 +970,7 @@ export class BoxManagerImpl implements BoxManager {
 			throw new BoxError({ message: "Box setup failed; see logs/setup.log" });
 		}
 
-		if (coldStart && manifest.settings.resume) {
+		if (coldStart && manifest.legacy && manifest.settings.resume) {
 			await this.runHook(manifest, "resume", manifest.settings.resume, false);
 		}
 
@@ -871,6 +1055,7 @@ export class BoxManagerImpl implements BoxManager {
 		return {
 			maxRunning: this.config.maxRunning,
 			running: this.resident.size,
+			queued: this.queue.length,
 			maxCpus: this.config.maxCpus,
 			usedCpus,
 			maxMemoryMiB: this.config.maxMemoryMiB,
@@ -900,6 +1085,7 @@ export class BoxManagerImpl implements BoxManager {
 		return {
 			boxId: manifest.boxId,
 			ownerId: manifest.ownerId,
+			...(manifest.legacy ? { legacy: true } : {}),
 			...(manifest.originSessionId ? { originSessionId: manifest.originSessionId } : {}),
 			attachments: manifest.attachments,
 			projectCwd: manifest.projectCwd,
@@ -1346,33 +1532,33 @@ export class BoxManagerImpl implements BoxManager {
 	private nextBoxId(): string {
 		for (;;) {
 			const boxId = createBoxId();
-			if (!this.store.load(boxId) && !existsSync(boxDir(this.config.dataDir, boxId))) return boxId;
+			if (
+				!this.store.load(boxId) &&
+				!this.resident.has(boxId) &&
+				!existsSync(boxDir(this.config.dataDir, boxId))
+			) {
+				return boxId;
+			}
 		}
 	}
 
 	/** Clamp a requested profile and its exact overrides to the server ceiling. */
 	private normalizeSettings(settings: BoxSettings): BoxSettings {
-		const maxProfile =
-			profileRank(settings.maxProfile) > profileRank(this.config.maxProfile)
-				? this.config.maxProfile
-				: settings.maxProfile;
-		const profile = profileRank(settings.profile) > profileRank(maxProfile) ? maxProfile : settings.profile;
-		const resources = profileResources(maxProfile);
-		return {
-			...settings,
-			profile,
-			maxProfile,
-			cpus: Math.min(settings.cpus, resources.cpus),
-			memoryMiB: Math.min(settings.memoryMiB, resources.memoryMiB),
-			rootDiskMiB: Math.min(settings.rootDiskMiB, resources.rootDiskMiB),
-		};
+		return clampBoxSettings(settings, this.config.maxProfile);
 	}
 
 	/**
 	 * Pick the prepared tool image when it is loaded, otherwise the plain Node
 	 * image. `RELAY_BOX_IMAGE` bypasses this by setting a concrete reference.
 	 */
-	private async resolveImage(): Promise<string> {
+	resolveImage(): Effect.Effect<string, BoxError> {
+		return Effect.tryPromise({
+			try: () => this.resolveImageValue(),
+			catch: (error) => toBoxError(error, "Could not resolve the box image"),
+		});
+	}
+
+	private async resolveImageValue(): Promise<string> {
 		try {
 			const images = await this.runtime.listImages();
 			if (images.includes(PREPARED_BOX_IMAGE)) return PREPARED_BOX_IMAGE;
@@ -1437,6 +1623,11 @@ export class BoxManagerImpl implements BoxManager {
 	}
 
 	private async attachInternal(manifest: BoxManifest, sessionId: string): Promise<void> {
+		if (!manifest.legacy) {
+			throw new BoxError({
+				message: "Pooled boxes are shared by project sessions; attach is only supported for legacy v2 boxes.",
+			});
+		}
 		if (manifest.attachments.some((attachment) => attachment.sessionId === sessionId)) return;
 		const next: BoxManifest = {
 			...manifest,

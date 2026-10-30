@@ -58,6 +58,8 @@ export interface ServerConfig {
 	workspaceRoots: string[];
 	/** Maximum persisted sessions kept per owner and workspace. `0` = unlimited. */
 	maxSessionsPerWorkspace: number;
+	/** Commit session-workspace changes to per-thread branches instead of the checkout. */
+	threadBranches: boolean;
 	/** Allowed GitHub logins or numeric ids (empty = allow any). */
 	allowedGithub: string[];
 	/** Backend storing per-user API keys: local files (default) or the database. */
@@ -143,8 +145,11 @@ function boxProfileEnv(value: string | undefined, fallback: BoxProfile, name: st
 }
 
 function boxConfigFromEnv(env: Record<string, string | undefined>): BoxManagerConfig {
-	const dataDir = expandHomePath(env.RELAY_BOX_DATA_DIR ?? join(relayDir(), "boxes"));
-	const cacheDir = expandHomePath(env.RELAY_BOX_CACHE_DIR ?? join(relayDir(), "box-cache"));
+	const dataDir = expandHomePath(envValue(env, "RELAY_BOX_DATA_DIR") ?? join(relayDir(), "boxes"));
+	const cacheDir = expandHomePath(envValue(env, "RELAY_BOX_CACHE_DIR") ?? join(relayDir(), "box-cache"));
+	const workspaceRoot = expandHomePath(
+		envValue(env, "RELAY_SESSION_WORKSPACE_ROOT") ?? join(relayDir(), "workspaces"),
+	);
 	const setup = env.RELAY_BOX_SETUP?.trim();
 	const resume = env.RELAY_BOX_RESUME?.trim();
 	// `small` is the default ceiling so every selectable profile fits the
@@ -168,6 +173,7 @@ function boxConfigFromEnv(env: Record<string, string | undefined>): BoxManagerCo
 		enabled: booleanEnv(env.RELAY_BOX, true, "RELAY_BOX"),
 		dataDir,
 		cacheDir,
+		workspaceRoot,
 		maxRunning: positiveInt(env.RELAY_BOX_MAX_RUNNING, 4, "RELAY_BOX_MAX_RUNNING", 64),
 		maxCpus: positiveInt(env.RELAY_BOX_MAX_CPUS, 8, "RELAY_BOX_MAX_CPUS", 64),
 		maxMemoryMiB: positiveInt(env.RELAY_BOX_MEMORY_BUDGET_MIB, 6144, "RELAY_BOX_MEMORY_BUDGET_MIB", 1_048_576),
@@ -386,6 +392,7 @@ export function serverConfigFromEnv(env: Record<string, string | undefined> = { 
 			"RELAY_MAX_SESSIONS_PER_WORKSPACE",
 			10_000,
 		),
+		threadBranches: booleanEnv(env.RELAY_THREAD_BRANCHES, true, "RELAY_THREAD_BRANCHES"),
 		allowedGithub,
 		settingsStore,
 		dataDir,

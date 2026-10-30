@@ -503,6 +503,11 @@ body {
 	white-space: nowrap;
 }
 
+.session-running {
+	color: var(--relay-success, #a8b0a8);
+	margin-right: 0.25rem;
+}
+
 .session-time {
 	color: var(--relay-text-faint, #606060);
 	font-size: 0.75rem;

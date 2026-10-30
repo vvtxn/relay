@@ -12,6 +12,7 @@ agent/
 ├── server.ts             # Background-server supervisor (ensureServer/stop/status) + auth + API-key gates
 ├── open.ts               # openBrowser(url) helper
 ├── workspace.ts          # relay workspace add|list|remove (register without the TUI)
+├── threads.ts            # relay threads / relay attach (multi-client discovery)
 ├── fonts.ts              # relay fonts install|status|path (shared font for the terminal)
 ├── app.tsx               # App component, signals, SSE event folding, command palettes
 ├── client.ts             # RelayClient singleton (server URL from config/env)
@@ -95,24 +96,38 @@ Edit/write tool results arrive with a unified diff on `UIToolCall.diff` (live fr
 
 ### Boot Flow
 
-`index.ts` parses `-c`/`--continue` and `--workspace <path>` (the default command's flags), ensures a server exists
-(see above), then sets `RELAY_SERVER_URL` before importing `app.tsx`. It then checks `/api/me` (using the token handed
-over by a browser login in `~/.relay/session.json`). Local mode resolves the local identity without a token, so this
-passes immediately; GitHub mode opens the web client and waits for the sign-in to complete (`ensureAuthenticated`).
+`index.ts` parses `-c`/`--continue`, `--workspace <path>`, and `--session <id>` (the default command's flags),
+ensures a server exists (see above), then sets `RELAY_SERVER_URL` before importing `app.tsx`. `relay attach <id>` is
+the explicit form: it opens the session, scopes the TUI to its canonical cwd, and sets `RELAY_CLI_SESSION`. It then
+checks `/api/me` (using the token handed over by a browser login in `~/.relay/session.json`). Local mode resolves the
+local identity without a token, so this passes immediately; GitHub mode opens the web client and waits for the sign-in
+to complete (`ensureAuthenticated`).
 `--workspace` is validated and registered server-side at this point; the server's
 canonical path becomes `RELAY_CLI_WORKSPACE`. It then checks `/api/settings` — if no LLM API key is configured it opens
 the web Settings page and waits (`ensureApiKey`), so the TUI never starts in an unusable state. `bootstrap()` then
 health-checks the server, fetches `/api/me` + `/api/config`, and resolves the initial session for the effective
-workspace (`config.ts` `workspaceCwd()`): `--continue` resumes the most recent thread, otherwise a session is created
-(the server reuses an idle empty one, so repeated launches do not pile up blank threads).
-`Root` renders `BootScreen` (loading) or `BootError` (friendly failure) and mounts `App` only once a user, session, and
-server info exist. `info.webUrl` powers the "Open in Browser" command.
+workspace (`config.ts` `workspaceCwd()`): an explicit `--session`/`relay attach` target wins, `--continue` resumes the
+most recent thread, otherwise a session is created (the server reuses an idle empty one, so repeated launches do not
+pile up blank threads). `Root` renders `BootScreen` (loading) or `BootError` (friendly failure) and mounts `App` only
+once a user, session, and server info exist. `info.webUrl` powers the "Open in Browser" command.
+
+### Multi-client operation
+
+Relay is designed for several CLI processes attached to one background server. `relay threads [--all]` lists
+workspace threads with their run phase and queue position; `relay attach <id>` opens one. Runs continue on the server
+when a CLI exits, and another client can attach or watch the same thread. Nodes in the session state now include the
+server run phase, box id, and queue position, so the status line can show `Preparing workspace`, `Waiting for box`,
+`Starting box`, `Running`, or `Syncing`. Multiple viewers are safe: the server keeps a stable live handle for an
+active run and does not reset tokens/cost when another client subscribes. Attached sessions report their
+`threadBranch` (`relay/thread/<id>`) when thread branches are enabled; the status bar shows that branch, and the
+work is committed there instead of the checkout.
 
 ### Workspace scoping
 
-The TUI is scoped to one workspace for its lifetime: the launch directory, or the `--workspace` target. Session
-creation, "New Chat", and the `/threads` palette all use that cwd, so a terminal in a project only ever shows that
-project's threads. `relay web` opens the browser at the same workspace's route (`/w/<token>` from the shared
+The TUI is scoped to one workspace for its lifetime: the launch directory, the `--workspace` target, or the cwd of an
+explicitly attached session. Session creation, "New Chat", and the `/threads` palette all use that cwd, so a terminal
+in a project only ever shows that project's threads. Multiple CLI processes may attach to different threads of the
+same workspace; each keeps its own draft and stream. `relay web` opens the browser at the same workspace's route (`/w/<token>` from the shared
 `workspace-token.ts` encoder); `relay workspace add|list|remove` manages registrations separately, and `remove` hides
 (tombstones) a workspace without deleting its sessions.
 
@@ -172,6 +187,10 @@ pnpm relay           # cloud mode (primary): Turso + GitHub
 pnpm relay:local     # local self-host: SQLite + local auth
 pnpm relay -c        # ...resuming the most recent thread for the directory
 pnpm relay --workspace ~/Code/foo  # ...scoped to another registered directory
+pnpm relay threads                   # list threads, run phases, and box queue state
+pnpm relay threads --all             # ...across every registered workspace
+pnpm relay attach <sessionId>        # open the TUI on an existing thread
+pnpm relay --session <sessionId>     # ...same, as a default-command flag
 pnpm relay web       # open the cloud browser client at the current workspace
 pnpm relay:local web # open the local browser client
 pnpm relay stop      # stop the cloud background server
@@ -182,12 +201,13 @@ pnpm relay workspace list            # list registered workspaces
 pnpm relay fonts status  # check whether the shared font is installed
 ```
 
-`scripts/relay.ts` decides the entrypoint: subcommands (`serve`, `web`, `stop`, `status`, `workspace`, `fonts`,
-`version`) run `packages/cli/agent/index.ts` straight from source under Node's native TypeScript support, while the TUI
-command packs `packages/cli` (`vp pack`, JSX needs compilation) and runs `packages/cli/dist/index.mjs`. Commands that
-serve the app (`relay`, `relay web`, `relay serve`) also build the bundled web app first; lifecycle-only commands skip
-both builds. Both paths use the same commands: `relay [-c|--workspace]`, `relay web`, `relay serve`, `relay stop`,
-`relay status`, `relay workspace add|list|remove`, `relay fonts`.
+`scripts/relay.ts` decides the entrypoint: source-safe subcommands (`serve`, `web`, `stop`, `status`, `workspace`,
+`fonts`, `threads`, `version`) run `packages/cli/agent/index.ts` straight from source under Node's native TypeScript
+support, while the TUI and `attach` commands pack `packages/cli` (`vp pack`, JSX needs compilation) and run
+`packages/cli/dist/index.mjs`. Commands that serve the app (`relay`, `relay web`, `relay serve`) also build the bundled
+web app first; lifecycle-only commands skip both builds. Both paths use the same commands: `relay [-c|--workspace]`,
+`relay web`, `relay serve`, `relay stop`, `relay status`, `relay workspace add|list|remove`, `relay fonts`,
+`relay threads`, `relay attach`.
 
 ## Task Completion Checklist
 

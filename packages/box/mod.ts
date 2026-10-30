@@ -7,6 +7,7 @@ export { parseProjectConfig, readProjectConfig, resolveBoxSettings, resolveProje
 export {
 	BOX_PROFILES,
 	BOX_PROFILE_ORDER,
+	clampBoxSettings,
 	isBoxProfile,
 	profileForResources,
 	profileForSettings,

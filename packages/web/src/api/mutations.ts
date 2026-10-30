@@ -1,6 +1,7 @@
 import { runApi } from "./runtime.ts";
 
-export const createSession = (cwd: string) => runApi((api) => api.createSession(cwd));
+export const createSession = (cwd: string, options?: { forceNew?: boolean }) =>
+	runApi((api) => api.createSession(cwd, options));
 
 export const validateWorkspace = (cwd: string) => runApi((api) => api.validateWorkspace(cwd));
 

@@ -84,7 +84,7 @@ export function WorkspacePage() {
 
 	const [createError, setCreateError] = createSignal("");
 	const create = useMutation(() => ({
-		mutationFn: () => startChat(cwd() ?? ""),
+		mutationFn: () => startChat(cwd() ?? "", { forceNew: true }),
 		onSuccess: (id) => void navigate({ to: "/s/$sessionId", params: { sessionId: id } }),
 		onError: (error) => setCreateError(errorMessage(error)),
 	}));

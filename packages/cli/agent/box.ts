@@ -12,13 +12,13 @@ function usage(): void {
 	console.log(
 		[
 			"Usage:",
-			"  relay box new [path] [tiny|small|medium]",
+			"  relay box new [path] [tiny|small|medium]  # create a pooled worker",
 			"  relay box list",
 			"  relay box pause|resume|stop <boxId>",
-			"  relay box sync <boxId>",
+			"  relay box sync <boxId>                  # legacy v2 boxes only",
 			"  relay box resize <boxId> <tiny|small|medium>",
-			"  relay box attach <boxId> <sessionId>",
-			"  relay box detach <boxId> <sessionId>",
+			"  relay box attach <boxId> <sessionId>    # legacy v2 boxes only",
+			"  relay box detach <boxId> <sessionId>    # legacy v2 boxes only",
 			"  relay box rm <boxId>",
 		].join("\n"),
 	);

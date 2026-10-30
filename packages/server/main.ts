@@ -89,6 +89,7 @@ export async function startServer(): Promise<void> {
 				`Boxes: enabled (${image}, ${config.box.defaults.profile} default, ` +
 					`max ${config.box.maxRunning} running, ${config.box.maxMemoryMiB} MiB budget)`,
 			);
+			console.log(`Session workspaces: ${config.box.workspaceRoot}`);
 		} catch (error) {
 			console.error(
 				"Box reconcile failed:",
@@ -171,6 +172,16 @@ export async function startServer(): Promise<void> {
 		} catch (error) {
 			console.error("Box GC failed:", error instanceof Error ? error.message : error);
 		}
+	}
+
+	// Remove session workspaces whose session no longer exists. Runs are not
+	// active yet, so every persisted session is safe.
+	try {
+		const active = await Effect.runPromise(services.sessionStore.allSessionIds());
+		const removed = await Effect.runPromise(services.workspaces.gc(active));
+		if (removed > 0) console.log(`Workspace GC: removed ${removed} orphaned session workspace(s).`);
+	} catch (error) {
+		console.error("Workspace GC failed:", error instanceof Error ? error.message : error);
 	}
 
 	const app = createAppLayer(services);

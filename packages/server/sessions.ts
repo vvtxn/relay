@@ -2,6 +2,7 @@ import { Effect } from "effect";
 import type { HttpServerRequest, HttpServerResponse } from "effect/http";
 import { resolve } from "node:path";
 import { realpath, stat } from "node:fs/promises";
+import { threadBranchName } from "@vvtxn/box/workspaces.ts";
 import { getGitBranch, validateWorkspacePath } from "@vvtxn/relay/core/workspace.ts";
 import { attempt, type StoreError } from "@vvtxn/relay/core/effect.ts";
 import { homeDir } from "@vvtxn/relay/core/paths.ts";
@@ -12,6 +13,7 @@ import type {
 	CreateSessionResponse,
 	MeResponse,
 	OpenSessionResponse,
+	RunListResponse,
 	SendMessageRequest,
 	SendMessageResponse,
 	SessionListResponse,
@@ -33,10 +35,18 @@ export function openSessionHandle(
 	services: RequestServices,
 	sessionId: string,
 ): Effect.Effect<SessionHandle, NotFoundError> {
+	// The live handle is authoritative while a run is active (and for empty
+	// sessions that have not been persisted yet). Opening a fresh handle from
+	// the store here would swap the run's handle and reset unflushed counters.
+	const live = services.runs.getHandle(sessionId, services.user.id);
+	if (live && (services.runs.isRunning(sessionId) || live.getEntries().length === 0)) {
+		return Effect.succeed(live);
+	}
 	return services.sessionStore.open(sessionId, services.user.id).pipe(
 		Effect.catchCause(() => {
-			const handle = services.runs.getHandle(sessionId, services.user.id);
-			if (handle && handle.getEntries().length === 0) return Effect.succeed(handle);
+			if (live && (services.runs.isRunning(sessionId) || live.getEntries().length === 0)) {
+				return Effect.succeed(live);
+			}
 			return Effect.fail(new NotFoundError(`Session not found: ${sessionId}`));
 		}),
 	);
@@ -97,8 +107,21 @@ export function handleListSessions(
 	return Effect.gen(function* () {
 		const cwd = yield* resolveCwd(services, requestUrl(request));
 		const sessions = yield* services.sessionStore.listSummaries({ ownerId: services.user.id, cwd });
-		return json({ sessions } satisfies SessionListResponse);
+		const runs = services.runs.listActive(services.user.id);
+		const bySession = new Map(runs.map((run) => [run.sessionId, run]));
+		return json({
+			sessions: sessions.map((session) => {
+				const run = bySession.get(session.id) ?? bySession.get(session.reference);
+				if (!run) return session;
+				return { ...session, running: true, runPhase: run.phase };
+			}),
+		} satisfies SessionListResponse);
 	});
+}
+
+/** Active runs for the workspace picker and `relay threads`. */
+export function handleListRuns(services: RequestServices): Effect.Effect<HttpServerResponse.HttpServerResponse> {
+	return Effect.succeed(json({ runs: services.runs.listActive(services.user.id) } satisfies RunListResponse));
 }
 
 /** Distinct workspaces for the user's workspace picker. */
@@ -138,7 +161,7 @@ export function handleCreateSession(
 	request: HttpServerRequest.HttpServerRequest,
 ): Effect.Effect<HttpServerResponse.HttpServerResponse, BadRequestError | ForbiddenError> {
 	return Effect.gen(function* () {
-		const body = yield* readJsonBody<CreateSessionRequest>(request);
+		const body = (yield* readJsonBody<CreateSessionRequest>(request)) ?? ({} as CreateSessionRequest);
 		const raw = typeof body.cwd === "string" && body.cwd.trim() ? body.cwd : services.config.defaultCwd;
 		const validation = yield* attempt(() => validateWorkspacePath(raw, services.config.workspaceRoots));
 		if (!validation.ok) {
@@ -154,8 +177,9 @@ export function handleCreateSession(
 		// Reuse an idle, never-used session instead of piling up blank ones: the
 		// session is not persisted until its first message, so this check is in
 		// memory. Repeated "New chat" clicks and `relay` launches land on the same
-		// blank thread until something is sent.
-		const empty = services.runs.findIdleEmpty(services.user.id, validation.path);
+		// blank thread until something is sent. `forceNew` is for clients that
+		// specifically want a separate blank thread (multiple CLI instances).
+		const empty = body.forceNew === true ? null : services.runs.findIdleEmpty(services.user.id, validation.path);
 		const handle = empty ?? services.sessionStore.create(scope);
 		services.runs.attachHandle(handle.getHeader().id, handle, services.user.id);
 		return json({ id: handle.getHeader().id, header: handle.getHeader() } satisfies CreateSessionResponse, 201);
@@ -169,18 +193,33 @@ export function handleOpenSession(
 	return Effect.gen(function* () {
 		const handle = yield* openSessionHandle(services, sessionId);
 		services.runs.attachHandle(sessionId, handle, services.user.id);
-		const box = yield* services.boxes.findBySession(sessionId).pipe(Effect.catchCause(() => Effect.succeed(null)));
-		const branch = yield* attempt(() => getGitBranch(box?.workspace ?? handle.getHeader().cwd)).pipe(
+		const activeBoxId = services.runs.getActiveBoxId(sessionId);
+		const box = yield* (
+			activeBoxId ? services.boxes.status(activeBoxId) : services.boxes.findBySession(sessionId)
+		).pipe(Effect.catchCause(() => Effect.succeed(null)));
+		const projectCwd = handle.getHeader().cwd;
+		const workspace = services.workspaces.find({
+			sessionId,
+			ownerId: services.user.id,
+			projectCwd,
+		});
+		const branchRoot = box?.legacy ? box.workspace : (workspace?.hostPath ?? box?.workspace ?? projectCwd);
+		const branch = yield* attempt(() => getGitBranch(branchRoot)).pipe(
 			Effect.catchCause(() => Effect.succeed(null)),
 		);
 
+		const runPhase = services.runs.getRunPhase(sessionId);
+		const threadBranch =
+			services.config.threadBranches && services.boxes.enabled && box?.legacy !== true && branch !== null;
 		return json({
 			header: handle.getHeader(),
 			entries: handle.getEntries(),
 			tokens: handle.getTokens(),
 			cost: handle.getCost(),
 			branch,
-			running: services.runs.isRunning(sessionId),
+			...(threadBranch ? { threadBranch: threadBranchName(sessionId) } : {}),
+			running: runPhase !== null,
+			...(runPhase ? { runPhase } : {}),
 			...(box ? { box: boxSummary(box) } : {}),
 		} satisfies OpenSessionResponse);
 	});

@@ -167,14 +167,15 @@ function boxSection(box: BuildSystemPromptOptions["box"]): string {
 	if (!box) return "";
 	return `## Box
 
-You are working inside an isolated box with its own copy of the project. Bash and services run in the box.
-Successful runs sync the box changes back to the project checkout; use \`box\` with action \`sync\` to apply a
-verified change earlier.
+You are working in a durable session workspace. File tools edit it directly; bash and browser tools lease a managed
+box that mounts the workspace, and sandbox tool calls reuse one box for the run.
+Successful runs commit the workspace changes to the session's thread branch (or sync them to the project checkout
+when thread branches are disabled); use \`box\` with action \`sync\` to commit a verified change earlier.
 
-- Current profile: **${box.profile}** (${box.cpus} vCPU, ${box.memoryMiB} MiB RAM). The highest allowed profile is ${box.maxProfile}.
+- Requested profile: **${box.profile}** (${box.cpus} vCPU, ${box.memoryMiB} MiB RAM). The highest allowed profile is ${box.maxProfile}.
 - Start small. Use the \`box\` tool to inspect the current size and to resize before heavy work.
 - Before Playwright/browser tests, large builds, or running several services, resize to \`small\` or \`medium\`.
-- Do not import \`microsandbox\` or create your own sandbox. This run already has a managed box; use its tools.
+- Do not import \`microsandbox\` or create your own sandbox. The runtime manages the box; use its tools.
 - Resize back down when heavy work is finished; other boxes share the host budget.${
 		box.playwright
 			? "\n- The prepared box includes Playwright + Chromium; use the `browser` tool for web/UI checks instead of installing browsers."
@@ -191,9 +192,10 @@ verified change earlier.
 function safetySection(box: BuildSystemPromptOptions["box"], host: boolean | undefined): string {
 	if (!box && !host) return "";
 	const location = box
-		? `You are working inside an isolated box with a copy of the project. Inside the box you may delete files,
-rewrite history, install packages, and run services without asking. Completed runs sync those changes to the project
-checkout.`
+		? `You are working in a durable session workspace whose bash and services run in an isolated box. Inside that
+workspace and box you may delete files, rewrite history, install packages, and run services without asking.
+Completed runs persist those changes to the session's thread branch (or the project checkout when thread branches
+are disabled).`
 		: `You are working directly on the host with no sandbox. Treat every command as potentially destructive.`;
 	const ask = box
 		? `Ask before actions that leave the box or are hard to undo, unless the user explicitly requested that exact

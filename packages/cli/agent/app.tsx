@@ -17,7 +17,7 @@ import { type CommandPaletteItem, useCommandPalette } from "#/tui/render/hooks/c
 import { inputManager } from "#/tui/core/input.ts";
 import { useProjectFiles } from "./hooks/project-files.ts";
 import { getClient, serverUrl } from "./client.ts";
-import { resumeRequested, workspaceCwd } from "./config.ts";
+import { requestedSession, resumeRequested, workspaceCwd } from "./config.ts";
 import { openBrowser } from "./open.ts";
 import { theme } from "#/tui/theme.ts";
 import { VERSION } from "../version.ts";
@@ -60,7 +60,18 @@ const COMMANDS: CommandPaletteItem[] = [
 
 type AgentStatus = SessionStatus;
 
-function formatStatus(status: AgentStatus): string {
+function formatStatus(state: SessionStreamState): string {
+	switch (state.phase) {
+		case "preparing-workspace":
+			return "Preparing workspace...";
+		case "queued":
+			return state.queuePosition !== null ? `Waiting for box (#${state.queuePosition})...` : "Waiting for box...";
+		case "starting-box":
+			return "Starting box...";
+		case "syncing":
+			return "Syncing changes...";
+	}
+	const status: AgentStatus = state.status;
 	switch (status.kind) {
 		case "idle":
 			return "Ready";
@@ -150,16 +161,25 @@ function App({ onQuit, initialSessionId, info }: AppProps) {
 		try {
 			const response = await getClient().openSession(id);
 			if (sessionId.value !== id) return;
+			const running = response.running;
+			const live = sync.value.pending;
 			sync.value.pending = {
-				...sync.value.pending,
+				...live,
 				messages: entriesToUIMessages(response.entries),
-				draftText: "",
-				draftToolCalls: [],
-				toolCallIndex: {},
-				cost: response.cost,
+				// The SSE `run_state` snapshot may have arrived first. Keep its
+				// draft and queue state when attaching to an active run; only reset
+				// them once the run has actually finished.
+				...(running ? {} : { draftText: "", draftToolCalls: [], toolCallIndex: {} }),
+				running,
+				phase: running ? (live.phase ?? response.runPhase ?? "running") : null,
+				runId: running ? live.runId : null,
+				boxId: running ? (live.boxId ?? response.box?.boxId ?? null) : null,
+				queuePosition: running ? live.queuePosition : null,
+				status: running ? (live.status.kind === "idle" ? { kind: "thinking" } : live.status) : { kind: "idle" },
+				cost: running ? Math.max(live.cost, response.cost) : response.cost,
 			};
 			syncStream(true);
-			branchName.value = response.branch;
+			branchName.value = response.threadBranch ?? response.branch;
 			boxLabel.value = response.box
 				? `${response.box.image.replace(/^localhost\//, "")} · ${response.box.state}`
 				: "";
@@ -257,6 +277,8 @@ function App({ onQuit, initialSessionId, info }: AppProps) {
 			...sync.value.pending,
 			messages: [...sync.value.pending.messages, { role: "user", content: value }],
 			running: true,
+			phase: "preparing-workspace",
+			queuePosition: null,
 			status: { kind: "thinking" },
 		};
 		syncStream(true);
@@ -269,7 +291,15 @@ function App({ onQuit, initialSessionId, info }: AppProps) {
 			try {
 				await getClient().sendMessage(id, value);
 			} catch (error) {
-				sync.value.pending = { ...sync.value.pending, running: false, status: { kind: "idle" } };
+				sync.value.pending = {
+					...sync.value.pending,
+					running: false,
+					phase: null,
+					runId: null,
+					boxId: null,
+					queuePosition: null,
+					status: { kind: "idle" },
+				};
 				syncStream(true);
 				showError(error instanceof Error ? error.message : String(error));
 			}
@@ -290,7 +320,7 @@ function App({ onQuit, initialSessionId, info }: AppProps) {
 	const startNewChat = async () => {
 		closeDiffViewer();
 		try {
-			const response = await getClient().createSession(workspaceCwd());
+			const response = await getClient().createSession(workspaceCwd(), { forceNew: true });
 			sessionId.value = response.id;
 			sync.value.pending = resetSessionStreamState();
 			syncStream(true);
@@ -315,7 +345,8 @@ function App({ onQuit, initialSessionId, info }: AppProps) {
 		openKey: null,
 		maxResults: 20,
 		onSelect: (item) => {
-			if (stream.value.running) return;
+			// Switching does not stop the old run: it continues on the server and
+			// stays reachable through `/threads` or another CLI instance.
 			openSessionById(item.id);
 		},
 	});
@@ -357,9 +388,9 @@ function App({ onQuit, initialSessionId, info }: AppProps) {
 			if (item.id === "new-chat") {
 				void startNewChat();
 			} else if (item.id === "threads") {
-				void getClient()
-					.listSessions(workspaceCwd())
-					.then((response) => {
+				void Promise.all([getClient().listSessions(workspaceCwd()), getClient().listRuns()])
+					.then(([response, runs]) => {
+						const bySession = new Map(runs.runs.map((run) => [run.sessionId, run]));
 						threadItems.value = response.sessions.map((s) => {
 							const date = new Date(s.timestamp);
 							const label = date.toLocaleString();
@@ -368,7 +399,18 @@ function App({ onQuit, initialSessionId, info }: AppProps) {
 									? s.firstUserMessage.slice(0, 45) + "…"
 									: s.firstUserMessage
 								: "(empty session)";
-							return { id: s.reference, title: preview, description: label, keywords: [s.id] };
+							const run = bySession.get(s.id) ?? bySession.get(s.reference);
+							const status = run
+								? run.phase === "queued" && run.queuePosition !== undefined
+									? `queued #${run.queuePosition}`
+									: run.phase.replace(/-/g, " ")
+								: "idle";
+							return {
+								id: s.reference,
+								title: `${preview} · ${status}`,
+								description: label,
+								keywords: [s.id, ...(run ? [run.runId] : [])],
+							};
 						});
 						threadsPalette.openPalette();
 					})
@@ -532,7 +574,7 @@ function App({ onQuit, initialSessionId, info }: AppProps) {
 						<>
 							<Spinner color={theme.accent} />
 							<Text color={theme.textMuted} bold italic>
-								{formatStatus(stream.value.status)}
+								{formatStatus(stream.value)}
 							</Text>
 							{escPrimed.value ? (
 								<Text color={theme.warning} bold>
@@ -600,6 +642,13 @@ async function bootstrap(): Promise<void> {
  * it the server creates a session, reusing an idle empty one when it can.
  */
 async function initialSession(cwd: string): Promise<string> {
+	const requested = requestedSession();
+	if (requested) {
+		// Opening here validates ownership and lets the boot surface a useful
+		// error instead of mounting the TUI against a missing thread.
+		await getClient().openSession(requested);
+		return requested;
+	}
 	if (resumeRequested()) {
 		const { sessions } = await getClient().listSessions(cwd);
 		const recent = sessions[0];

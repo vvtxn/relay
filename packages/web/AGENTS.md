@@ -66,11 +66,12 @@ web/
   caching, dedup, retries, and invalidation for REST; it does **not** cache the live stream.
 - `state/session.ts` forks a reconnect loop onto the runtime: consume the stream, and on end/failure back off (500ms →
   5s) and resubscribe. Every event is folded with `applyServerEvent` from `@vvtxn/client/session-state.ts` into a
-  module-level Solid signal.
+  module-level Solid signal; that state now carries the server run phase, box id, and queue position so the composer
+  can show workspace/box phases instead of a generic "Thinking…".
 - The session route's loader (`router.tsx`) `ensureQueryData`s the persisted snapshot before rendering; with
-  `defaultPreload: "intent"` link hovers warm it. `ensureSession(id, snapshot)` seeds the store only on the first entry
-  per session, and `startStream(id)` is idempotent — refetches and re-renders never reset live state or restart the
-  stream. The fiber is interrupted only when the session route unmounts.
+  `defaultPreload: "intent"` link hovers warm it. `ensureSession(id, snapshot)` seeds the store whenever the live
+  stream for that session is not active, and `startStream(id)` is idempotent — refetches and re-renders never reset
+  live state or restart the stream. The fiber is interrupted only when the session route unmounts.
 - `run_finished` invalidates the session + sessions queries so persisted entries replace the live view.
 
 ### Navigation performance
@@ -174,13 +175,15 @@ session header. `<token>` is `base64url` of the canonical cwd via `encodeWorkspa
 The sidebar renders workspaces as an expandable **tree**: each row has a chevron, session count, a `missing` flag when
 its directory is gone, and a hide button; its sessions nest underneath, capped at the latest three with a `+N more…`
 link to the pane (the pane owns the full list and its search box, and its header shows the server's per-workspace
-thread cap as `N / limit` with a warning once full). Only expanded workspaces are fetched
+thread cap as `N / limit` with a warning once full). Session summaries carry `running`/`runPhase`; the tree shows a
+green dot and title for active threads, and the sessions query polls every 10s so another client's run is visible
+without opening the thread. Only expanded workspaces are fetched
 (`useQueries` over `sessionsQuery(cwd)` per open cwd); the active workspace starts expanded (and re-expands when it
 becomes active), while the chevron collapses any workspace — including the active one. "New chat" targets the active
 workspace, falling back to the last visited one
 (`relay.cwd` in localStorage), then the first listed workspace, then the server default. Sessions are created through
-`startChat()`, which seeds the cache; the server reuses an idle empty session, so repeated clicks do not pile up
-handles.
+`startChat()`, which seeds the cache; explicit "New chat" requests set `forceNew` so another client's blank thread is
+never reused.
 
 "Add workspace" (sidebar form and the workspace pane's unknown-workspace state) validates via
 `GET /api/workspaces/validate` (inline error when missing/outside roots) and registers the canonical path via
