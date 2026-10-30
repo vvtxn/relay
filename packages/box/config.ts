@@ -124,9 +124,11 @@ export async function readProjectConfig(projectCwd: string): Promise<ProjectBoxC
 /** Project config overrides server defaults field by field. */
 export function resolveBoxSettings(defaults: BoxSettings, project: ProjectBoxConfig | null): BoxSettings {
 	if (!project) return defaults;
-	const maxProfile = project.maxProfile ?? defaults.maxProfile;
-	const requestedProfile = project.profile ?? defaults.profile;
 	// A project can lower the ceiling but never raise it past the server default.
+	const requestedMax = project.maxProfile ?? defaults.maxProfile;
+	const maxProfile =
+		profileRank(requestedMax) > profileRank(defaults.maxProfile) ? defaults.maxProfile : requestedMax;
+	const requestedProfile = project.profile ?? defaults.profile;
 	const profile = profileRank(requestedProfile) > profileRank(maxProfile) ? maxProfile : requestedProfile;
 	const resources = profileResources(profile);
 	const cpus = project.cpus ?? (project.profile ? resources.cpus : defaults.cpus);

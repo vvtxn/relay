@@ -33,6 +33,7 @@ box/
 - `resize()` is live within the boot-time `maxCpus`/`maxMemory` ceilings; disk is grow-only.
 - Capacity is reserved atomically before runtime calls. Failed starts/resizes must release the reservation.
 - Never copy host credentials into a box. Sanitization runs on every new workspace clone; explicit env/secrets only.
+- The project directory and box data directory must not contain each other; the workspace clone is created inside the data directory.
 - Each Git-cloned workspace gets a hidden `refs/relay/baseline` commit of its post-sanitize state. Sync diffs against
   that ref, so pre-existing checkout dirt is never replayed. Never delete/rewrite the baseline except when advancing it
   after a successful sync.

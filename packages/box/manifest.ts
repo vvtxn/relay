@@ -2,16 +2,7 @@ import { mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync
 import { join } from "node:path";
 import { BoxError } from "./errors.ts";
 import { profileForSettings } from "./profiles.ts";
-import {
-	boxDir,
-	boxesRoot,
-	BOX_DIR_MODE,
-	BOX_FILE_MODE,
-	logsDir,
-	manifestPath,
-	trashDir,
-	workspacePath,
-} from "./paths.ts";
+import { boxDir, boxesRoot, BOX_DIR_MODE, BOX_FILE_MODE, logsDir, manifestPath, trashDir } from "./paths.ts";
 import type { BoxAttachment, BoxProfile, BoxSettings, BoxState } from "./types.ts";
 
 export const MANIFEST_VERSION = 2;
@@ -175,10 +166,6 @@ export class FileBoxStore {
 
 	dir(boxId: string): string {
 		return boxDir(this.dataDir, boxId);
-	}
-
-	workspace(boxId: string): string {
-		return workspacePath(this.dataDir, boxId);
 	}
 
 	logs(boxId: string): string {
