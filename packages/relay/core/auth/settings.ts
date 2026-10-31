@@ -1,7 +1,7 @@
 import type { Effect } from "effect";
 import type { DatabaseClient } from "../database.ts";
 import { storeEffect, type StoreError } from "../effect.ts";
-import { isEncryptedSecret, type SecretCipher, userSettingsAad } from "./secret.ts";
+import { type SecretCipher, userSettingsAad } from "./secret.ts";
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS user_settings (
@@ -48,9 +48,7 @@ export interface DatabaseUserSettingsStoreOptions {
 /**
  * Database-backed per-user settings. The LLM API key is stored encrypted
  * (AES-GCM, owner-bound AAD) because the database may be remote: a leaked
- * database or database token yields ciphertext only. Rows written before
- * encryption was introduced are read as plaintext and upgraded in place on
- * first read.
+ * database or database token yields ciphertext only.
  */
 export class DatabaseUserSettingsStore implements UserSettingsStore {
 	private readonly client: DatabaseClient;
@@ -80,11 +78,6 @@ export class DatabaseUserSettingsStore implements UserSettingsStore {
 		})) as unknown as { rows: Record<string, unknown>[] };
 		const value = result.rows[0]?.llm_api_key;
 		if (typeof value !== "string" || value.length === 0) return null;
-		if (!isEncryptedSecret(value)) {
-			// Legacy plaintext row: upgrade in place, best effort.
-			await this.setApiKeyPromise(userId, value).catch(() => {});
-			return value;
-		}
 		return await this.cipher.decrypt(value, userSettingsAad(userId));
 	}
 
@@ -102,11 +95,7 @@ export class DatabaseUserSettingsStore implements UserSettingsStore {
 		const value = row?.llm_api_key;
 		if (typeof value !== "string" || value.length === 0) return { set: false, hint: null };
 		const hint = row?.llm_api_key_hint;
-		if (typeof hint === "string" && hint.length > 0) return { set: true, hint };
-		// Legacy plaintext rows carry no hint column value yet; compute it
-		// directly. Ciphertext without a hint is downgraded to a null hint.
-		if (!isEncryptedSecret(value)) return { set: true, hint: apiKeyHint(value) };
-		return { set: true, hint: null };
+		return { set: true, hint: typeof hint === "string" && hint.length > 0 ? hint : null };
 	}
 
 	setApiKey(userId: string, apiKey: string | null): Effect.Effect<void, StoreError> {
@@ -125,21 +114,6 @@ export class DatabaseUserSettingsStore implements UserSettingsStore {
 					llm_api_key_hint = excluded.llm_api_key_hint, updated_at = excluded.updated_at`,
 			args: [userId, encrypted, hint, new Date().toISOString()],
 		});
-	}
-
-	/** User ids that currently hold an API key (used by the file-store migration). */
-	listUserIdsWithKeys(): Effect.Effect<string[], StoreError> {
-		return storeEffect(() => this.listUserIdsWithKeysPromise());
-	}
-
-	private async listUserIdsWithKeysPromise(): Promise<string[]> {
-		await this.schemaReady;
-		const result = (await this.client.execute({
-			sql: "SELECT user_id FROM user_settings WHERE llm_api_key IS NOT NULL AND llm_api_key <> ''",
-		})) as unknown as { rows: Record<string, unknown>[] };
-		return result.rows
-			.map((row) => row["user_id"])
-			.filter((value): value is string => typeof value === "string" && value.length > 0);
 	}
 
 	private async initialize(): Promise<void> {

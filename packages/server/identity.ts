@@ -6,8 +6,6 @@ import type { ServerServices } from "./services.ts";
 
 /** GitHub-mode session cookie; local mode never uses cookies. */
 export const SESSION_COOKIE = "relay_cloud_session";
-/** Cookie issued by versions before the local/cloud split; local mode retires it. */
-export const LEGACY_SESSION_COOKIE = "relay_session";
 /** Short-lived OAuth handshake cookies. */
 export const OAUTH_STATE_COOKIE = "relay_oauth_state";
 export const OAUTH_VERIFIER_COOKIE = "relay_oauth_verifier";

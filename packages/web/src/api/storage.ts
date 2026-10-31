@@ -16,9 +16,6 @@ export type ThemePreference = "dark" | "light";
  */
 const DEFAULT_SERVER_URL = "";
 
-/** The old client persisted this absolute default; treat it as "unset". */
-const LEGACY_DEFAULT_URLS = new Set(["http://127.0.0.1:7433", "http://localhost:7433"]);
-
 function read(key: string): string | null {
 	try {
 		return localStorage.getItem(key);
@@ -36,9 +33,7 @@ function write(key: string, value: string): void {
 }
 
 export function readStoredServerUrl(): string {
-	const stored = read(SERVER_URL_KEY)?.replace(/\/+$/, "");
-	if (!stored || LEGACY_DEFAULT_URLS.has(stored)) return DEFAULT_SERVER_URL;
-	return stored;
+	return read(SERVER_URL_KEY)?.replace(/\/+$/, "") || DEFAULT_SERVER_URL;
 }
 
 export function writeStoredServerUrl(url: string): void {

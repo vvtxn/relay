@@ -141,7 +141,7 @@ Relay has two flavors:
 - **Cloud (primary)** — GitHub App OAuth. Callers receive an opaque `relay_cloud_session` cookie (browser) or a bearer
   session token handed over locally (CLI). Each GitHub account gets its own user, sessions, and workspaces.
 - **Local (secondary)** — SQLite and a fixed loopback identity. No login, no auth cookie. The authenticated wrapper
-  rejects non-loopback `Host` headers (DNS-rebinding guard) and retires the legacy pre-split cookie.
+  rejects non-loopback `Host` headers (DNS-rebinding guard).
 
 The rest of this section describes the cloud/GitHub deployment.
 

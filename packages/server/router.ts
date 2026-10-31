@@ -25,7 +25,7 @@ import {
 	handleResumeBox,
 	handleStopBox,
 } from "./boxes.ts";
-import { LEGACY_SESSION_COOKIE, resolveRequestUser } from "./identity.ts";
+import { resolveRequestUser } from "./identity.ts";
 import {
 	BadRequestError,
 	error,
@@ -141,15 +141,7 @@ function authenticated(services: ServerServices, build: (services: RequestServic
 			const user = yield* resolveRequestUser(services, request);
 			if (!user) return error(401, "Unauthorized");
 			yield* handOffBrowserSession(services, request).pipe(Effect.catchCause(() => Effect.void));
-			const response = yield* build({ ...services, user });
-			if (services.config.authMode !== "local") return response;
-			// A browser that previously signed into cloud mode may still hold the
-			// OAuth session cookie. Local mode has its own identity, so retire it.
-			return HttpServerResponse.expireCookieUnsafe(response, LEGACY_SESSION_COOKIE, {
-				httpOnly: true,
-				sameSite: "lax",
-				path: "/",
-			});
+			return yield* build({ ...services, user });
 		}),
 	);
 }
