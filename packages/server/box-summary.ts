@@ -12,8 +12,6 @@ export function boxSummary(status: BoxStatus): BoxSummary {
 		cpus: status.settings.cpus,
 		memoryMiB: status.settings.memoryMiB,
 		rootDiskMiB: status.settings.rootDiskMiB,
-		attachments: status.attachments.map((attachment) => attachment.sessionId),
-		...(status.originSessionId ? { originSessionId: status.originSessionId } : {}),
 		createdAt: status.createdAt,
 		lastUsedAt: status.lastUsedAt,
 		...(status.pausedAt ? { pausedAt: status.pausedAt } : {}),

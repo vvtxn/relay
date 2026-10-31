@@ -150,8 +150,6 @@ function boxConfigFromEnv(env: Record<string, string | undefined>): BoxManagerCo
 	const workspaceRoot = expandHomePath(
 		envValue(env, "RELAY_SESSION_WORKSPACE_ROOT") ?? join(relayDir(), "workspaces"),
 	);
-	const setup = env.RELAY_BOX_SETUP?.trim();
-	const resume = env.RELAY_BOX_RESUME?.trim();
 	// `small` is the default ceiling so every selectable profile fits the
 	// default memory budget. Raise both to enable `medium`.
 	const maxProfile = boxProfileEnv(env.RELAY_BOX_MAX_PROFILE, "small", "RELAY_BOX_MAX_PROFILE");
@@ -186,12 +184,6 @@ function boxConfigFromEnv(env: Record<string, string | undefined>): BoxManagerCo
 			"RELAY_BOX_ACQUIRE_TIMEOUT_MS",
 			60 * 60_000,
 		),
-		setupTimeoutMs: positiveInt(
-			env.RELAY_BOX_SETUP_TIMEOUT_MS,
-			20 * 60_000,
-			"RELAY_BOX_SETUP_TIMEOUT_MS",
-			24 * 60 * 60_000,
-		),
 		retentionMs: nonNegativeInt(
 			env.RELAY_BOX_RETENTION_MS,
 			24 * 60 * 60_000,
@@ -212,8 +204,6 @@ function boxConfigFromEnv(env: Record<string, string | undefined>): BoxManagerCo
 				"RELAY_BOX_ROOT_DISK_MIB",
 				1_048_576,
 			),
-			...(setup ? { setup } : {}),
-			...(resume ? { resume } : {}),
 			env: {},
 			exclude: [],
 		},

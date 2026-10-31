@@ -144,7 +144,7 @@ export interface OpenSessionResponse {
 	running: boolean;
 	/** Phase of the active run, when `running` is true. */
 	runPhase?: RunPhase;
-	/** The box attached to this session, when boxes are enabled. */
+	/** The box leased by this session's active run, when boxes are enabled. */
 	box?: BoxSummary;
 }
 
@@ -156,7 +156,7 @@ export type BoxProfileName = "tiny" | "small" | "medium";
 
 export type BoxLifecycleState = "provisioning" | "starting" | "ready" | "busy" | "paused" | "stopped" | "error";
 
-/** A managed execution box. Boxes are independent of sessions; attachments name users. */
+/** A managed execution box. Boxes are pooled per project and leased by runs. */
 export interface BoxSummary {
 	boxId: string;
 	state: BoxLifecycleState;
@@ -167,8 +167,6 @@ export interface BoxSummary {
 	cpus: number;
 	memoryMiB: number;
 	rootDiskMiB: number;
-	attachments: string[];
-	originSessionId?: string;
 	createdAt: string;
 	lastUsedAt: string;
 	pausedAt?: string;
@@ -199,29 +197,8 @@ export interface CreateBoxRequest {
 	profile?: BoxProfileName;
 }
 
-export interface BoxAttachRequest {
-	sessionId: string;
-}
-
 export interface BoxResizeRequest {
 	profile: BoxProfileName;
-}
-
-/** One path applied from a box workspace to the project checkout. */
-export interface BoxSyncFile {
-	/** Git name-status code (`M`, `A`, `D`, `R100`, ...). */
-	status: string;
-	path: string;
-}
-
-/** Result of syncing a box workspace back to the project checkout. */
-export interface BoxSyncResponse {
-	projectCwd: string;
-	files: BoxSyncFile[];
-	summary: string;
-	/** Set when the changes were committed to a thread branch. */
-	branch?: string;
-	commit?: string;
 }
 
 export interface FileListResponse {

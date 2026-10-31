@@ -15,10 +15,7 @@ function usage(): void {
 			"  relay box new [path] [tiny|small|medium]  # create a pooled worker",
 			"  relay box list",
 			"  relay box pause|resume|stop <boxId>",
-			"  relay box sync <boxId>                  # legacy v2 boxes only",
 			"  relay box resize <boxId> <tiny|small|medium>",
-			"  relay box attach <boxId> <sessionId>    # legacy v2 boxes only",
-			"  relay box detach <boxId> <sessionId>    # legacy v2 boxes only",
 			"  relay box rm <boxId>",
 		].join("\n"),
 	);
@@ -49,14 +46,13 @@ async function list(): Promise<void> {
 			return;
 		}
 		for (const box of boxes) {
-			const attachments = box.attachments.length > 0 ? box.attachments.join(", ") : "none";
 			const capacity = box.capacity
 				? `  ${box.capacity.running}/${box.capacity.maxRunning} boxes, ` +
 					`${box.capacity.usedMemoryMiB}/${box.capacity.maxMemoryMiB} MiB`
 				: "";
 			console.log(
 				`${box.boxId}  ${box.state.padEnd(8)}  ${box.profile.padEnd(6)}  ` +
-					`${box.cpus} vCPU/${box.memoryMiB} MiB  sessions: ${attachments}${capacity}`,
+					`${box.cpus} vCPU/${box.memoryMiB} MiB${capacity}`,
 			);
 		}
 	});
@@ -76,18 +72,6 @@ async function action(sub: "pause" | "resume" | "stop", args: string[]): Promise
 	});
 }
 
-async function sync(args: string[]): Promise<void> {
-	const boxId = args[0];
-	if (!boxId) {
-		usage();
-		process.exit(1);
-	}
-	await withClient(async (client) => {
-		const result = await client.syncBox(boxId);
-		console.log(result.summary);
-	});
-}
-
 async function resize(args: string[]): Promise<void> {
 	const [boxId, profile] = args;
 	if (!boxId || (profile !== "tiny" && profile !== "small" && profile !== "medium")) {
@@ -97,19 +81,6 @@ async function resize(args: string[]): Promise<void> {
 	await withClient(async (client) => {
 		const { box } = await client.resizeBox(boxId, profile);
 		console.log(`${box.boxId}  ${box.profile}  ${box.cpus} vCPU/${box.memoryMiB} MiB`);
-	});
-}
-
-async function attach(args: string[], detach: boolean): Promise<void> {
-	const [boxId, sessionId] = args;
-	if (!boxId || !sessionId) {
-		usage();
-		process.exit(1);
-	}
-	await withClient(async (client) => {
-		if (detach) await client.detachBox(boxId, sessionId);
-		else await client.attachBox(boxId, sessionId);
-		console.log(`${detach ? "Detached" : "Attached"} ${sessionId} ${detach ? "from" : "to"} ${boxId}`);
 	});
 }
 
@@ -141,17 +112,8 @@ export async function runBoxCommand(args: string[]): Promise<void> {
 		case "stop":
 			await action(sub, rest);
 			return;
-		case "sync":
-			await sync(rest);
-			return;
 		case "resize":
 			await resize(rest);
-			return;
-		case "attach":
-			await attach(rest, false);
-			return;
-		case "detach":
-			await attach(rest, true);
 			return;
 		case "rm":
 		case "remove":

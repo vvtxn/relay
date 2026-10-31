@@ -88,7 +88,7 @@ export class DatabaseSessionStore implements SessionStore {
 	private readonly client: DatabaseClient;
 	private readonly schemaReady: Promise<void>;
 	private readonly maxSessionsPerWorkspace: number;
-	/** Notified after pruning removes sessions, so boxes can detach them. */
+	/** Notified after pruning removes sessions, so their workspaces can be removed. */
 	onPruned: ((sessionIds: readonly string[]) => void) | undefined;
 
 	constructor(options: DatabaseSessionStoreOptions) {

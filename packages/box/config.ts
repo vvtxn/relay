@@ -69,8 +69,6 @@ export function parseProjectConfig(raw: unknown): ProjectBoxConfig {
 		"cpus",
 		"memoryMiB",
 		"rootDiskMiB",
-		"setup",
-		"resume",
 		"env",
 		"exclude",
 	]);
@@ -85,8 +83,6 @@ export function parseProjectConfig(raw: unknown): ProjectBoxConfig {
 	const cpus = positiveInteger(value.cpus, "cpus");
 	const memoryMiB = positiveInteger(value.memoryMiB, "memoryMiB");
 	const rootDiskMiB = positiveInteger(value.rootDiskMiB, "rootDiskMiB");
-	const setup = optionalString(value.setup, "setup");
-	const resume = optionalString(value.resume, "resume");
 	const env = stringMap(value.env, "env");
 	const exclude = stringList(value.exclude, "exclude");
 	if (image !== undefined) config.image = image;
@@ -95,8 +91,6 @@ export function parseProjectConfig(raw: unknown): ProjectBoxConfig {
 	if (cpus !== undefined) config.cpus = cpus;
 	if (memoryMiB !== undefined) config.memoryMiB = memoryMiB;
 	if (rootDiskMiB !== undefined) config.rootDiskMiB = rootDiskMiB;
-	if (setup !== undefined) config.setup = setup;
-	if (resume !== undefined) config.resume = resume;
 	if (env !== undefined) config.env = env;
 	if (exclude !== undefined) config.exclude = exclude;
 	return config;
@@ -141,16 +135,6 @@ export function resolveBoxSettings(defaults: BoxSettings, project: ProjectBoxCon
 		cpus,
 		memoryMiB,
 		rootDiskMiB,
-		...(project.setup !== undefined
-			? { setup: project.setup }
-			: defaults.setup !== undefined
-				? { setup: defaults.setup }
-				: {}),
-		...(project.resume !== undefined
-			? { resume: project.resume }
-			: defaults.resume !== undefined
-				? { resume: defaults.resume }
-				: {}),
 		env: { ...defaults.env, ...project.env },
 		exclude: project.exclude ?? defaults.exclude,
 	};
