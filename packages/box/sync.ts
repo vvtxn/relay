@@ -98,10 +98,11 @@ export async function createWorkspaceBaseline(workspace: string): Promise<boolea
 		const tree = (
 			await requireGit(workspace, ["write-tree"], "Could not write the box baseline tree", env)
 		).stdout.trim();
+		const headCommit = head.code === 0 ? head.stdout.trim() : "";
 		const commit = (
 			await requireGit(
 				workspace,
-				["commit-tree", tree, "-m", "Relay box sync baseline"],
+				["commit-tree", tree, ...(headCommit ? ["-p", headCommit] : []), "-m", "Relay box sync baseline"],
 				"Could not create the box sync baseline",
 				env,
 			)
@@ -131,6 +132,30 @@ function summaryFor(files: BoxSyncFile[], projectCwd: string): string {
 	return `Synced ${files.length} change${files.length === 1 ? "" : "s"} to ${projectCwd}:\n${lines}`;
 }
 
+const projectSyncLocks = new Map<string, Promise<void>>();
+
+/**
+ * Serialize syncs into one checkout. Two sessions may finish at the same time;
+ * their patches must not interleave in the shared working tree.
+ */
+export async function withProjectSyncLock<T>(projectCwd: string, fn: () => Promise<T>): Promise<T> {
+	const key = resolve(projectCwd);
+	const previous = projectSyncLocks.get(key) ?? Promise.resolve();
+	let release!: () => void;
+	const next = new Promise<void>((resolvePromise) => {
+		release = resolvePromise;
+	});
+	const chained = previous.then(() => next);
+	projectSyncLocks.set(key, chained);
+	await previous.catch(() => {});
+	try {
+		return await fn();
+	} finally {
+		release();
+		if (projectSyncLocks.get(key) === chained) projectSyncLocks.delete(key);
+	}
+}
+
 /**
  * Apply the changes made in a box workspace to the original project checkout.
  *
@@ -141,6 +166,17 @@ function summaryFor(files: BoxSyncFile[], projectCwd: string): string {
  * diverged checkout fails the apply instead of being overwritten.
  */
 export async function syncWorkspace(workspace: string, projectCwd: string): Promise<BoxSyncResult> {
+	return await withProjectSyncLock(projectCwd, () => syncWorkspaceUnlocked(workspace, projectCwd));
+}
+
+interface WorkspacePatch {
+	projectCwd: string;
+	files: BoxSyncFile[];
+	patchPath: string;
+	tree: string;
+}
+
+function validateWorkspaceSync(workspace: string, projectCwd: string): void {
 	if (!hasGitDir(workspace)) {
 		throw new BoxError({ message: "This box has no Git repository, so its changes cannot be synced." });
 	}
@@ -155,7 +191,15 @@ export async function syncWorkspace(workspace: string, projectCwd: string): Prom
 			message: "No sync baseline for this box; create a new box to enable sync.",
 		});
 	}
+}
 
+/** Build the incremental patch (baseline -> workspace) once for both sync modes. */
+async function withWorkspacePatch<T>(
+	workspace: string,
+	projectCwd: string,
+	fn: (patch: WorkspacePatch) => Promise<T>,
+): Promise<T> {
+	validateWorkspaceSync(workspace, projectCwd);
 	const temp = mkdtempSync(join(tmpdir(), "relay-box-sync-"));
 	const env = gitEnv({ GIT_INDEX_FILE: join(temp, "index") });
 	const patch = join(temp, "changes.patch");
@@ -170,16 +214,29 @@ export async function syncWorkspace(workspace: string, projectCwd: string): Prom
 		);
 		const files = parseNameStatus(names.stdout);
 		if (files.length === 0) {
-			return { projectCwd, files, summary: summaryFor(files, projectCwd) };
+			return await fn({ projectCwd, files, patchPath: "", tree: "" });
 		}
-
+		const tree = (
+			await requireGit(workspace, ["write-tree"], "Could not write the workspace tree", env)
+		).stdout.trim();
 		await requireGit(
 			workspace,
 			["diff", "--cached", "--binary", "--full-index", "--no-ext-diff", `--output=${patch}`, BASELINE_REF],
 			"Could not build the box change patch",
 			env,
 		);
-		const check = await runGit(projectCwd, ["apply", "--binary", "--check", patch]);
+		return await fn({ projectCwd, files, patchPath: patch, tree });
+	} finally {
+		rmSync(temp, { recursive: true, force: true });
+	}
+}
+
+async function syncWorkspaceUnlocked(workspace: string, projectCwd: string): Promise<BoxSyncResult> {
+	return await withWorkspacePatch(workspace, projectCwd, async ({ files, patchPath }) => {
+		if (files.length === 0) {
+			return { projectCwd, files, summary: summaryFor(files, projectCwd) };
+		}
+		const check = await runGit(projectCwd, ["apply", "--binary", "--check", patchPath]);
 		if (check.code !== 0) {
 			throw new BoxError({
 				message:
@@ -189,12 +246,137 @@ export async function syncWorkspace(workspace: string, projectCwd: string): Prom
 		}
 		await requireGit(
 			projectCwd,
-			["apply", "--binary", "--whitespace=nowarn", patch],
+			["apply", "--binary", "--whitespace=nowarn", patchPath],
 			"Could not apply the box changes",
 		);
 		await createWorkspaceBaseline(workspace);
 		return { projectCwd, files, summary: summaryFor(files, projectCwd) };
-	} finally {
-		rmSync(temp, { recursive: true, force: true });
+	});
+}
+
+function threadBranchRef(branch: string): string {
+	if (!/^[A-Za-z0-9._/-]+$/.test(branch) || branch.startsWith("-") || branch.includes("..")) {
+		throw new BoxError({ message: `Invalid thread branch name: ${branch}` });
 	}
+	return `refs/heads/${branch}`;
+}
+
+function branchSummary(files: BoxSyncFile[], branch: string, commit: string): string {
+	if (files.length === 0) return "No workspace changes to commit.";
+	return (
+		`Committed ${files.length} change${files.length === 1 ? "" : "s"} to ${branch} (${commit.slice(0, 8)}).\n` +
+		files.map((file) => `${file.status}\t${file.path}`).join("\n")
+	);
+}
+
+/**
+ * Commit the workspace changes to a dedicated branch in the project repository.
+ *
+ * The project checkout is never modified. The patch is three-way applied onto
+ * the branch tip (or the project's current HEAD for a new branch), so a dirty
+ * project checkout and an advanced project branch can coexist with a thread.
+ * The result can be reviewed with `git diff <base>...<branch>` or merged with
+ * `git merge <branch>`.
+ */
+export async function syncWorkspaceToBranch(
+	workspace: string,
+	projectCwd: string,
+	branch: string,
+): Promise<BoxSyncResult> {
+	const branchRef = threadBranchRef(branch);
+	return await withProjectSyncLock(projectCwd, () =>
+		withWorkspacePatch(workspace, projectCwd, async ({ files, patchPath, tree }) => {
+			if (files.length === 0) {
+				return { projectCwd, files, summary: branchSummary(files, branch, ""), branch };
+			}
+
+			const base = (
+				await requireGit(workspace, ["rev-parse", BASELINE_REF], "Could not resolve the workspace baseline")
+			).stdout.trim();
+			const syncCommit = (
+				await requireGit(
+					workspace,
+					["commit-tree", tree, "-p", base, "-m", `Relay thread ${branch} snapshot`],
+					"Could not snapshot the workspace for branch sync",
+				)
+			).stdout.trim();
+			await requireGit(
+				workspace,
+				["update-ref", "refs/relay/sync", syncCommit],
+				"Could not store the workspace sync snapshot",
+			);
+
+			const tempRef = `refs/relay/tmp/${process.pid}-${Date.now()}`;
+			const fetched = await runGit(projectCwd, ["fetch", "--no-tags", workspace, `refs/relay/sync:${tempRef}`]);
+			if (fetched.code !== 0) {
+				throw new BoxError({
+					message: `Could not fetch the workspace snapshot into ${projectCwd}.\n${
+						fetched.stderr.trim() || fetched.stdout.trim()
+					}`,
+				});
+			}
+
+			const projectTemp = mkdtempSync(join(tmpdir(), "relay-thread-branch-"));
+			const projectEnv = gitEnv({ GIT_INDEX_FILE: join(projectTemp, "index") });
+			try {
+				const head = await runGit(projectCwd, ["rev-parse", "--verify", "HEAD"]);
+				const target =
+					(await runGit(projectCwd, ["rev-parse", "--verify", branchRef])).code === 0
+						? (
+								await requireGit(
+									projectCwd,
+									["rev-parse", "--verify", branchRef],
+									"Could not read the thread branch",
+								)
+							).stdout.trim()
+						: head.code === 0
+							? head.stdout.trim()
+							: base;
+				await requireGit(projectCwd, ["read-tree", target], "Could not seed the thread branch", projectEnv);
+				const applied = await runGit(
+					projectCwd,
+					["apply", "--cached", "--3way", "--binary", "--whitespace=nowarn", patchPath],
+					projectEnv,
+				);
+				if (applied.code !== 0) {
+					throw new BoxError({
+						message:
+							`The workspace changes conflict with ${target === base ? "the workspace base" : "the project branch"}.\n` +
+							`The project checkout was not modified. Resolve the conflict manually or rebase the thread branch.\n` +
+							`${applied.stderr.trim() || applied.stdout.trim()}`,
+					});
+				}
+				const nextTree = (
+					await requireGit(projectCwd, ["write-tree"], "Could not write the thread branch tree", projectEnv)
+				).stdout.trim();
+				const commit = (
+					await requireGit(
+						projectCwd,
+						[
+							"commit-tree",
+							nextTree,
+							"-p",
+							target,
+							"-m",
+							`Relay thread ${branch}: ${files.length} change${files.length === 1 ? "" : "s"}`,
+						],
+						"Could not commit the thread branch",
+						projectEnv,
+					)
+				).stdout.trim();
+				await requireGit(projectCwd, ["update-ref", branchRef, commit], "Could not update the thread branch");
+				await createWorkspaceBaseline(workspace);
+				return {
+					projectCwd,
+					files,
+					summary: branchSummary(files, branch, commit),
+					branch,
+					commit,
+				};
+			} finally {
+				rmSync(projectTemp, { recursive: true, force: true });
+				await runGit(projectCwd, ["update-ref", "-d", tempRef]);
+			}
+		}),
+	);
 }

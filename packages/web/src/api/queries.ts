@@ -36,6 +36,8 @@ export function sessionsQuery(cwd: string) {
 		queryKey: queryKeys.sessions(cwd),
 		queryFn: () => runApi((api) => Effect.map(api.listSessions(cwd), (response) => response.sessions)),
 		enabled: cwd.length > 0,
+		// Keep the sidebar's running badge fresh while other threads work.
+		refetchInterval: 10_000,
 	});
 }
 

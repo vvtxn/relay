@@ -17,10 +17,11 @@ import { fileURLToPath } from "node:url";
  * subcommand works in both modes.
  *
  * Keep `SOURCE_COMMANDS` in sync with the command switch in
- * `packages/cli/agent/index.ts`.
+ * `packages/cli/agent/index.ts`, except commands that import the TSX app
+ * (`attach`, and the default TUI command) which must run from the bundle.
  */
 
-const SOURCE_COMMANDS = new Set(["serve", "web", "stop", "status", "fonts", "workspace", "version"]);
+const SOURCE_COMMANDS = new Set(["serve", "web", "stop", "status", "fonts", "workspace", "threads", "version"]);
 const VERSION_COMMANDS = new Set(["version", "--version", "-v"]);
 
 const root = fileURLToPath(new URL("..", import.meta.url));

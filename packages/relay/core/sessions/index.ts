@@ -9,6 +9,7 @@ export type {
 	Session,
 	SessionHandle,
 	SessionHeader,
+	RunPhase,
 	SessionScope,
 	SessionStore,
 	SessionSummary,

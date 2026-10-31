@@ -5,17 +5,20 @@ import { profileForSettings } from "./profiles.ts";
 import { boxDir, boxesRoot, BOX_DIR_MODE, BOX_FILE_MODE, logsDir, manifestPath, trashDir } from "./paths.ts";
 import type { BoxAttachment, BoxProfile, BoxSettings, BoxState } from "./types.ts";
 
-export const MANIFEST_VERSION = 2;
+export const MANIFEST_VERSION = 3;
 
 export type SetupState = "pending" | "ok" | "failed";
 
 export interface BoxManifest {
 	version: number;
 	boxId: string;
+	/** v2 boxes own a session workspace clone; v3 boxes are pooled workers. */
+	legacy?: boolean;
 	originSessionId?: string;
 	attachments: BoxAttachment[];
 	ownerId: string;
 	projectCwd: string;
+	/** Host path mounted at /workspace: a project workspace root for v3. */
 	workspacePath: string;
 	sandboxName: string;
 	runtime: { kind: string; version: string };
@@ -109,9 +112,10 @@ function parseManifest(raw: unknown): BoxManifest {
 	}
 	const value = raw as Record<string, unknown>;
 	const version = value.version;
-	if (version !== 1 && version !== MANIFEST_VERSION) {
+	if (version !== 1 && version !== 2 && version !== MANIFEST_VERSION) {
 		throw new BoxError({ message: `Unsupported box manifest version: ${String(version)}` });
 	}
+	const legacy = version !== MANIFEST_VERSION || value.legacy === true;
 	const boxId = requireString(value.boxId, "boxId");
 	const ownerId = requireString(value.ownerId, "ownerId");
 	const projectCwd = requireString(value.projectCwd, "projectCwd");
@@ -131,6 +135,7 @@ function parseManifest(raw: unknown): BoxManifest {
 
 	return {
 		version: MANIFEST_VERSION,
+		...(legacy ? { legacy: true } : {}),
 		boxId,
 		...(originSessionId ? { originSessionId } : {}),
 		attachments,

@@ -57,12 +57,19 @@ export interface Session {
 	entries: Entry[];
 }
 
+/** Lifecycle phase of an active run, shared by the server and every client. */
+export type RunPhase = "preparing-workspace" | "queued" | "starting-box" | "running" | "syncing";
+
 export interface SessionSummary {
 	id: string;
 	/** Opaque value passed back to SessionStore.open(). */
 	reference: string;
 	timestamp: string;
 	firstUserMessage: string | null;
+	/** True while a run is active on the session. */
+	running?: boolean;
+	/** Phase of the active run, when `running` is true. */
+	runPhase?: RunPhase;
 }
 
 /** Aggregated per-workspace info for a client's workspace picker. */

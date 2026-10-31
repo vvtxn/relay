@@ -61,3 +61,19 @@ export function profileForSettings(settings: Pick<BoxSettings, "cpus" | "memoryM
 	}
 	return "custom";
 }
+
+/** Clamp requested settings to the server's profile ceiling. */
+export function clampBoxSettings(settings: BoxSettings, serverMaxProfile: BoxProfile): BoxSettings {
+	const maxProfile =
+		profileRank(settings.maxProfile) > profileRank(serverMaxProfile) ? serverMaxProfile : settings.maxProfile;
+	const profile = profileRank(settings.profile) > profileRank(maxProfile) ? maxProfile : settings.profile;
+	const resources = profileResources(maxProfile);
+	return {
+		...settings,
+		profile,
+		maxProfile,
+		cpus: Math.min(settings.cpus, resources.cpus),
+		memoryMiB: Math.min(settings.memoryMiB, resources.memoryMiB),
+		rootDiskMiB: Math.min(settings.rootDiskMiB, resources.rootDiskMiB),
+	};
+}

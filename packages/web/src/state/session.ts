@@ -29,12 +29,12 @@ function commit(next: SessionStreamState): void {
 }
 
 /**
- * Seed the live store from a persisted snapshot. Only the first call for a
- * session applies — later refetches and re-renders must never clobber streamed
- * state (or restart the stream).
+ * Seed the live store from a persisted snapshot. Re-seed when returning to a
+ * session whose stream is no longer active, but never while the live stream is
+ * running: refetches and re-renders must not clobber streamed state.
  */
 export function ensureSession(id: string, session: OpenSessionResponse): void {
-	if (activeSessionId === id) return;
+	if (activeSessionId === id && streamingSessionId === id) return;
 	activeSessionId = id;
 	writeStoredSessionId(id);
 	commit({
@@ -43,6 +43,7 @@ export function ensureSession(id: string, session: OpenSessionResponse): void {
 		tokens: session.tokens,
 		cost: session.cost,
 		running: session.running,
+		phase: session.running ? (session.runPhase ?? "running") : null,
 		status: session.running ? { kind: "thinking" } : { kind: "idle" },
 	});
 }
@@ -53,6 +54,7 @@ export function appendUserMessage(content: string): void {
 		...current,
 		messages: [...current.messages, { role: "user", content }],
 		running: true,
+		phase: "preparing-workspace",
 		status: { kind: "thinking" },
 	});
 }
@@ -63,7 +65,12 @@ export function appendError(message: string): void {
 }
 
 export function setRunning(running: boolean): void {
-	commit({ ...current, running, status: running ? current.status : { kind: "idle" } });
+	commit({
+		...current,
+		running,
+		status: running ? current.status : { kind: "idle" },
+		...(running ? {} : { phase: null, queuePosition: null, boxId: null }),
+	});
 }
 
 function handleEvent(sessionId: string, event: ServerEvent): void {

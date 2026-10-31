@@ -1,6 +1,6 @@
 import { Effect } from "effect";
-import type { BoxLease } from "@vvtxn/box/types.ts";
 import type { Tool, ToolResult } from "@vvtxn/relay/core/tools/types.ts";
+import type { SandboxProvider } from "./sandbox.ts";
 
 const SCRIPT_PATH = "/tmp/relay-browser-check.cjs";
 const MAX_BODY = 5_000;
@@ -114,7 +114,7 @@ function optionalNumber(value: unknown, fallback: number, max: number): number {
 	return Math.min(Math.floor(value), max);
 }
 
-export function createBrowserTool(lease: BoxLease): Tool {
+export function createBrowserTool(provider: SandboxProvider): Tool {
 	return {
 		definition: {
 			type: "function",
@@ -162,7 +162,7 @@ export function createBrowserTool(lease: BoxLease): Tool {
 			},
 		},
 		usageHint:
-			"Use browser for rendered UI checks inside this box. It runs Playwright against a URL and returns title, DOM text, console errors, and any evaluated result. Never create .mjs probe scripts or install browsers.",
+			"Use browser for rendered UI checks inside the sandbox. It runs Playwright against a URL and returns title, DOM text, console errors, and any evaluated result. Never create .mjs probe scripts or install browsers.",
 		execute: (input): Effect.Effect<ToolResult> =>
 			Effect.gen(function* () {
 				const value = (input ?? {}) as BrowserInput;
@@ -194,17 +194,19 @@ export function createBrowserTool(lease: BoxLease): Tool {
 					`printf '%s' '${scriptBase64}' | base64 -d > ${SCRIPT_PATH} && ` +
 					`RELAY_BROWSER_CONFIG='${configBase64}' PLAYWRIGHT_BROWSERS_PATH=/opt/playwright ` +
 					`node ${SCRIPT_PATH}`;
-				const result = yield* lease.exec(command, { timeoutMs: 180_000 }).pipe(
-					Effect.catchTag("BoxError", (error) =>
-						Effect.succeed({
-							code: 1,
-							stdout: "",
-							stderr: error.message,
-							durationMs: 0,
-							truncated: false,
-						}),
-					),
-				);
+				const result = yield* provider
+					.withLease((lease) => lease.exec(command, { timeoutMs: 180_000 }))
+					.pipe(
+						Effect.catchTag("BoxError", (error) =>
+							Effect.succeed({
+								code: 1,
+								stdout: "",
+								stderr: error.message,
+								durationMs: 0,
+								truncated: false,
+							}),
+						),
+					);
 				const line = result.stdout.trim().split("\n").at(-1) ?? "";
 				let parsedResult: BrowserResult | null = null;
 				try {

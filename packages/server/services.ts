@@ -4,6 +4,7 @@ import { userInfo } from "node:os";
 import { dirname, join } from "node:path";
 import type { BoxManager } from "@vvtxn/box/types.ts";
 import { Boxes, boxesLayer } from "@vvtxn/box/service.ts";
+import { createWorkspaceManager, type WorkspaceManager } from "@vvtxn/box/workspaces.ts";
 import type { AuthenticatedUser, AuthIdentity } from "@vvtxn/relay/core/index.ts";
 import {
 	createSecretCipher,
@@ -40,6 +41,7 @@ export interface ServerServices {
 	authSessions: DatabaseAuthSessionStore;
 	sessionStore: DatabaseSessionStore;
 	runs: RunManager;
+	workspaces: WorkspaceManager;
 	/** The fixed identity used by local auth; null in GitHub mode. */
 	localUser: AuthenticatedUser | null;
 	boxes: BoxManager;
@@ -63,6 +65,7 @@ export class AuthSessions extends Context.Service<AuthSessions, DatabaseAuthSess
 ) {}
 export class SessionStore extends Context.Service<SessionStore, DatabaseSessionStore>()("relay/server/SessionStore") {}
 export class Runs extends Context.Service<Runs, RunManager>()("relay/server/Runs") {}
+export class Workspaces extends Context.Service<Workspaces, WorkspaceManager>()("relay/server/Workspaces") {}
 
 // ---------------------------------------------------------------------------
 // Layers
@@ -170,6 +173,15 @@ function createUserSettingsStore(
 	});
 }
 
+/** Per-session durable workspaces, mounted into the project box pool. */
+const workspacesLayer = Layer.effect(
+	Workspaces,
+	Effect.gen(function* () {
+		const config = yield* Config;
+		return createWorkspaceManager(config.box.workspaceRoot);
+	}),
+);
+
 /**
  * The per-process RunManager. Each run builds a provider from the owning
  * user's stored key: the key is per-user, decrypted on demand, and never
@@ -181,12 +193,13 @@ const runsLayer = Layer.effect(
 		const config = yield* Config;
 		const userSettings = yield* UserSettings;
 		const boxes = yield* Boxes;
+		const workspaces = yield* Workspaces;
 		const providerFor = (ownerId: string) =>
 			Effect.gen(function* () {
 				const apiKey = yield* userSettings.getApiKey(ownerId);
 				return apiKey ? new CompletionsProvider({ apiKey, baseURL: config.baseURL }) : null;
 			});
-		return new RunManager({ config, providerFor, boxes });
+		return new RunManager({ config, providerFor, boxes, workspaces });
 	}),
 );
 
@@ -228,7 +241,8 @@ export const serverLayer = (config: ServerConfig) => {
 	const base = databaseLayer.pipe(Layer.provideMerge(configLayer(config)));
 	const stores = storesLayer.pipe(Layer.provideMerge(base));
 	const boxes = boxesLayer(config.box).pipe(Layer.provideMerge(stores));
-	return runsLayer.pipe(Layer.provideMerge(boxes));
+	const workspaces = workspacesLayer.pipe(Layer.provideMerge(boxes));
+	return runsLayer.pipe(Layer.provideMerge(workspaces));
 };
 
 /**
@@ -245,13 +259,21 @@ export async function createServices(config: ServerConfig): Promise<ServerServic
 			const authSessions = yield* AuthSessions;
 			const sessionStore = yield* SessionStore;
 			const runs = yield* Runs;
+			const workspaces = yield* Workspaces;
 			const boxes = yield* Boxes;
 			// Pruning happens inside the session store's write batch; detach the
-			// affected boxes asynchronously so retention can collect them later.
+			// affected boxes and drop their workspaces asynchronously. A session
+			// with an active run is never removed.
 			sessionStore.onPruned = (sessionIds) => {
+				const removable = new Set(sessionIds.filter((sessionId) => !runs.isRunning(sessionId)));
 				void Effect.runPromise(boxes.detachSessions(new Set(sessionIds))).catch((error: unknown) => {
 					console.warn("relay box: could not detach pruned sessions:", error);
 				});
+				if (removable.size > 0) {
+					void Effect.runPromise(workspaces.removeSessions(removable)).catch((error: unknown) => {
+						console.warn("relay workspace: could not remove pruned sessions:", error);
+					});
+				}
 			};
 			const localUser = serverConfig.authMode === "local" ? yield* resolveLocalUser(userStore) : null;
 			return {
@@ -262,6 +284,7 @@ export async function createServices(config: ServerConfig): Promise<ServerServic
 				authSessions,
 				sessionStore,
 				runs,
+				workspaces,
 				localUser,
 				boxes,
 			};

@@ -92,7 +92,7 @@ export function Sidebar(props: {
 	});
 
 	const create = useMutation(() => ({
-		mutationFn: () => startChat(newChatTarget()),
+		mutationFn: () => startChat(newChatTarget(), { forceNew: true }),
 		onSuccess: (id) => {
 			setActionError("");
 			const target = newChatTarget();
@@ -254,8 +254,18 @@ export function Sidebar(props: {
 																		? "session-item active"
 																		: "session-item"
 																}
+																title={
+																	session.running
+																		? `Running: ${session.runPhase ?? "running"}`
+																		: undefined
+																}
 															>
-																<span class="session-preview">{preview(session)}</span>
+																<span class="session-preview">
+																	{session.running && (
+																		<span class="session-running">●</span>
+																	)}
+																	{preview(session)}
+																</span>
 																<span class="session-time">
 																	{formatTimestamp(session.timestamp)}
 																</span>

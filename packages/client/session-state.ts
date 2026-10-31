@@ -11,7 +11,7 @@
  */
 
 import { createUIToolCall, type UIMessage, type UIToolCall } from "@vvtxn/relay/core/display.ts";
-import type { ServerEvent } from "./protocol.ts";
+import type { RunPhase, ServerEvent } from "./protocol.ts";
 
 /** Agent activity shown by a client's status indicator. */
 export type SessionStatus =
@@ -34,6 +34,14 @@ export interface SessionStreamState {
 	running: boolean;
 	/** Current activity, for status displays. */
 	status: SessionStatus;
+	/** Server-reported run lifecycle phase. */
+	phase: RunPhase | null;
+	/** Active run id, when known. */
+	runId: string | null;
+	/** Box leased by the active run, when known. */
+	boxId: string | null;
+	/** Position in the box-acquisition queue. */
+	queuePosition: number | null;
 	/** Authoritative token total reported by the server. */
 	tokens: number;
 	/** Authoritative cost total reported by the server. */
@@ -47,6 +55,10 @@ export const initialSessionStreamState: SessionStreamState = {
 	toolCallIndex: {},
 	running: false,
 	status: { kind: "idle" },
+	phase: null,
+	runId: null,
+	boxId: null,
+	queuePosition: null,
 	tokens: 0,
 	cost: 0,
 };
@@ -103,18 +115,38 @@ export function applyServerEvent(state: SessionStreamState, event: ServerEvent):
 				toolCallIndex,
 				running: true,
 				status: { kind: "thinking" },
+				phase: event.phase,
+				runId: event.runId,
+				boxId: event.boxId ?? null,
+				queuePosition: event.queuePosition ?? null,
 				tokens: event.tokens,
 				cost: event.cost,
 			};
 		}
+		case "run_status":
+			return {
+				...state,
+				running: true,
+				phase: event.phase,
+				runId: event.runId,
+				boxId: event.boxId ?? null,
+				queuePosition: event.queuePosition ?? null,
+			};
 		case "text_delta":
 			return {
 				...state,
 				draftText: state.draftText + event.content,
 				status: { kind: "writing" },
+				// A box sync can finish mid-run; the model speaking again means
+				// the run is back to normal, not still syncing.
+				phase: state.phase === "syncing" ? "running" : state.phase,
 			};
 		case "tool_call_start":
-			return { ...state, status: { kind: "running_tool", toolName: event.name } };
+			return {
+				...state,
+				status: { kind: "running_tool", toolName: event.name },
+				phase: state.phase === "syncing" ? "running" : state.phase,
+			};
 		case "tool_call_args_delta":
 			return state;
 		case "tool_call_end": {
@@ -160,6 +192,10 @@ export function applyServerEvent(state: SessionStreamState, event: ServerEvent):
 				...flushed,
 				running: false,
 				status: { kind: "idle" },
+				phase: null,
+				runId: null,
+				boxId: null,
+				queuePosition: null,
 			};
 		}
 	}

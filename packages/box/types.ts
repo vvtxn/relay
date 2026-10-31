@@ -42,19 +42,29 @@ export interface BoxAttachment {
 	attachedAt: string;
 }
 
-/** Request to find or create a box for a session and lease it. */
+/** Request to find or create a box for a run and lease it. */
 export interface BoxSpec {
 	ownerId: string;
 	projectCwd: string;
 	/** Omitted for a standalone box; the current run path always supplies one. */
 	sessionId?: string;
+	/** Session workspace host path; file tools and sync operate here. */
+	workspace?: string;
+	/** Session workspace path inside the box (for example `/workspace/<key>`). */
+	execPath?: string;
+	/** Active run identity, for diagnostics/status. */
+	runId?: string;
 	settings: BoxSettings;
 	signal?: AbortSignal;
+	/** Called when the request is queued and whenever its 1-based position changes. */
+	onQueued?: (position: number) => void;
 }
 
 export interface BoxStatus {
 	boxId: string;
 	ownerId: string;
+	/** v2 box that owns a session workspace clone; pooled v3 boxes omit this. */
+	legacy?: boolean;
 	originSessionId?: string;
 	attachments: BoxAttachment[];
 	projectCwd: string;
@@ -70,6 +80,7 @@ export interface BoxStatus {
 	capacity?: {
 		maxRunning: number;
 		running: number;
+		queued: number;
 		maxCpus: number;
 		usedCpus: number;
 		maxMemoryMiB: number;
@@ -104,13 +115,20 @@ export interface BoxSyncResult {
 	projectCwd: string;
 	files: BoxSyncFile[];
 	summary: string;
+	/** Branch updated by a thread-branch sync (checkout syncs omit it). */
+	branch?: string;
+	/** Commit created on the thread branch. */
+	commit?: string;
 }
 
 export interface BoxLease {
 	readonly boxId: string;
 	readonly status: BoxStatus;
+	/** Session workspace host path used by file tools and sync. */
 	readonly workspace: string;
-	/** True when this box has a sync baseline and can apply changes to the checkout. */
+	/** Default working directory inside the box for exec. */
+	readonly execPath: string;
+	/** True when this workspace has a sync baseline and can apply changes to the checkout. */
 	readonly syncAvailable: boolean;
 	sync(): Effect.Effect<BoxSyncResult, BoxError>;
 	exec(command: string, options?: ExecOptions): Effect.Effect<ExecResult, BoxError>;
@@ -146,6 +164,8 @@ export interface BoxManager {
 	destroy(boxId: string): Effect.Effect<void, BoxError>;
 	/** Apply the box workspace's changes to the project checkout. */
 	sync(boxId: string): Effect.Effect<BoxSyncResult, BoxError>;
+	/** Resolve the configured image, including the `auto` placeholder. */
+	resolveImage(): Effect.Effect<string, BoxError>;
 	/** Detach missing sessions, retain unattached boxes by TTL, then expire trash. */
 	gc(activeSessionIds: ReadonlySet<string>): Effect.Effect<GcResult, BoxError>;
 	reconcile(): Effect.Effect<void, BoxError>;
@@ -232,6 +252,8 @@ export interface BoxManagerConfig {
 	enabled: boolean;
 	dataDir: string;
 	cacheDir: string;
+	/** Root containing per-project session workspaces mounted into boxes. */
+	workspaceRoot: string;
 	maxRunning: number;
 	/** Total vCPU budget across resident boxes. */
 	maxCpus: number;

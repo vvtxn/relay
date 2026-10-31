@@ -72,6 +72,8 @@ modules stay Effect-free on purpose.
   the TUI; lifecycle-only subcommands skip builds — see `scripts/relay.ts`)
 - **Run CLI (local self-host)**: `pnpm relay:local` (SQLite + local auth; same subcommands)
 - **Open web client**: `pnpm relay web` / `pnpm relay:local web`
+- **List/attach threads**: `pnpm relay threads [--all]` and `pnpm relay attach <sessionId>`; one background server
+  can serve several CLI processes, and runs continue after a CLI exits
 - **Stop/status the background server**: `pnpm relay stop|status` / `pnpm relay:local stop|status` (mode-specific
   state files)
 - **Manage workspaces**: `pnpm relay workspace add|list|remove [path]` or `pnpm relay:local workspace …`

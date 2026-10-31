@@ -55,3 +55,9 @@ export function workspaceCwd(): string {
 export function resumeRequested(): boolean {
 	return process.env.RELAY_CLI_RESUME === "1";
 }
+
+/** Session explicitly requested by `relay attach` or `--session`. */
+export function requestedSession(): string | null {
+	const value = process.env.RELAY_CLI_SESSION?.trim();
+	return value ? value : null;
+}

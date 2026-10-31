@@ -6,14 +6,16 @@ import { ensureApiKey, ensureAuthenticated, ensureServer, printStatus, runWeb, s
 import { runFontsCommand } from "./fonts.ts";
 import { runWorkspaceCommand } from "./workspace.ts";
 import { runBoxCommand } from "./box.ts";
+import { runAttach, runThreads } from "./threads.ts";
 
 const args = process.argv.slice(2);
 const command = args[0];
 
-/** Flags for the default command: `relay [--continue] [--workspace <path>]`. */
-function parseRunFlags(argv: string[]): { resume: boolean; workspace: string | null } {
+/** Flags for the default command: `relay [--continue] [--workspace <path>] [--session <id>]`. */
+function parseRunFlags(argv: string[]): { resume: boolean; workspace: string | null; session: string | null } {
 	let resume = false;
 	let workspace: string | null = null;
+	let session: string | null = null;
 	for (let index = 0; index < argv.length; index++) {
 		const arg = argv[index];
 		if (arg === "-c" || arg === "--continue") {
@@ -23,11 +25,16 @@ function parseRunFlags(argv: string[]): { resume: boolean; workspace: string | n
 			if (!value) throw new Error("--workspace requires a directory path");
 			workspace = value;
 			index += 1;
+		} else if (arg === "--session") {
+			const value = argv[index + 1];
+			if (!value) throw new Error("--session requires a thread id");
+			session = value;
+			index += 1;
 		} else if (arg?.startsWith("-")) {
 			throw new Error(`Unknown option: ${arg}`);
 		}
 	}
-	return { resume, workspace };
+	return { resume, workspace, session };
 }
 
 try {
@@ -48,6 +55,12 @@ try {
 			break;
 		case "status":
 			await printStatus();
+			break;
+		case "threads":
+			await runThreads(args.slice(1));
+			break;
+		case "attach":
+			await runAttach(args.slice(1));
 			break;
 		case "fonts":
 			await runFontsCommand(args.slice(1));
@@ -74,6 +87,13 @@ try {
 					resolveWorkspacePath(flags.workspace),
 				);
 				process.env.RELAY_CLI_WORKSPACE = workspace.cwd;
+			}
+			// An explicit session attaches to an existing thread. Resolve its
+			// canonical workspace first so New Chat and @-mentions stay scoped.
+			if (flags.session) {
+				const session = await createClient(state.url).openSession(flags.session);
+				process.env.RELAY_CLI_SESSION = flags.session;
+				process.env.RELAY_CLI_WORKSPACE = session.header.cwd;
 			}
 			// The agent needs an LLM API key, entered only in the web Settings
 			// page; block here until one is saved rather than opening a TUI that
