@@ -194,23 +194,21 @@ export function handleOpenSession(
 		const handle = yield* openSessionHandle(services, sessionId);
 		services.runs.attachHandle(sessionId, handle, services.user.id);
 		const activeBoxId = services.runs.getActiveBoxId(sessionId);
-		const box = yield* (
-			activeBoxId ? services.boxes.status(activeBoxId) : services.boxes.findBySession(sessionId)
-		).pipe(Effect.catchCause(() => Effect.succeed(null)));
+		const box = yield* (activeBoxId ? services.boxes.status(activeBoxId) : Effect.succeed(null)).pipe(
+			Effect.catchCause(() => Effect.succeed(null)),
+		);
 		const projectCwd = handle.getHeader().cwd;
 		const workspace = services.workspaces.find({
 			sessionId,
 			ownerId: services.user.id,
 			projectCwd,
 		});
-		const branchRoot = box?.legacy ? box.workspace : (workspace?.hostPath ?? box?.workspace ?? projectCwd);
-		const branch = yield* attempt(() => getGitBranch(branchRoot)).pipe(
+		const branch = yield* attempt(() => getGitBranch(workspace?.hostPath ?? projectCwd)).pipe(
 			Effect.catchCause(() => Effect.succeed(null)),
 		);
 
 		const runPhase = services.runs.getRunPhase(sessionId);
-		const threadBranch =
-			services.config.threadBranches && services.boxes.enabled && box?.legacy !== true && branch !== null;
+		const threadBranch = services.config.threadBranches && services.boxes.enabled && branch !== null;
 		return json({
 			header: handle.getHeader(),
 			entries: handle.getEntries(),

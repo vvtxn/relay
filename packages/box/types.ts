@@ -15,8 +15,6 @@ export interface BoxSettings {
 	cpus: number;
 	memoryMiB: number;
 	rootDiskMiB: number;
-	setup?: string;
-	resume?: string;
 	env: Record<string, string>;
 	exclude: string[];
 }
@@ -30,16 +28,8 @@ export interface ProjectBoxConfig {
 	cpus?: number;
 	memoryMiB?: number;
 	rootDiskMiB?: number;
-	setup?: string;
-	resume?: string;
 	env?: Record<string, string>;
 	exclude?: string[];
-}
-
-/** A session attached to a box. Attachments are metadata, never identity. */
-export interface BoxAttachment {
-	sessionId: string;
-	attachedAt: string;
 }
 
 /** Request to find or create a box for a run and lease it. */
@@ -63,10 +53,6 @@ export interface BoxSpec {
 export interface BoxStatus {
 	boxId: string;
 	ownerId: string;
-	/** v2 box that owns a session workspace clone; pooled v3 boxes omit this. */
-	legacy?: boolean;
-	originSessionId?: string;
-	attachments: BoxAttachment[];
 	projectCwd: string;
 	/** Host path of the workspace mounted at /workspace. Local-only in v0. */
 	workspace: string;
@@ -128,9 +114,6 @@ export interface BoxLease {
 	readonly workspace: string;
 	/** Default working directory inside the box for exec. */
 	readonly execPath: string;
-	/** True when this workspace has a sync baseline and can apply changes to the checkout. */
-	readonly syncAvailable: boolean;
-	sync(): Effect.Effect<BoxSyncResult, BoxError>;
 	exec(command: string, options?: ExecOptions): Effect.Effect<ExecResult, BoxError>;
 	release(): Effect.Effect<void>;
 }
@@ -140,34 +123,25 @@ export interface GcResult {
 	trashed: number;
 	/** Trash entries removed after their TTL. */
 	removed: number;
-	/** Attachments dropped because their session no longer exists. */
-	detached: number;
 }
 
 export interface BoxManager {
 	readonly enabled: boolean;
 	/** Create a box without starting it. Used for standalone boxes and tests. */
 	create(spec: BoxSpec): Effect.Effect<BoxStatus, BoxError>;
-	/** Find an attached box or create one, then lease it. */
+	/** Find an idle pooled box or create one, then lease it. */
 	acquire(spec: BoxSpec): Effect.Effect<BoxLease, BoxError>;
-	findBySession(sessionId: string): Effect.Effect<BoxStatus | null, BoxError>;
 	status(boxId: string): Effect.Effect<BoxStatus | null, BoxError>;
 	list(ownerId?: string): Effect.Effect<BoxStatus[], BoxError>;
-	attach(boxId: string, sessionId: string): Effect.Effect<BoxStatus, BoxError>;
-	detach(boxId: string, sessionId: string): Effect.Effect<void, BoxError>;
-	/** Drop attachments for sessions that no longer exist. */
-	detachSessions(sessionIds: ReadonlySet<string>): Effect.Effect<number, BoxError>;
 	resize(boxId: string, profile: BoxProfile): Effect.Effect<BoxStatus, BoxError>;
 	pause(boxId: string): Effect.Effect<void, BoxError>;
 	resume(boxId: string): Effect.Effect<void, BoxError>;
 	stop(boxId: string): Effect.Effect<void, BoxError>;
 	destroy(boxId: string): Effect.Effect<void, BoxError>;
-	/** Apply the box workspace's changes to the project checkout. */
-	sync(boxId: string): Effect.Effect<BoxSyncResult, BoxError>;
 	/** Resolve the configured image, including the `auto` placeholder. */
 	resolveImage(): Effect.Effect<string, BoxError>;
-	/** Detach missing sessions, retain unattached boxes by TTL, then expire trash. */
-	gc(activeSessionIds: ReadonlySet<string>): Effect.Effect<GcResult, BoxError>;
+	/** Retain stopped boxes by TTL, then expire trash. */
+	gc(): Effect.Effect<GcResult, BoxError>;
 	reconcile(): Effect.Effect<void, BoxError>;
 	shutdown(): Effect.Effect<void, BoxError>;
 }
@@ -266,8 +240,7 @@ export interface BoxManagerConfig {
 	/** Idle duration before a paused/ready box is stopped. Zero disables stopping. */
 	stopMs: number;
 	acquireTimeoutMs: number;
-	setupTimeoutMs: number;
-	/** How long an unattached box is kept before it is trashed. */
+	/** How long a stopped box is kept before it is trashed. */
 	retentionMs: number;
 	/** Highest profile an agent may select. */
 	maxProfile: BoxProfile;

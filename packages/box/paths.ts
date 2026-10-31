@@ -8,7 +8,7 @@ export const BOX_FILE_MODE = 0o600;
 
 /**
  * Generate an independent, filesystem-safe box id. Boxes are not derived from
- * sessions: a box can outlive its attachments and be attached elsewhere.
+ * sessions: a pooled worker outlives every run that leases it.
  */
 export function createBoxId(): string {
 	return randomBytes(18).toString("base64url");
@@ -41,18 +41,8 @@ export function manifestPath(dataDir: string, boxId: string): string {
 	return join(boxDir(dataDir, boxId), "box.json");
 }
 
-export function logsDir(dataDir: string, boxId: string): string {
-	return join(boxDir(dataDir, boxId), "logs");
-}
-
 export function trashDir(dataDir: string): string {
 	return join(boxesRoot(dataDir), ".trash");
-}
-
-/** Create the directories a box owns, with private permissions. */
-export function ensureBoxDirs(dataDir: string, boxId: string): void {
-	mkdirSync(logsDir(dataDir, boxId), { recursive: true, mode: BOX_DIR_MODE });
-	mkdirSync(trashDir(dataDir), { recursive: true, mode: BOX_DIR_MODE });
 }
 
 /**

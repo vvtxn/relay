@@ -414,9 +414,4 @@ export class Terminal {
 		if (this.defaultBgHex) this.write(OSC_RESET_BACKGROUND);
 		this.exitAlternateScreen();
 	}
-
-	/** @deprecated Use dispose() instead */
-	clear() {
-		this.dispose();
-	}
 }

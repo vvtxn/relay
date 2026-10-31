@@ -5,7 +5,6 @@ import type { WorkspaceManager } from "@vvtxn/box/workspaces.ts";
 import { DisabledBoxManager } from "@vvtxn/box/manager.ts";
 import { resolveProjectBoxSettings } from "@vvtxn/box/config.ts";
 import { isPreparedBoxImage } from "@vvtxn/box/images.ts";
-import { createWorkspaceBaseline, hasWorkspaceBaseline } from "@vvtxn/box/sync.ts";
 import { clampBoxSettings, profileForSettings } from "@vvtxn/box/profiles.ts";
 import { createDelegateTool, createToolRegistry, createWorkspaceTools } from "@vvtxn/relay/core/tools/index.ts";
 import { expandMentions, validateWorkspacePath } from "@vvtxn/relay/core/workspace.ts";
@@ -369,97 +368,40 @@ export class RunManager {
 			let sandbox: SandboxProvider | null = null;
 
 			if (boxes.enabled) {
-				const existing = yield* boxes.findBySession(sessionId);
-				const legacy = existing?.legacy ? existing : null;
-				if (legacy) {
-					// Compatibility path: v2 boxes own their workspace clone and
-					// stay session-affine until they are retired.
-					const legacyImage =
-						legacy.settings.image === "auto" ? yield* boxes.resolveImage() : legacy.settings.image;
-					const legacySettings = { ...legacy.settings, image: legacyImage };
-					boxSettings = legacySettings;
-					boxImage = legacyImage;
-					// Backfill before the provider snapshots sync availability; a
-					// file-only run never leases the box, so waiting for `acquire`
-					// would leave it unable to sync its changes.
-					if (!hasWorkspaceBaseline(legacy.workspace)) {
-						const created = yield* attempt(() => createWorkspaceBaseline(legacy.workspace)).pipe(
-							Effect.catchCause((cause) =>
-								Effect.sync(() => {
-									console.warn(
-										`relay box: could not initialize the legacy sync baseline: ${causeMessage(cause)}`,
-									);
-									return false;
-								}),
-							),
-						);
-						if (created) {
-							console.warn(
-								`relay box: initialized a sync baseline for legacy box ${legacy.boxId}; ` +
-									"earlier changes remain in the box workspace",
-							);
-						}
-					}
-					const legacyWorkspace: RunWorkspace = {
-						hostPath: legacy.workspace,
-						execPath: "/workspace",
-						projectCwd: legacy.projectCwd,
-						sync: () =>
-							workspaces.syncCheckout({
-								projectCwd: legacy.projectCwd,
-								hostPath: legacy.workspace,
-							}),
-					};
-					sandbox = createSandboxProvider({
-						boxes,
-						settings: legacySettings,
-						runId,
-						sessionId,
-						ownerId,
-						projectCwd: legacy.projectCwd,
-						workspace: legacyWorkspace,
-						signal: abort.signal,
-						onPhase: setPhase,
-					});
-					cwd = legacy.workspace;
-				} else {
-					const project = yield* attempt(() => validateWorkspacePath(storedCwd, config.workspaceRoots));
-					if (!project.ok) {
-						return yield* Effect.fail(
-							new Error(`Workspace "${storedCwd}" is not usable: ${project.message}`),
-						);
-					}
-					const settings = yield* attempt(() => resolveProjectBoxSettings(project.path, config.box.defaults));
-					const image = settings.image === "auto" ? yield* boxes.resolveImage() : settings.image;
-					const runSettings = clampBoxSettings({ ...settings, image }, config.box.maxProfile);
-					boxSettings = runSettings;
-					boxImage = image;
-					const workspace = yield* workspaces.ensure({
-						sessionId,
-						ownerId,
-						projectCwd: project.path,
-						exclude: settings.exclude,
-					});
-					const runWorkspace: RunWorkspace = {
-						hostPath: workspace.hostPath,
-						execPath: workspace.execPath,
-						projectCwd: workspace.projectCwd,
-						sync: () =>
-							config.threadBranches ? workspaces.sync(workspace) : workspaces.syncCheckout(workspace),
-					};
-					sandbox = createSandboxProvider({
-						boxes,
-						settings: runSettings,
-						runId,
-						sessionId,
-						ownerId,
-						projectCwd: project.path,
-						workspace: runWorkspace,
-						signal: abort.signal,
-						onPhase: setPhase,
-					});
-					cwd = workspace.hostPath;
+				const project = yield* attempt(() => validateWorkspacePath(storedCwd, config.workspaceRoots));
+				if (!project.ok) {
+					return yield* Effect.fail(new Error(`Workspace "${storedCwd}" is not usable: ${project.message}`));
 				}
+				const settings = yield* attempt(() => resolveProjectBoxSettings(project.path, config.box.defaults));
+				const image = settings.image === "auto" ? yield* boxes.resolveImage() : settings.image;
+				const runSettings = clampBoxSettings({ ...settings, image }, config.box.maxProfile);
+				boxSettings = runSettings;
+				boxImage = image;
+				const workspace = yield* workspaces.ensure({
+					sessionId,
+					ownerId,
+					projectCwd: project.path,
+					exclude: settings.exclude,
+				});
+				const runWorkspace: RunWorkspace = {
+					hostPath: workspace.hostPath,
+					execPath: workspace.execPath,
+					projectCwd: workspace.projectCwd,
+					sync: () =>
+						config.threadBranches ? workspaces.sync(workspace) : workspaces.syncCheckout(workspace),
+				};
+				sandbox = createSandboxProvider({
+					boxes,
+					settings: runSettings,
+					runId,
+					sessionId,
+					ownerId,
+					projectCwd: project.path,
+					workspace: runWorkspace,
+					signal: abort.signal,
+					onPhase: setPhase,
+				});
+				cwd = workspace.hostPath;
 			} else {
 				const workspace = yield* attempt(() => validateWorkspacePath(storedCwd, config.workspaceRoots));
 				if (!workspace.ok) {
@@ -555,10 +497,11 @@ export class RunManager {
 				if (abort.signal.aborted) return "cancelled";
 				if (Ref.getUnsafe(runRef).hadError) return "error";
 
-				// A successful boxed run lands its changes in the project checkout.
-				// The box tool can sync mid-run too; this is the safety net for the
+				// A successful boxed run lands its changes in the thread branch
+				// (or the project checkout when thread branches are disabled). The
+				// box tool can sync mid-run too; this is the safety net for the
 				// agent forgetting to call it. A failed sync is a run error because
-				// the user's checkout did not receive the work.
+				// the project did not receive the work.
 				if (sandbox?.syncAvailable) {
 					const synced = yield* sandbox.sync().pipe(
 						Effect.map((result) => ({ ok: true as const, result })),

@@ -34,8 +34,6 @@ export {
 } from "./session-state.ts";
 export type { SessionStatus, SessionStreamState } from "./session-state.ts";
 export type {
-	BoxSyncFile,
-	BoxSyncResponse,
 	ConfigResponse,
 	CreateSessionRequest,
 	CreateSessionResponse,

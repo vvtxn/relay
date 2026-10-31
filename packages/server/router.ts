@@ -16,9 +16,7 @@ import { causeMessage } from "@vvtxn/relay/core/effect.ts";
 import type { HealthResponse } from "@vvtxn/client/protocol.ts";
 import { handleCallback, handleLogin, handleLogout, handOffBrowserSession } from "./auth-routes.ts";
 import {
-	handleAttachBox,
 	handleCreateBox,
-	handleDetachBox,
 	handleGetBox,
 	handleListBoxes,
 	handlePauseBox,
@@ -26,9 +24,8 @@ import {
 	handleResizeBox,
 	handleResumeBox,
 	handleStopBox,
-	handleSyncBox,
 } from "./boxes.ts";
-import { LEGACY_SESSION_COOKIE, resolveRequestUser } from "./identity.ts";
+import { resolveRequestUser } from "./identity.ts";
 import {
 	BadRequestError,
 	error,
@@ -144,15 +141,7 @@ function authenticated(services: ServerServices, build: (services: RequestServic
 			const user = yield* resolveRequestUser(services, request);
 			if (!user) return error(401, "Unauthorized");
 			yield* handOffBrowserSession(services, request).pipe(Effect.catchCause(() => Effect.void));
-			const response = yield* build({ ...services, user });
-			if (services.config.authMode !== "local") return response;
-			// A browser that previously signed into cloud mode may still hold the
-			// OAuth session cookie. Local mode has its own identity, so retire it.
-			return HttpServerResponse.expireCookieUnsafe(response, LEGACY_SESSION_COOKIE, {
-				httpOnly: true,
-				sameSite: "lax",
-				path: "/",
-			});
+			return yield* build({ ...services, user });
 		}),
 	);
 }
@@ -329,8 +318,8 @@ export function createAppLayer(services: ServerServices) {
 				respond(authenticated(services, (rs) => withSessionId((id) => handleListFiles(rs, id)))),
 			);
 
-			// Boxes are first-class: sessions attach to them, but their lifecycle
-			// is independent of any thread.
+			// Boxes are first-class pooled compute workers; their lifecycle is
+			// independent of any thread.
 			yield* router.add("GET", "/api/boxes", respond(authenticated(services, (rs) => handleListBoxes(rs))));
 			yield* router.add(
 				"POST",
@@ -344,35 +333,12 @@ export function createAppLayer(services: ServerServices) {
 			);
 			yield* router.add(
 				"POST",
-				"/api/boxes/:id/attach",
-				respond(
-					authenticated(services, (rs) =>
-						withSessionId((id) => withRequest((request) => handleAttachBox(rs, id, request))),
-					),
-				),
-			);
-			yield* router.add(
-				"POST",
-				"/api/boxes/:id/detach",
-				respond(
-					authenticated(services, (rs) =>
-						withSessionId((id) => withRequest((request) => handleDetachBox(rs, id, request))),
-					),
-				),
-			);
-			yield* router.add(
-				"POST",
 				"/api/boxes/:id/resize",
 				respond(
 					authenticated(services, (rs) =>
 						withSessionId((id) => withRequest((request) => handleResizeBox(rs, id, request))),
 					),
 				),
-			);
-			yield* router.add(
-				"POST",
-				"/api/boxes/:id/sync",
-				respond(authenticated(services, (rs) => withSessionId((id) => handleSyncBox(rs, id)))),
 			);
 			yield* router.add(
 				"POST",

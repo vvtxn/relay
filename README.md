@@ -29,7 +29,7 @@ over the same wire protocol. Tooling (format, lint, type-check, builds) runs thr
 - **Streaming agent loop** — Async generator that yields events for real-time UI updates as the LLM thinks and uses
   tools
 - **Built-in tools** — Bash, file read/write/edit, and grep for filesystem interaction
-- **Managed boxes (experimental)** — Standalone Microsandbox microVMs with copy-on-write workspaces, live agent-driven
+- **Managed boxes (experimental)** — Pooled Microsandbox microVMs with durable session workspaces, live agent-driven
   resizing, pause/wake, and VM-isolated bash
 - **Shared cloud sessions** — Conversations persist in Turso behind GitHub auth; local self-hosting uses SQLite
 - **Agent-initiated confirmation** — The agent stops and asks before actions that leave the box or are hard to undo
@@ -141,7 +141,7 @@ Relay has two flavors:
 - **Cloud (primary)** — GitHub App OAuth. Callers receive an opaque `relay_cloud_session` cookie (browser) or a bearer
   session token handed over locally (CLI). Each GitHub account gets its own user, sessions, and workspaces.
 - **Local (secondary)** — SQLite and a fixed loopback identity. No login, no auth cookie. The authenticated wrapper
-  rejects non-loopback `Host` headers (DNS-rebinding guard) and retires the legacy pre-split cookie.
+  rejects non-loopback `Host` headers (DNS-rebinding guard).
 
 The rest of this section describes the cloud/GitHub deployment.
 
@@ -194,7 +194,7 @@ canonical (symlink-resolved) path must sit within an allowed root.
 │   │   └── core/           # Agent loop, runner, tools, sessions, context, display
 │   ├── client/             # Wire protocol + RelayClient (@vvtxn/client)
 │   ├── server/             # HTTP + SSE server hosting the runtime (@vvtxn/server)
-│   ├── box/                # Per-session Microsandbox VMs (@vvtxn/box)
+│   ├── box/                # Pooled Microsandbox VMs + session workspaces (@vvtxn/box)
 │   ├── cli/                # TUI client + serve subcommand (@vvtxn/cli)
 │   │   ├── agent/          # App entry point, config, components, hooks
 │   │   └── tui/            # Terminal UI framework (JSX runtime, Yoga layout)
@@ -244,8 +244,8 @@ The single source of truth for the server↔client contract, used by the CLI (No
 An HTTP + SSE server built on `effect/http` and `@effect/platform-node`:
 
 - **RunManager** — one active run per session; bridges agent events onto per-session SSE streams; boxed runs are
-  unrestricted inside the VM and sync their changes back to the project checkout when they complete successfully,
-  while host mode is explicitly unsandboxed
+  unrestricted inside the VM and sync their session workspace changes back to a thread branch when they complete
+  successfully, while host mode is explicitly unsandboxed
 - **Sessions** — create/open/list against Turso (cloud, primary) or local SQLite (self-hosted); per-session workspace
   cwd (file tools are confined to it)
 - **Auth** — GitHub App OAuth in cloud mode, or a fixed loopback identity in local mode, with per-request identity
@@ -254,21 +254,22 @@ An HTTP + SSE server built on `effect/http` and `@effect/platform-node`:
 
 ### `packages/box/` — Managed Microsandbox VMs
 
-Default isolated execution. Boxes are independent of sessions: a box owns a Microsandbox microVM and a
-copy-on-write clone of a project, and sessions attach to it. The agent can resize the current box live; idle boxes
-pause first (services stay warm), then stop after a longer idle window.
+Default isolated execution. Boxes are pooled Microsandbox compute workers per owner and project; sessions own
+durable workspaces and runs lease a box lazily only while a sandbox tool executes. The agent can resize the leased
+box live; idle boxes pause first (services stay warm), then stop after a longer idle window.
 
-- `manager.ts` — box identity, attachments, leases, live resize, pause/stop, budgets, queue, reconciliation, GC
+- `manager.ts` — pooled box lifecycle, leases, live resize, pause/stop, budgets, queue, reconciliation, GC
 - `profiles.ts` — `tiny` (1 vCPU / 2 GB), `small` (2 / 4 GB), `medium` (4 / 8 GB) with disk bundles
-- `workspace.ts` — reflink clone of the current working tree (including dirty/untracked state), linked-worktree handling
-- `sanitize.ts` — removes `.env*`, `.npmrc`, SSH/cloud credentials, and git URL credentials before the box starts
-- `manifest.ts` — versioned `box.json` per box under `RELAY_BOX_DATA_DIR`; sessions are attachments, not identity
+- `workspace.ts` — reflink clone of the project working tree (including dirty/untracked state), linked-worktree handling
+- `workspaces.ts` — durable per-session workspaces, markers, and orphan cleanup
+- `sanitize.ts` — removes `.env*`, `.npmrc`, SSH/cloud credentials, and git URL credentials before the workspace is used
+- `manifest.ts` — versioned `box.json` per pooled worker under `RELAY_BOX_DATA_DIR`; box identity never contains a session id
 - `microsandbox.ts` — the only module that imports the native Microsandbox SDK
 
 Boxes are enabled by default; set `RELAY_BOX=0` for explicitly unsandboxed host execution. See `.env.example` for
 profiles, budgets, idle timers, and image settings. The runtime prompt requires browser verification of rendered UI
 changes and exposes a `browser` tool that runs Playwright inside the managed box. A project can add
-`.relay/box.json` for its image, profile ceiling, and setup/resume hooks. The agent starts at `tiny` and uses the `box`
+`.relay/box.json` for its image, profile ceiling, and resource overrides. The agent starts at `tiny` and uses the `box`
 tool to resize before Playwright/browser tests, large builds, or multiple services. The default ceiling is `small`;
 set `RELAY_BOX_MAX_PROFILE=medium` and raise `RELAY_BOX_MEMORY_BUDGET_MIB` above 8 GiB to enable `medium`.
 
@@ -290,14 +291,15 @@ and ask before actions that leave the box or are hard to undo.
 Boxes require Linux KVM, macOS Apple Silicon, or Windows WHP. The manager enforces a memory/CPU budget in addition to
 the running-box count, so paused boxes and concurrent sessions cannot oversubscribe the host.
 
-Use `relay box list|new|resize|pause|resume|stop|sync|attach|detach|rm` to manage boxes; `relay box new [path]`
-creates a standalone box without starting a thread.
+Use `relay box list|new|resize|pause|resume|stop|rm` to manage boxes; `relay box new [path]` creates a pooled worker
+without starting a thread.
 
-Boxes are the working copy. A successful boxed run syncs its changes back to the project checkout, and the agent can
-apply them earlier with the `box` tool's `sync` action or `relay box sync <boxId>`. The box records a hidden baseline
-when its workspace is cloned, so only changes made in the box are applied; pre-existing uncommitted changes in the
-checkout are not replayed. A checkout that has diverged since the clone fails the apply instead of being overwritten.
-Boxes created before sync support get a baseline on their next run; changes made before that point stay in the box.
+Sessions are the working copies. A successful boxed run commits its session workspace changes to
+`relay/thread/<sessionId>` in the project repository without touching the checkout; the agent can commit earlier with
+the `box` tool's `sync` action. Set `RELAY_THREAD_BRANCHES=0` to apply changes to the checkout instead. Each workspace
+records a hidden baseline when it is cloned, so only changes made in the workspace are applied; pre-existing
+uncommitted changes in the checkout are not replayed. A checkout that has diverged since the clone fails the apply
+instead of being overwritten.
 
 When `RELAY_BOX_GITHUB_TOKEN` (or `GITHUB_TOKEN`) is set, the agent can commit and push from inside the box; the real
 token stays on the host and is substituted only for `RELAY_BOX_GIT_HOST` (default `github.com`). Without a token, local

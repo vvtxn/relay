@@ -14,7 +14,6 @@ import {
 	FileUserSettingsStore,
 	loadMasterKey,
 	loadOrCreateLocalMasterKey,
-	migrateApiKeysToFile,
 	type UserSettingsStore,
 } from "@vvtxn/relay/core/index.ts";
 import { CompletionsProvider } from "@vvtxn/relay/api/providers/completions.ts";
@@ -132,9 +131,8 @@ export const storesLayer = Layer.effectContext(
 
 /**
  * Builds the per-user settings store for the configured backend. The file
- * backend (the default) keeps API keys on the server host and migrates any
- * keys already stored in the database, clearing the cloud columns. The
- * database backend encrypts them at rest under the configured master key.
+ * backend (the default) keeps API keys on the server host. The database
+ * backend encrypts them at rest under the configured master key.
  */
 function createUserSettingsStore(
 	config: ServerConfig,
@@ -147,29 +145,13 @@ function createUserSettingsStore(
 				loadOrCreateLocalMasterKey(config.dataDir);
 			return await createSecretCipher(masterKey);
 		});
-		const databaseStore = () =>
-			new DatabaseUserSettingsStore({
+		if (config.settingsStore === "database") {
+			return new DatabaseUserSettingsStore({
 				client: db,
 				cipher,
 			});
-		if (config.settingsStore === "database") return databaseStore();
-
-		const fileStore = new FileUserSettingsStore({ dir: join(config.dataDir, "settings"), cipher });
-		// Local databases never held cloud keys; only migrate when the database
-		// is remote (the previous default).
-		if (config.database.kind === "turso") {
-			const migration = yield* migrateApiKeysToFile(databaseStore(), fileStore);
-			if (migration.migrated > 0) {
-				console.log(`Migrated ${migration.migrated} API key(s) out of the database into ${config.dataDir}`);
-			}
-			if (migration.failed > 0) {
-				console.error(
-					`Failed to migrate ${migration.failed} API key(s); they remain in the database. ` +
-						`Set the previous RELAY_SECRET_KEY to recover them.`,
-				);
-			}
 		}
-		return fileStore;
+		return new FileUserSettingsStore({ dir: join(config.dataDir, "settings"), cipher });
 	});
 }
 
@@ -261,14 +243,11 @@ export async function createServices(config: ServerConfig): Promise<ServerServic
 			const runs = yield* Runs;
 			const workspaces = yield* Workspaces;
 			const boxes = yield* Boxes;
-			// Pruning happens inside the session store's write batch; detach the
-			// affected boxes and drop their workspaces asynchronously. A session
-			// with an active run is never removed.
+			// Pruning happens inside the session store's write batch; drop the
+			// affected session workspaces asynchronously. A session with an
+			// active run is never removed.
 			sessionStore.onPruned = (sessionIds) => {
 				const removable = new Set(sessionIds.filter((sessionId) => !runs.isRunning(sessionId)));
-				void Effect.runPromise(boxes.detachSessions(new Set(sessionIds))).catch((error: unknown) => {
-					console.warn("relay box: could not detach pruned sessions:", error);
-				});
 				if (removable.size > 0) {
 					void Effect.runPromise(workspaces.removeSessions(removable)).catch((error: unknown) => {
 						console.warn("relay workspace: could not remove pruned sessions:", error);

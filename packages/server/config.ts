@@ -150,8 +150,6 @@ function boxConfigFromEnv(env: Record<string, string | undefined>): BoxManagerCo
 	const workspaceRoot = expandHomePath(
 		envValue(env, "RELAY_SESSION_WORKSPACE_ROOT") ?? join(relayDir(), "workspaces"),
 	);
-	const setup = env.RELAY_BOX_SETUP?.trim();
-	const resume = env.RELAY_BOX_RESUME?.trim();
 	// `small` is the default ceiling so every selectable profile fits the
 	// default memory budget. Raise both to enable `medium`.
 	const maxProfile = boxProfileEnv(env.RELAY_BOX_MAX_PROFILE, "small", "RELAY_BOX_MAX_PROFILE");
@@ -162,12 +160,7 @@ function boxConfigFromEnv(env: Record<string, string | undefined>): BoxManagerCo
 	const profile = profileRank(requestedProfile) > profileRank(maxProfile) ? maxProfile : requestedProfile;
 	const resources = profileResources(profile);
 	// Pause/stop/retention accept zero to disable that transition.
-	const pauseMs = nonNegativeInt(
-		env.RELAY_BOX_PAUSE_MS ?? env.RELAY_BOX_IDLE_MS,
-		5 * 60_000,
-		"RELAY_BOX_PAUSE_MS",
-		24 * 60 * 60_000,
-	);
+	const pauseMs = nonNegativeInt(env.RELAY_BOX_PAUSE_MS, 5 * 60_000, "RELAY_BOX_PAUSE_MS", 24 * 60 * 60_000);
 	const stopMs = nonNegativeInt(env.RELAY_BOX_STOP_MS, 60 * 60_000, "RELAY_BOX_STOP_MS", 7 * 24 * 60 * 60_000);
 	return {
 		enabled: booleanEnv(env.RELAY_BOX, true, "RELAY_BOX"),
@@ -185,12 +178,6 @@ function boxConfigFromEnv(env: Record<string, string | undefined>): BoxManagerCo
 			10 * 60_000,
 			"RELAY_BOX_ACQUIRE_TIMEOUT_MS",
 			60 * 60_000,
-		),
-		setupTimeoutMs: positiveInt(
-			env.RELAY_BOX_SETUP_TIMEOUT_MS,
-			20 * 60_000,
-			"RELAY_BOX_SETUP_TIMEOUT_MS",
-			24 * 60 * 60_000,
 		),
 		retentionMs: nonNegativeInt(
 			env.RELAY_BOX_RETENTION_MS,
@@ -212,8 +199,6 @@ function boxConfigFromEnv(env: Record<string, string | undefined>): BoxManagerCo
 				"RELAY_BOX_ROOT_DISK_MIB",
 				1_048_576,
 			),
-			...(setup ? { setup } : {}),
-			...(resume ? { resume } : {}),
 			env: {},
 			exclude: [],
 		},
@@ -299,8 +284,8 @@ export function serverConfigFromEnv(env: Record<string, string | undefined> = { 
 
 	// GitHub App credentials are required in cloud mode. Local mode ignores
 	// them even if they happen to be present in the same `.env`.
-	const githubClientId = envValue(env, "GITHUB_APP_CLIENT_ID") ?? envValue(env, "GITHUB_CLIENT_ID") ?? "";
-	const githubClientSecret = envValue(env, "GITHUB_APP_CLIENT_SECRET") ?? envValue(env, "GITHUB_CLIENT_SECRET") ?? "";
+	const githubClientId = envValue(env, "GITHUB_APP_CLIENT_ID") ?? "";
+	const githubClientSecret = envValue(env, "GITHUB_APP_CLIENT_SECRET") ?? "";
 	const hasGithubCredentials = githubClientId !== "" && githubClientSecret !== "";
 	if (flavor === "cloud" && !hasGithubCredentials) {
 		throw new Error("GITHUB_APP_CLIENT_ID and GITHUB_APP_CLIENT_SECRET are required in cloud mode");
