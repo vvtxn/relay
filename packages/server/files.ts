@@ -20,8 +20,7 @@ export function handleListFiles(
 			ownerId: services.user.id,
 			projectCwd,
 		});
-		const box = yield* services.boxes.findBySession(sessionId).pipe(Effect.catchCause(() => Effect.succeed(null)));
-		const root = box?.legacy ? box.workspace : (workspace?.hostPath ?? box?.workspace ?? projectCwd);
+		const root = workspace?.hostPath ?? projectCwd;
 		const files = yield* attempt(() => listProjectFiles(root));
 		return json({ cwd: projectCwd, files } satisfies FileListResponse);
 	});

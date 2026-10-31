@@ -261,14 +261,11 @@ export async function createServices(config: ServerConfig): Promise<ServerServic
 			const runs = yield* Runs;
 			const workspaces = yield* Workspaces;
 			const boxes = yield* Boxes;
-			// Pruning happens inside the session store's write batch; detach the
-			// affected boxes and drop their workspaces asynchronously. A session
-			// with an active run is never removed.
+			// Pruning happens inside the session store's write batch; drop the
+			// affected session workspaces asynchronously. A session with an
+			// active run is never removed.
 			sessionStore.onPruned = (sessionIds) => {
 				const removable = new Set(sessionIds.filter((sessionId) => !runs.isRunning(sessionId)));
-				void Effect.runPromise(boxes.detachSessions(new Set(sessionIds))).catch((error: unknown) => {
-					console.warn("relay box: could not detach pruned sessions:", error);
-				});
 				if (removable.size > 0) {
 					void Effect.runPromise(workspaces.removeSessions(removable)).catch((error: unknown) => {
 						console.warn("relay workspace: could not remove pruned sessions:", error);

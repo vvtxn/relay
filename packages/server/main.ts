@@ -153,17 +153,12 @@ export async function startServer(): Promise<void> {
 		);
 	}
 
-	// Reconcile box attachments with the sessions that survived pruning. Boxes
-	// without attachments are retained by TTL, not deleted on sight.
+	// Retain stopped boxes by TTL, then expire their trash.
 	if (services.boxes.enabled) {
 		try {
-			const active = await Effect.runPromise(services.sessionStore.allSessionIds());
-			const collected = await Effect.runPromise(services.boxes.gc(active));
-			if (collected.detached > 0 || collected.trashed > 0 || collected.removed > 0) {
-				console.log(
-					`Box GC: detached ${collected.detached}, trashed ${collected.trashed}, ` +
-						`removed ${collected.removed} old workspace(s).`,
-				);
+			const collected = await Effect.runPromise(services.boxes.gc());
+			if (collected.trashed > 0 || collected.removed > 0) {
+				console.log(`Box GC: trashed ${collected.trashed}, removed ${collected.removed} old workspace(s).`);
 			}
 		} catch (error) {
 			console.error("Box GC failed:", error instanceof Error ? error.message : error);

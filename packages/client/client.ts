@@ -1,10 +1,8 @@
 import type {
-	BoxAttachRequest,
 	BoxListResponse,
 	BoxProfileName,
 	BoxResizeRequest,
 	BoxResponse,
-	BoxSyncResponse,
 	ConfigResponse,
 	CreateBoxRequest,
 	CreateSessionRequest,
@@ -153,26 +151,10 @@ export class RelayClient {
 		return await this.get(`/api/boxes/${encodeURIComponent(boxId)}`);
 	}
 
-	async attachBox(boxId: string, sessionId: string): Promise<BoxResponse> {
-		return await this.post(`/api/boxes/${encodeURIComponent(boxId)}/attach`, {
-			sessionId,
-		} satisfies BoxAttachRequest);
-	}
-
-	async detachBox(boxId: string, sessionId: string): Promise<StatusResponse> {
-		return await this.post(`/api/boxes/${encodeURIComponent(boxId)}/detach`, {
-			sessionId,
-		} satisfies BoxAttachRequest);
-	}
-
 	async resizeBox(boxId: string, profile: BoxProfileName): Promise<BoxResponse> {
 		return await this.post(`/api/boxes/${encodeURIComponent(boxId)}/resize`, {
 			profile,
 		} satisfies BoxResizeRequest);
-	}
-
-	async syncBox(boxId: string): Promise<BoxSyncResponse> {
-		return await this.post(`/api/boxes/${encodeURIComponent(boxId)}/sync`, {});
 	}
 
 	async pauseBox(boxId: string): Promise<StatusResponse> {

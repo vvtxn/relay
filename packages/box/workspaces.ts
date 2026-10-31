@@ -31,7 +31,7 @@ export interface WorkspaceManager {
 	find(input: { sessionId: string; ownerId: string; projectCwd: string }): SessionWorkspace | null;
 	/** Commit changes to the session's thread branch without touching the checkout. */
 	sync(workspace: SessionWorkspace): Effect.Effect<BoxSyncResult, BoxError>;
-	/** Legacy/opt-out path: apply changes directly to the checkout working tree. */
+	/** Checkout path used when thread branches are disabled. */
 	syncCheckout(workspace: Pick<SessionWorkspace, "hostPath" | "projectCwd">): Effect.Effect<BoxSyncResult, BoxError>;
 	removeSessions(sessionIds: ReadonlySet<string>): Effect.Effect<number, BoxError>;
 	gc(activeSessionIds: ReadonlySet<string>): Effect.Effect<number, BoxError>;

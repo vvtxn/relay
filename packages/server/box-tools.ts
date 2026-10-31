@@ -58,7 +58,6 @@ function describeStatus(status: BoxStatus): string {
 		`Box ${status.boxId}`,
 		`State: ${status.state}`,
 		`Profile: ${profile} (${status.settings.cpus} vCPU, ${status.settings.memoryMiB} MiB RAM, ${status.settings.rootDiskMiB} MiB disk)`,
-		`Attachments: ${status.attachments.length === 0 ? "(none)" : status.attachments.map((a) => a.sessionId).join(", ")}`,
 	];
 	if (isPreparedBoxImage(status.settings.image)) {
 		lines.push("Browser tooling: Playwright + Chromium embedded");

@@ -24,7 +24,7 @@ server/
 ├── sandbox.ts       # lazy BoxLease provider shared by bash/browser/future sandbox tools
 ├── box-tools.ts     # box bash executor + model-facing status/resize/sync tool
 ├── browser-tool.ts  # one-shot Playwright check inside a leased box
-├── boxes.ts         # /api/boxes routes (create/list/attach/resize/pause/stop/rm)
+├── boxes.ts         # /api/boxes routes (create/list/resize/pause/resume/stop/rm)
 ├── box-summary.ts   # BoxStatus -> wire BoxSummary projection
 ├── cancel.ts        # /api/sessions/:id/cancel handler
 ├── sse.ts           # GET /api/sessions/:id/events (snapshot + live stream + heartbeat)
@@ -79,7 +79,7 @@ Owns active runs, one per session:
   before `run_finished`; the agent can call the `box` tool's `sync` action earlier. With `RELAY_THREAD_BRANCHES=1`
   (default) the patch is committed to `relay/thread/<sessionId>` in the project repo without touching the checkout;
   set it to `0` for checkout sync. A sync conflict marks the run as an error instead of overwriting a diverged
-  checkout. Legacy v2 boxes remain session-affine and always use checkout sync until retired.
+  checkout.
 - Host runs (`RELAY_BOX=0`) execute directly on the host with no sandbox and no approval prompts; `main.ts` logs a
   warning at startup. In both modes the system prompt adds a Safety section telling the agent to stop and ask before
   actions that leave the box or are hard to undo
@@ -108,8 +108,8 @@ The database store keeps at most `RELAY_MAX_SESSIONS_PER_WORKSPACE` sessions per
 (the local default); Turso deployments default to 10. When a user message is persisted with a finite limit, the
 insert/update and the delete of older sessions plus their entries run in one atomic batch. `pruneAll()` trims
 pre-existing overflow on startup, before any runs are active. `DatabaseSessionStore.onPruned` reports removed session
-ids; `createServices` wires it to `boxes.detachSessions` and `workspaces.removeSessions` so pruned threads do not keep
-box attachments or workspace clones alive. Active runs are never removed.
+ids; `createServices` wires it to `workspaces.removeSessions` so pruned threads do not keep workspace clones alive.
+Active runs are never removed.
 
 The per-session project cwd comes from the client (CLI sends its terminal cwd); the durable session workspace is
 created lazily under `RELAY_SESSION_WORKSPACE_ROOT` and mounted into the project's box pool. File tools are confined to
@@ -193,18 +193,15 @@ starting": it adopts a healthy winner, otherwise it reports the bind error. The 
 | `/api/boxes`                 | GET    | List the caller's boxes + capacity                    |
 | `/api/boxes`                 | POST   | Create a standalone box (optional cwd/profile)        |
 | `/api/boxes/:id`             | GET    | Box status                                            |
-| `/api/boxes/:id/attach`      | POST   | Attach a session (legacy v2 boxes only)               |
-| `/api/boxes/:id/detach`      | POST   | Detach a session (legacy v2 boxes only)               |
 | `/api/boxes/:id/resize`      | POST   | Live-resize to tiny/small/medium                      |
-| `/api/boxes/:id/sync`        | POST   | Legacy box sync (pooled boxes sync via the run)       |
 | `/api/boxes/:id/pause`       | POST   | Pause an idle box (services stay warm)                |
 | `/api/boxes/:id/resume`      | POST   | Resume a paused box                                   |
 | `/api/boxes/:id/stop`        | POST   | Stop an idle box                                      |
-| `/api/boxes/:id`             | DELETE | Detach attachments and remove the box                 |
+| `/api/boxes/:id`             | DELETE | Remove the box                                        |
 
 Payload types live in `@vvtxn/client/protocol.ts` — never redeclare them here. Box routes are owner-checked through
-`ownedBox`; only the box owner may inspect or control it. `GET /api/sessions/:id` includes the attached `box` summary
-when boxes are enabled.
+`ownedBox`; only the box owner may inspect or control it. `GET /api/sessions/:id` includes the active run's `box`
+summary when boxes are enabled.
 
 ## Environment
 
@@ -224,14 +221,13 @@ when boxes are enabled.
 - Settings storage: `RELAY_SETTINGS_STORE` (`file` default, or `database`), `RELAY_DATA_DIR` (default `~/.relay`),
   `RELAY_SECRET_KEY` / `RELAY_SECRET_KEY_FILE` (master key; required with the database backend)
 - Boxes (on by default; `RELAY_BOX=0` selects unsandboxed host execution with a startup warning):
-  `RELAY_BOX_RETENTION_MS` (24h default; applies to stopped boxes
-  even while attached), `RELAY_BOX_PROFILE` (`tiny` default), `RELAY_BOX_MAX_PROFILE` (`small`),
-  `RELAY_BOX_IMAGE` (`auto` by default; uses `relay-box:local` when loaded), `RELAY_BOX_MAX_RUNNING`,
-  `RELAY_BOX_MAX_CPUS`, `RELAY_BOX_MEMORY_BUDGET_MIB`,
+  `RELAY_BOX_RETENTION_MS` (24h default; applies to stopped boxes), `RELAY_BOX_PROFILE` (`tiny` default),
+  `RELAY_BOX_MAX_PROFILE` (`small`), `RELAY_BOX_IMAGE` (`auto` by default; uses `relay-box:local` when loaded),
+  `RELAY_BOX_MAX_RUNNING`, `RELAY_BOX_MAX_CPUS`, `RELAY_BOX_MEMORY_BUDGET_MIB`,
   `RELAY_BOX_VM_OVERHEAD_MIB`, `RELAY_BOX_PAUSE_MS`, `RELAY_BOX_STOP_MS`, `RELAY_BOX_RETENTION_MS`,
-  `RELAY_BOX_ACQUIRE_TIMEOUT_MS`, `RELAY_BOX_SETUP_TIMEOUT_MS`, `RELAY_BOX_DATA_DIR`, `RELAY_BOX_CACHE_DIR`,
+  `RELAY_BOX_ACQUIRE_TIMEOUT_MS`, `RELAY_BOX_DATA_DIR`, `RELAY_BOX_CACHE_DIR`,
   `RELAY_SESSION_WORKSPACE_ROOT`, `RELAY_THREAD_BRANCHES`,
-  `RELAY_BOX_SETUP`, `RELAY_BOX_RESUME`, `RELAY_BOX_GITHUB_TOKEN`, `RELAY_BOX_GIT_HOST`
+  `RELAY_BOX_GITHUB_TOKEN`, `RELAY_BOX_GIT_HOST`
 
 ## Running
 

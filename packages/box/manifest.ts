@@ -2,29 +2,22 @@ import { mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync
 import { join } from "node:path";
 import { BoxError } from "./errors.ts";
 import { profileForSettings } from "./profiles.ts";
-import { boxDir, boxesRoot, BOX_DIR_MODE, BOX_FILE_MODE, logsDir, manifestPath, trashDir } from "./paths.ts";
-import type { BoxAttachment, BoxProfile, BoxSettings, BoxState } from "./types.ts";
+import { boxDir, boxesRoot, BOX_DIR_MODE, BOX_FILE_MODE, manifestPath, trashDir } from "./paths.ts";
+import type { BoxProfile, BoxSettings, BoxState } from "./types.ts";
 
 export const MANIFEST_VERSION = 3;
-
-export type SetupState = "pending" | "ok" | "failed";
 
 export interface BoxManifest {
 	version: number;
 	boxId: string;
-	/** v2 boxes own a session workspace clone; v3 boxes are pooled workers. */
-	legacy?: boolean;
-	originSessionId?: string;
-	attachments: BoxAttachment[];
 	ownerId: string;
 	projectCwd: string;
-	/** Host path mounted at /workspace: a project workspace root for v3. */
+	/** Project workspace root mounted at /workspace; sessions live below it. */
 	workspacePath: string;
 	sandboxName: string;
 	runtime: { kind: string; version: string };
 	settings: BoxSettings;
 	state: BoxState;
-	setupState: SetupState;
 	createdAt: string;
 	lastUsedAt: string;
 	pausedAt?: string;
@@ -36,10 +29,6 @@ function requireString(value: unknown, field: string): string {
 		throw new BoxError({ message: `Invalid box manifest: ${field} must be a non-empty string` });
 	}
 	return value;
-}
-
-function optionalString(value: unknown): string | undefined {
-	return typeof value === "string" && value.length > 0 ? value : undefined;
 }
 
 function parseState(value: unknown): BoxState {
@@ -65,22 +54,6 @@ function parseProfile(value: unknown, fallback: BoxProfile): BoxProfile {
 	return value === "tiny" || value === "small" || value === "medium" ? value : fallback;
 }
 
-function parseAttachments(value: unknown): BoxAttachment[] {
-	if (value === undefined) return [];
-	if (!Array.isArray(value)) throw new BoxError({ message: "Invalid box manifest: attachments must be an array" });
-	const attachments: BoxAttachment[] = [];
-	for (const entry of value) {
-		if (typeof entry !== "object" || entry === null) continue;
-		const item = entry as Partial<BoxAttachment>;
-		if (typeof item.sessionId !== "string" || !item.sessionId) continue;
-		attachments.push({
-			sessionId: item.sessionId,
-			attachedAt: typeof item.attachedAt === "string" ? item.attachedAt : new Date(0).toISOString(),
-		});
-	}
-	return attachments;
-}
-
 function parseSettings(raw: unknown, profileFallback: BoxProfile): BoxSettings {
 	const settings = (raw ?? {}) as Partial<BoxSettings>;
 	if (typeof settings.image !== "string" || !settings.image) {
@@ -99,8 +72,6 @@ function parseSettings(raw: unknown, profileFallback: BoxProfile): BoxSettings {
 		cpus,
 		memoryMiB,
 		rootDiskMiB,
-		...(typeof settings.setup === "string" ? { setup: settings.setup } : {}),
-		...(typeof settings.resume === "string" ? { resume: settings.resume } : {}),
 		env: settings.env ?? {},
 		exclude: settings.exclude ?? [],
 	};
@@ -111,11 +82,9 @@ function parseManifest(raw: unknown): BoxManifest {
 		throw new BoxError({ message: "Invalid box manifest: expected an object" });
 	}
 	const value = raw as Record<string, unknown>;
-	const version = value.version;
-	if (version !== 1 && version !== 2 && version !== MANIFEST_VERSION) {
-		throw new BoxError({ message: `Unsupported box manifest version: ${String(version)}` });
+	if (value.version !== MANIFEST_VERSION) {
+		throw new BoxError({ message: `Unsupported box manifest version: ${String(value.version)}` });
 	}
-	const legacy = version !== MANIFEST_VERSION || value.legacy === true;
 	const boxId = requireString(value.boxId, "boxId");
 	const ownerId = requireString(value.ownerId, "ownerId");
 	const projectCwd = requireString(value.projectCwd, "projectCwd");
@@ -125,20 +94,9 @@ function parseManifest(raw: unknown): BoxManifest {
 	const lastUsedAt = requireString(value.lastUsedAt, "lastUsedAt");
 	const settings = parseSettings(value.settings, "tiny");
 
-	// v1 stored exactly one session id; migrate it to the attachment list.
-	const legacySessionId = optionalString(value.sessionId);
-	const attachments = parseAttachments(value.attachments);
-	if (legacySessionId && !attachments.some((attachment) => attachment.sessionId === legacySessionId)) {
-		attachments.push({ sessionId: legacySessionId, attachedAt: createdAt });
-	}
-	const originSessionId = optionalString(value.originSessionId) ?? legacySessionId ?? attachments[0]?.sessionId;
-
 	return {
 		version: MANIFEST_VERSION,
-		...(legacy ? { legacy: true } : {}),
 		boxId,
-		...(originSessionId ? { originSessionId } : {}),
-		attachments,
 		ownerId,
 		projectCwd,
 		workspacePath,
@@ -149,10 +107,6 @@ function parseManifest(raw: unknown): BoxManifest {
 				: { kind: "microsandbox", version: "unknown" },
 		settings,
 		state: parseState(value.state),
-		setupState:
-			value.setupState === "ok" || value.setupState === "failed" || value.setupState === "pending"
-				? value.setupState
-				: "pending",
 		createdAt,
 		lastUsedAt,
 		...(typeof value.pausedAt === "string" ? { pausedAt: value.pausedAt } : {}),
@@ -171,10 +125,6 @@ export class FileBoxStore {
 
 	dir(boxId: string): string {
 		return boxDir(this.dataDir, boxId);
-	}
-
-	logs(boxId: string): string {
-		return logsDir(this.dataDir, boxId);
 	}
 
 	load(boxId: string): BoxManifest | null {
@@ -212,7 +162,6 @@ export class FileBoxStore {
 
 	write(manifest: BoxManifest): void {
 		mkdirSync(this.dir(manifest.boxId), { recursive: true, mode: BOX_DIR_MODE });
-		mkdirSync(this.logs(manifest.boxId), { recursive: true, mode: BOX_DIR_MODE });
 		const path = manifestPath(this.dataDir, manifest.boxId);
 		const tmp = `${path}.${process.pid}.tmp`;
 		const persisted: BoxManifest = { ...manifest, version: MANIFEST_VERSION };
