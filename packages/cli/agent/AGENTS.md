@@ -99,9 +99,9 @@ Edit/write tool results arrive with a unified diff on `UIToolCall.diff` (live fr
 `index.ts` parses `-c`/`--continue`, `--workspace <path>`, and `--session <id>` (the default command's flags),
 ensures a server exists (see above), then sets `RELAY_SERVER_URL` before importing `app.tsx`. `relay attach <id>` is
 the explicit form: it opens the session, scopes the TUI to its canonical cwd, and sets `RELAY_CLI_SESSION`. It then
-checks `/api/me` (using the token handed over by a browser login in `~/.relay/session.json`). Local mode resolves the
-local identity without a token, so this passes immediately; GitHub mode opens the web client and waits for the sign-in
-to complete (`ensureAuthenticated`).
+checks `/api/me` (using the token handed over by the browser session in `~/.relay/session.json`). Local mode resolves
+the local identity without a token, so this passes immediately; GitHub mode opens the web client and waits for the
+sign-in to complete (`ensureAuthenticated`).
 `--workspace` is validated and registered server-side at this point; the server's
 canonical path becomes `RELAY_CLI_WORKSPACE`. It then checks `/api/settings` — if no LLM API key is configured it opens
 the web Settings page and waits (`ensureApiKey`), so the TUI never starts in an unusable state. `bootstrap()` then

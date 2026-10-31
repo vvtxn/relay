@@ -45,7 +45,7 @@ async function list(): Promise<void> {
 	await withClient(async (client) => {
 		const { boxes } = await client.listBoxes();
 		if (boxes.length === 0) {
-			console.log("No boxes. Enable them with RELAY_BOX=1 and send a message.");
+			console.log("No boxes yet. Send a message, or run `relay box new`.");
 			return;
 		}
 		for (const box of boxes) {

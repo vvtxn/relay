@@ -14,7 +14,7 @@ import type { ServerServices } from "./services.ts";
 import { error, json, requestUrl } from "./http.ts";
 import { isSecureOrigin } from "./cookies.ts";
 import { isLoopbackHost } from "./config.ts";
-import { readSessionToken, SESSION_COOKIE, sessionTtlMs } from "./identity.ts";
+import { readBearerToken, readSessionToken, SESSION_COOKIE, sessionTtlMs } from "./identity.ts";
 import { OAUTH_RETURN_COOKIE, OAUTH_STATE_COOKIE, OAUTH_VERIFIER_COOKIE } from "./identity.ts";
 import { buildAuthorizeUrl, createPkce, createState, exchangeCode, fetchGitHubProfile } from "./github-oauth.ts";
 
@@ -150,5 +150,27 @@ export function handleLogout(
 		}
 		const response = json({ status: "ok" } satisfies StatusResponse);
 		return HttpServerResponse.expireCookieUnsafe(response, SESSION_COOKIE, cookieOptions(services));
+	});
+}
+
+/**
+ * Hand a signed-in browser's session to the CLI. The callback writes the handoff
+ * only at login, so a browser that was already signed in left the terminal
+ * unauthorized. This runs on cookie-authenticated requests and replaces the
+ * handoff only when it is missing or no longer resolves, so a live token for
+ * another session (another browser) keeps the terminal's identity.
+ */
+export function handOffBrowserSession(
+	services: ServerServices,
+	request: HttpServerRequest.HttpServerRequest,
+): Effect.Effect<void, StoreError> {
+	return Effect.gen(function* () {
+		const token = request.cookies[SESSION_COOKIE];
+		if (services.config.authMode !== "github" || !token || readBearerToken(request)) return;
+		if (!isLoopbackHost(services.config.hostname)) return;
+		const stored = readStoredSession();
+		if (stored?.token === token) return;
+		if (stored && (yield* services.authSessions.resolve(stored.token))) return;
+		writeStoredSession({ serverUrl: services.config.publicUrl, token, createdAt: new Date().toISOString() });
 	});
 }

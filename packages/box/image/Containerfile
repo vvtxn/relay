@@ -82,7 +82,7 @@ RUN apt-get update \
         fonts-tlwg-loma-otf \
     && rm -rf /var/lib/apt/lists/*
 
-RUN npm install -g "playwright@${PLAYWRIGHT_VERSION}" "pnpm@11.13.0"
+RUN npm install -g "playwright@${PLAYWRIGHT_VERSION}" "pnpm@12.15.0"
 
 COPY browsers/chromium-linux.zip /tmp/chromium-linux.zip
 COPY browsers/chromium-headless-shell-linux.zip /tmp/chromium-headless-shell-linux.zip

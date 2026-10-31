@@ -152,7 +152,7 @@ export interface BoxManager {
 	acquire(spec: BoxSpec): Effect.Effect<BoxLease, BoxError>;
 	findBySession(sessionId: string): Effect.Effect<BoxStatus | null, BoxError>;
 	status(boxId: string): Effect.Effect<BoxStatus | null, BoxError>;
-	list(): Effect.Effect<BoxStatus[], BoxError>;
+	list(ownerId?: string): Effect.Effect<BoxStatus[], BoxError>;
 	attach(boxId: string, sessionId: string): Effect.Effect<BoxStatus, BoxError>;
 	detach(boxId: string, sessionId: string): Effect.Effect<void, BoxError>;
 	/** Drop attachments for sessions that no longer exist. */
@@ -185,7 +185,6 @@ export type RuntimeStatus =
 export interface RuntimeBoxInfo {
 	name: string;
 	status: RuntimeStatus;
-	boxId?: string;
 }
 
 /** A host-held secret exposed to the guest as a placeholder for allowed hosts. */
@@ -199,7 +198,6 @@ export interface RuntimeCreateInput {
 	name: string;
 	settings: BoxSettings;
 	workspace: string;
-	cacheDir: string;
 	labels: Record<string, string>;
 	/** Host secrets substituted only for their allowed egress destinations. */
 	secrets: readonly BoxSecret[];

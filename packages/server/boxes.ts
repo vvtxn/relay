@@ -93,10 +93,10 @@ export function handleListBoxes(
 ): Effect.Effect<HttpServerResponse.HttpServerResponse, Error> {
 	return Effect.gen(function* () {
 		const boxes = yield* services.boxes
-			.list()
+			.list(services.user.id)
 			.pipe(Effect.catchTag("BoxError", (boxError) => Effect.fail(new Error(boxError.message))));
 		return json({
-			boxes: boxes.filter((box) => box.ownerId === services.user.id).map((box) => boxSummary(box)),
+			boxes: boxes.map((box) => boxSummary(box)),
 		} satisfies BoxListResponse);
 	});
 }
@@ -117,13 +117,16 @@ export function handleAttachBox(
 	request: HttpServerRequest.HttpServerRequest,
 ): Effect.Effect<HttpServerResponse.HttpServerResponse, BadRequestError | NotFoundError | ForbiddenError | Error> {
 	return Effect.gen(function* () {
-		yield* ownedBox(services, boxId);
+		const owned = yield* ownedBox(services, boxId);
 		const body = yield* readJsonBody<BoxAttachRequest>(request);
 		if (!body || typeof body.sessionId !== "string" || !body.sessionId) {
 			return yield* Effect.fail(new BadRequestError('"sessionId" is required'));
 		}
 		// Opening the session verifies ownership before a box is attached to it.
-		yield* openSessionHandle(services, body.sessionId);
+		const session = yield* openSessionHandle(services, body.sessionId);
+		if (owned.projectCwd !== session.getHeader().cwd) {
+			return yield* Effect.fail(new BadRequestError("This box belongs to a different workspace"));
+		}
 		const box = yield* services.boxes
 			.attach(boxId, body.sessionId)
 			.pipe(Effect.catchTag("BoxError", (boxError) => Effect.succeed(boxFailure(boxError))));
@@ -227,10 +230,13 @@ export function handleRemoveBox(
 	return Effect.gen(function* () {
 		const box = yield* ownedBox(services, boxId);
 		for (const attachment of box.attachments) {
-			const detached = yield* services.boxes
-				.detach(boxId, attachment.sessionId)
-				.pipe(Effect.catchTag("BoxError", (boxError) => Effect.succeed(boxFailure(boxError))));
-			if (detached !== undefined) return detached;
+			const detached = yield* services.boxes.detach(boxId, attachment.sessionId).pipe(
+				Effect.map(() => ({ ok: true as const })),
+				Effect.catchTag("BoxError", (boxError) =>
+					Effect.succeed({ ok: false as const, response: boxFailure(boxError) }),
+				),
+			);
+			if (!detached.ok) return detached.response;
 		}
 		return yield* services.boxes.destroy(boxId).pipe(
 			Effect.map(() => json({ status: "ok" } satisfies StatusResponse)),

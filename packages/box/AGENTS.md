@@ -42,6 +42,8 @@ box/
   requests report their position through `BoxSpec.onQueued`.
 - Never copy host credentials into a box. Sanitization runs on every new session workspace clone; explicit env/secrets
   only.
+- The project directory and box data directory must not contain each other. Session workspace clones live under
+  `RELAY_SESSION_WORKSPACE_ROOT`, which must not overlap the project directory either.
 - Pooled v3 boxes ignore `setup`/`resume` hooks: those hooks assume one project checkout at `/workspace`, while a v3
   box mounts a project workspace root. Treat project setup as session-workspace work (or use a legacy box) until a
   workspace-scoped setup hook lands.

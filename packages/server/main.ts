@@ -4,7 +4,6 @@ import { dirname } from "node:path";
 import { Effect, Layer } from "effect";
 import { HttpRouter } from "effect/http";
 import * as NodeHttpServer from "@effect/platform-node/NodeHttpServer";
-import { clearStoredSession } from "@vvtxn/relay/core/index.ts";
 import { type ServerConfig, serverConfigFromEnv } from "./config.ts";
 import { createServices } from "./services.ts";
 import { createAppLayer } from "./router.ts";
@@ -76,9 +75,6 @@ function writeServerState(config: ServerConfig): void {
 /** Starts the HTTP/SSE server. `entry.ts` is the direct executable wrapper. */
 export async function startServer(): Promise<void> {
 	const config = serverConfigFromEnv();
-	// Cloud mode may have handed the CLI a bearer token; local mode has no
-	// session, so drop the stale handoff file when switching modes.
-	if (config.authMode === "local") clearStoredSession();
 	const services = await createServices(config);
 
 	if (services.boxes.enabled) {

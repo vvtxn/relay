@@ -2,12 +2,9 @@ import { Effect } from "effect";
 import { isPreparedBoxImage } from "@vvtxn/box/images.ts";
 import { isBoxProfile, profileForSettings } from "@vvtxn/box/profiles.ts";
 import type { BoxManager, BoxStatus } from "@vvtxn/box/types.ts";
-import { bashToolDefinition } from "@vvtxn/relay/core/tools/bash.ts";
+import { bashToolDefinition, BASH_DEFAULT_TIMEOUT, formatShellResult } from "@vvtxn/relay/core/tools/bash.ts";
 import type { Tool, ToolResult } from "@vvtxn/relay/core/tools/types.ts";
 import type { SandboxProvider } from "./sandbox.ts";
-
-const MAX_OUTPUT = 10_000;
-const DEFAULT_TIMEOUT = 30_000;
 
 /**
  * The normal bash tool, routed into a box lease. It keeps the same schema and
@@ -18,7 +15,8 @@ export function createBoxBashTool(provider: SandboxProvider): Tool {
 		definition: {
 			type: "function",
 			function: {
-				...bashToolDefinition,
+				name: bashToolDefinition.name,
+				description: bashToolDefinition.description,
 				parameters: bashToolDefinition.parameters,
 			},
 		},
@@ -30,7 +28,9 @@ export function createBoxBashTool(provider: SandboxProvider): Tool {
 					return { content: "A non-empty command is required.", isError: true };
 				}
 				const timeoutMs =
-					typeof timeout === "number" && Number.isFinite(timeout) && timeout > 0 ? timeout : DEFAULT_TIMEOUT;
+					typeof timeout === "number" && Number.isFinite(timeout) && timeout > 0
+						? timeout
+						: BASH_DEFAULT_TIMEOUT;
 
 				const result = yield* provider
 					.withLease((lease) => lease.exec(command, { timeoutMs }))
@@ -46,20 +46,7 @@ export function createBoxBashTool(provider: SandboxProvider): Tool {
 						),
 					);
 
-				let output = "";
-				if (result.stdout) output += result.stdout;
-				if (result.stderr) output += (output ? "\n" : "") + `stderr:\n${result.stderr}`;
-				if (!output) output = "(no output)";
-				const truncated = result.truncated || output.length > MAX_OUTPUT;
-				if (output.length > MAX_OUTPUT) {
-					output = output.slice(0, MAX_OUTPUT) + "\n...(truncated)";
-				}
-
-				return {
-					content: result.code === 0 ? output : `exit code ${result.code}\n${output}`,
-					isError: result.code !== 0,
-					meta: { truncated, durationMs: result.durationMs },
-				};
+				return formatShellResult(result);
 			}),
 	};
 }
@@ -113,10 +100,6 @@ export function createBoxTool(manager: BoxManager, provider: SandboxProvider): T
 							type: "string",
 							enum: ["tiny", "small", "medium"],
 							description: "Target profile for the resize action.",
-						},
-						reason: {
-							type: "string",
-							description: "Short reason for the resize; shown in diagnostics.",
 						},
 					},
 					required: ["action"],

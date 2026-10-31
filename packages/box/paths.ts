@@ -2,7 +2,6 @@ import { createHash, randomBytes } from "node:crypto";
 import { closeSync, mkdirSync, openSync, readFileSync, rmSync, writeSync } from "node:fs";
 import { join } from "node:path";
 import { BoxError } from "./errors.ts";
-import type { BoxSettings } from "./types.ts";
 
 export const BOX_DIR_MODE = 0o700;
 export const BOX_FILE_MODE = 0o600;
@@ -13,14 +12,6 @@ export const BOX_FILE_MODE = 0o600;
  */
 export function createBoxId(): string {
 	return randomBytes(18).toString("base64url");
-}
-
-/**
- * Legacy v1 identity. Only used to recognize manifests created before boxes
- * were decoupled from sessions; new code must use {@link createBoxId}.
- */
-export function legacyBoxIdFor(sessionId: string): string {
-	return createHash("sha256").update(sessionId).digest("base64url").slice(0, 26);
 }
 
 /** Short hash that namespaces sandbox names to one Relay data directory. */
@@ -117,9 +108,4 @@ export function acquireDataDirLock(dataDir: string): () => void {
 			// Best effort; a stale pid is reclaimed on the next start.
 		}
 	};
-}
-
-/** Public path helpers shared with the server for diagnostics. */
-export function describeBox(dataDir: string, boxId: string, settings: BoxSettings): string {
-	return `${boxDir(dataDir, boxId)} (${settings.image})`;
 }

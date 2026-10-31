@@ -1,9 +1,9 @@
 import { collectCommand, spawnCommand } from "../command.ts";
 import { scrubbedAgentEnv } from "../env.ts";
-import { defineTool, type Tool } from "./types.ts";
+import { defineTool, type Tool, type ToolResult } from "./types.ts";
 
-const MAX_OUTPUT = 10_000;
-const DEFAULT_TIMEOUT = 30_000;
+export const BASH_MAX_OUTPUT = 10_000;
+export const BASH_DEFAULT_TIMEOUT = 30_000;
 
 /** Shared model-facing definition so alternate executors (boxes) cannot drift. */
 export const bashToolDefinition = {
@@ -29,6 +29,30 @@ export const bashToolDefinition = {
 		required: ["command"],
 	},
 };
+
+/** Normalize a shell result for the model, shared by host and box executors. */
+export function formatShellResult(result: {
+	code: number;
+	stdout: string;
+	stderr: string;
+	durationMs: number;
+	truncated?: boolean;
+}): ToolResult {
+	let output = "";
+	if (result.stdout) output += result.stdout;
+	if (result.stderr) output += (output ? "\n" : "") + `stderr:\n${result.stderr}`;
+	if (!output) output = "(no output)";
+	const outputTruncated = output.length > BASH_MAX_OUTPUT;
+	if (outputTruncated) output = output.slice(0, BASH_MAX_OUTPUT) + "\n...(truncated)";
+	return {
+		content: result.code === 0 ? output : `exit code ${result.code}\n${output}`,
+		isError: result.code !== 0,
+		meta: {
+			truncated: result.truncated === true || outputTruncated,
+			durationMs: result.durationMs,
+		},
+	};
+}
 
 export interface BashToolOptions {
 	/**
@@ -61,7 +85,7 @@ export function createBashTool(cwd?: string, options: BashToolOptions = {}): Too
 					stderr: "piped",
 				});
 
-				const timeoutMs = timeout ?? DEFAULT_TIMEOUT;
+				const timeoutMs = timeout ?? BASH_DEFAULT_TIMEOUT;
 				const timer = setTimeout(() => {
 					try {
 						child.kill();
@@ -76,22 +100,12 @@ export function createBashTool(cwd?: string, options: BashToolOptions = {}): Too
 				const durationMs = Math.round(performance.now() - start);
 				const stdout = new TextDecoder().decode(result.stdout);
 				const stderr = new TextDecoder().decode(result.stderr);
-
-				let output = "";
-				if (stdout) output += stdout;
-				if (stderr) output += (output ? "\n" : "") + `stderr:\n${stderr}`;
-				if (!output) output = "(no output)";
-
-				const truncated = output.length > MAX_OUTPUT;
-				if (truncated) {
-					output = output.slice(0, MAX_OUTPUT) + "\n...(truncated)";
-				}
-
-				return {
-					content: result.success ? output : `exit code ${result.code}\n${output}`,
-					isError: !result.success,
-					meta: { truncated, durationMs },
-				};
+				return formatShellResult({
+					code: result.code,
+					stdout,
+					stderr,
+					durationMs,
+				});
 			} catch (err) {
 				return {
 					content: `Failed to execute command: ${err instanceof Error ? err.message : String(err)}`,

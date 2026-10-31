@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, renameSync, rmSync, statfsSync } from "node:fs";
 import { cp } from "node:fs/promises";
-import { basename, join, relative, resolve, sep } from "node:path";
+import { join, relative, resolve, sep } from "node:path";
 import { BoxError } from "./errors.ts";
 import { sanitizeWorkspace } from "./sanitize.ts";
 import { createWorkspaceBaseline } from "./sync.ts";
@@ -175,8 +175,4 @@ export function cleanupTempWorkspaces(boxDir: string): void {
 		if (!entry.startsWith("workspace.tmp-")) continue;
 		rmSync(join(boxDir, entry), { recursive: true, force: true });
 	}
-}
-
-export function workspaceBasename(path: string): string {
-	return basename(path);
 }
