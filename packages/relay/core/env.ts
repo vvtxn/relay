@@ -10,14 +10,7 @@
  */
 
 /** Exact names the generic pattern would not catch. */
-const SECRET_NAMES = new Set([
-	"TURSO_DB_URL",
-	"TURSO_DB_TOKEN",
-	"GITHUB_APP_CLIENT_ID",
-	"GITHUB_APP_CLIENT_SECRET",
-	"GITHUB_CLIENT_ID",
-	"GITHUB_CLIENT_SECRET",
-]);
+const SECRET_NAMES = new Set(["TURSO_DB_URL", "TURSO_DB_TOKEN", "GITHUB_APP_CLIENT_ID", "GITHUB_APP_CLIENT_SECRET"]);
 
 /** Credential-shaped names (`*_TOKEN`, `*_SECRET`, `*_PASSWORD`, ...). */
 const SECRET_NAME_PATTERN = /(^|_)(SECRET|SECRETS|TOKEN|PASSWORD|PASSPHRASE|CREDENTIAL|CREDENTIALS|API_KEY)(_|$)/i;

@@ -200,7 +200,7 @@ pnpm relay:local # local server serves the same bundled SPA
 
 Server URL defaults to same-origin (`""`), because the relay commands build and serve the SPA themselves. Override it
 per browser via the localStorage key `relay.serverUrl` to point at a different server (which must then allow this
-browser origin). The legacy absolute default is treated as unset.
+browser origin).
 
 ## Dependencies
 

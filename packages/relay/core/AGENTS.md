@@ -25,7 +25,6 @@ core/
 │   ├── sessions.ts       # DatabaseAuthSessionStore: opaque hashed session tokens
 │   ├── settings.ts       # UserSettingsStore contract + DatabaseUserSettingsStore (encrypted keys)
 │   ├── settings-file.ts  # FileUserSettingsStore: per-user encrypted files (the default backend)
-│   ├── settings-migrate.ts # migrateApiKeysToFile(): one-shot database → file move + purge
 │   ├── secret.ts         # AES-GCM SecretCipher, master-key parsing/generation, owner-bound AAD
 │   └── service.ts        # authenticate(): provider + user store → AuthenticatedUser
 ├── prompts.ts            # buildSystemPrompt(): section composition + registry-aware tool guidance

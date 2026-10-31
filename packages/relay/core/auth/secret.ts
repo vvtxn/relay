@@ -4,9 +4,9 @@
  * AES-256-GCM via WebCrypto — the primitive the auth session store already
  * hashes with — under a subkey derived from a 32-byte master key with
  * HKDF-SHA256. Payloads are self-describing (`v1.<iv>.<ciphertext>`, both
- * base64url), so legacy plaintext values stay distinguishable while they are
- * migrated, and the additional authenticated data binds a payload to its owner:
- * a ciphertext copied onto another user (or another file) fails to decrypt.
+ * base64url), and the additional authenticated data binds a payload to its
+ * owner: a ciphertext copied onto another user (or another file) fails to
+ * decrypt.
  */
 
 import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
@@ -35,7 +35,7 @@ export function userSettingsAad(userId: string): string {
 	return `${KEY_INFO}:${userId}`;
 }
 
-/** True for values produced by {@link SecretCipher.encrypt} (vs. legacy plaintext). */
+/** True for values produced by {@link SecretCipher.encrypt}. */
 export function isEncryptedSecret(value: string): boolean {
 	return value.startsWith(PREFIX);
 }

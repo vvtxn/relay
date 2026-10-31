@@ -41,8 +41,8 @@ server/
 Effect Layers; acquisition is sequential (config → database → stores → workspaces → RunManager) and the store layer
 awaits each schema `ready` in order
 (`users` backs the `auth_sessions` foreign key, so that schema is created first). `UserSettings` is built by
-`createUserSettingsStore`: the file backend plus a one-shot migration of database keys, or the encrypted database
-store. `createServices(config)` materializes the bundle once for `main.ts`. The shared `Database` client is the libSQL
+`createUserSettingsStore`: the file backend or the encrypted database store. `createServices(config)` materializes
+the bundle once for `main.ts`. The shared `Database` client is the libSQL
 driver in both modes: a `file:` URL opens embedded SQLite, a `libsql://` URL talks to Turso. `main.ts` closes it on
 SIGTERM/SIGINT so SQLite checkpoints its WAL.
 
@@ -130,9 +130,8 @@ the cwd before every run.
 Two transports:
 
 - **Local (secondary)** — the server seeds a stable `local` identity through the user store and every loopback request
-  resolves to it without a token. The authenticated wrapper rejects non-loopback `Host` headers (DNS-rebinding guard),
-  clears the legacy pre-split cookie, and does not mount OAuth routes.
-  Cloud/GitHub mode uses the separate `relay_cloud_session` cookie.
+  resolves to it without a token. The authenticated wrapper rejects non-loopback `Host` headers (DNS-rebinding guard)
+  and does not mount OAuth routes. Cloud/GitHub mode uses the separate `relay_cloud_session` cookie.
 - **GitHub** — the browser completes a **GitHub App** code + PKCE flow; the server maps the profile through
   `GitHubAuthProvider` → `DatabaseUserStore` and issues an opaque session token (hashed at rest in `auth_sessions`).
   Non-browser clients send `Authorization: Bearer <token>` (the CLI reads the token handed over to
@@ -149,9 +148,9 @@ Two transports:
 The LLM API key is per user, entered once in the web Settings page, and encrypted at rest under a master key
 (`RELAY_SECRET_KEY`/`RELAY_SECRET_KEY_FILE`, or a generated `RELAY_DATA_DIR/secret.key`). The default backend keeps it
 in local files (`RELAY_DATA_DIR/settings/<userId>.json`, mode `0600`, AES-GCM with owner-bound AAD); the database
-backend stores it encrypted in `user_settings` instead. Startup with the file backend migrates any database keys into
-the files and clears them. `getApiKey` is the only plaintext path (used by `RunManager` to build the provider at run
-start, never handed to the model); `GET /api/settings` reads a status that never decrypts, exposing only `{ set, hint }`.
+backend stores it encrypted in `user_settings` instead. `getApiKey` is the only plaintext path (used by `RunManager`
+to build the provider at run start, never handed to the model); `GET /api/settings` reads a status that never
+decrypts, exposing only `{ set, hint }`.
 A missing key fails the run with a clear message, and `handleSendMessage` returns 400 before a doomed run begins.
 
 ### Background state
@@ -208,8 +207,8 @@ summary when boxes are enabled.
 - `LLM_BASE_URL`, `LLM_MODEL`, `LLM_TEMPERATURE`, `LLM_MAX_TOKENS`, `LLM_MAX_COMPLETION_TOKENS`
 - Flavor: `RELAY_FLAVOR=cloud|local` (default cloud; set by the package scripts). Cloud implies Turso + GitHub;
   local implies SQLite + local auth.
-- Cloud required: `TURSO_DB_URL`, `TURSO_DB_TOKEN`, `GITHUB_APP_CLIENT_ID`, `GITHUB_APP_CLIENT_SECRET`
-  (`GITHUB_CLIENT_ID`/`GITHUB_CLIENT_SECRET` still accepted). Local mode ignores them.
+- Cloud required: `TURSO_DB_URL`, `TURSO_DB_TOKEN`, `GITHUB_APP_CLIENT_ID`, `GITHUB_APP_CLIENT_SECRET`. Local mode
+  ignores them.
 - Local: `RELAY_DB_PATH` (default `RELAY_DATA_DIR/relay.db`).
 - `RELAY_PUBLIC_URL` (OAuth callback base), `AUTH_SESSION_TTL_DAYS` (default 30)
 - Hardening: `RELAY_PUBLIC_URL` (HTTPS), `AUTH_ALLOWED_GITHUB`, and `RELAY_WORKSPACE_ROOTS`; local allows any
