@@ -232,6 +232,8 @@ Every change that affects rendered UI must be verified in a real browser before 
 
 - This box has Playwright and Chromium preinstalled at \`/opt/playwright\`.
 - Use the \`browser\` tool for the check; it runs Playwright inside this box.
+- Playwright video recording (\`recordVideo\`) is available; its bundled ffmpeg and the system \`ffmpeg\` are installed.
+  Write recordings and derived clips under \`/tmp\` and remove them when finished.
 - Start the app or dev server with the project's existing command.
 - Never run \`playwright install\` — the browsers are already present.
 - Do not create temporary \`.mjs\` probe scripts or add debugging files to the repository. If you need a temporary script, write it under \`/tmp\` with a \`bash\` heredoc and remove it afterward.

@@ -272,8 +272,8 @@ changes and exposes a `browser` tool that runs Playwright inside the managed box
 tool to resize before Playwright/browser tests, large builds, or multiple services. The default ceiling is `small`;
 set `RELAY_BOX_MAX_PROFILE=medium` and raise `RELAY_BOX_MEMORY_BUDGET_MIB` above 8 GiB to enable `medium`.
 
-Build the prepared toolchain image once (Node 26, pnpm, Playwright + Chromium, git, GitHub CLI, ripgrep, build tools,
-databases):
+Build the prepared toolchain image once (Node 26, pnpm, Playwright + Chromium, Playwright's ffmpeg recorder, system
+`ffmpeg`, git, GitHub CLI, ripgrep, build tools, databases):
 
 ```bash
 pnpm box:image
@@ -281,8 +281,9 @@ pnpm box:image
 
 With the default `RELAY_BOX_IMAGE=auto`, new boxes use `relay-box:local` when it is loaded and fall back to
 `node:26-bookworm` otherwise. Playwright browsers are embedded at `/opt/playwright`, so the agent can run browser tests
-without downloading Chromium inside every box. When the prepared image is active, the agent's system prompt requires
-real-browser verification of rendered UI changes.
+without downloading Chromium inside every box. The image also includes Playwright's ffmpeg recorder and the system
+`ffmpeg` command, so the agent can record and process videos of rendered flows. When the prepared image is active, the
+agent's system prompt requires real-browser verification of rendered UI changes.
 
 Boxed runs are unrestricted inside the VM: it is the execution boundary. Host mode runs directly on the host with no
 sandbox and no approval prompts; the server logs a warning at startup. In both modes the agent is instructed to stop

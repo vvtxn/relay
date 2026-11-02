@@ -1,9 +1,10 @@
 /**
  * Build the prepared box image and load it into the local Microsandbox cache.
  *
- * The image contains Node 26, pnpm, Playwright + Chromium, git, ripgrep, and
- * the rest of the common agent toolchain. Boxes select it automatically when
- * RELAY_BOX_IMAGE is `auto` (the default).
+ * The image contains Node 26, pnpm, Playwright + Chromium (with its ffmpeg
+ * recorder), system ffmpeg, git, ripgrep, and the rest of the common agent
+ * toolchain. Boxes select it automatically when RELAY_BOX_IMAGE is `auto`
+ * (the default).
  *
  * Playwright browser archives are downloaded once into the ignored
  * `packages/box/image/browsers` directory and copied into the build. This
@@ -28,6 +29,7 @@ const noCache = process.argv.includes("--no-cache");
 
 const FALLBACK_VERSION = "1.49.1";
 const FALLBACK_REVISION = "1148";
+const FALLBACK_FFMPEG_REVISION = "1010";
 
 interface BrowserArtifact {
 	name: string;
@@ -37,8 +39,10 @@ interface BrowserArtifact {
 interface PlaywrightBrowsers {
 	version: string;
 	revision: string;
+	ffmpegRevision: string;
 	chromium: BrowserArtifact;
 	headlessShell: BrowserArtifact;
+	ffmpeg: BrowserArtifact;
 }
 
 function commandExists(command: string): boolean {
@@ -71,6 +75,7 @@ function playwrightBrowsers(): PlaywrightBrowsers {
 	const fallback: PlaywrightBrowsers = {
 		version: FALLBACK_VERSION,
 		revision: FALLBACK_REVISION,
+		ffmpegRevision: FALLBACK_FFMPEG_REVISION,
 		chromium: {
 			name: "chromium-linux.zip",
 			url: `https://playwright.azureedge.net/builds/chromium/${FALLBACK_REVISION}/chromium-linux.zip`,
@@ -78,6 +83,10 @@ function playwrightBrowsers(): PlaywrightBrowsers {
 		headlessShell: {
 			name: "chromium-headless-shell-linux.zip",
 			url: `https://playwright.azureedge.net/builds/chromium/${FALLBACK_REVISION}/chromium-headless-shell-linux.zip`,
+		},
+		ffmpeg: {
+			name: "ffmpeg-linux.zip",
+			url: `https://playwright.azureedge.net/builds/ffmpeg/${FALLBACK_FFMPEG_REVISION}/ffmpeg-linux.zip`,
 		},
 	};
 	const executable = join(root, "node_modules", ".bin", "playwright");
@@ -125,11 +134,33 @@ function playwrightBrowsers(): PlaywrightBrowsers {
 	const chromium = chromiumUrl ?? fallback.chromium.url;
 	const headlessShell = headlessUrl ?? fallback.headlessShell.url;
 	const revisionMatch = /\/builds\/chromium\/(\d+)\//.exec(chromium);
+
+	// Playwright records video through its own ffmpeg build, not the distro
+	// package, so download the matching artifact alongside Chromium.
+	let ffmpegUrl: string | null = null;
+	const ffmpegResult = spawnSync(executable, ["install", "--dry-run", "ffmpeg"], {
+		cwd: root,
+		encoding: "utf8",
+		stdio: ["ignore", "pipe", "ignore"],
+	});
+	if (ffmpegResult.status === 0 && ffmpegResult.stdout) {
+		for (const line of ffmpegResult.stdout.split("\n")) {
+			const trimmed = line.trim();
+			if (trimmed.startsWith("Download url:")) {
+				ffmpegUrl = trimmed.slice("Download url:".length).trim();
+				break;
+			}
+		}
+	}
+	const ffmpeg = ffmpegUrl ?? fallback.ffmpeg.url;
+	const ffmpegRevisionMatch = /\/builds\/ffmpeg\/(\d+)\//.exec(ffmpeg);
 	return {
 		version,
 		revision: revisionMatch?.[1] ?? fallback.revision,
+		ffmpegRevision: ffmpegRevisionMatch?.[1] ?? fallback.ffmpegRevision,
 		chromium: { name: "chromium-linux.zip", url: chromium },
 		headlessShell: { name: "chromium-headless-shell-linux.zip", url: headlessShell },
+		ffmpeg: { name: "ffmpeg-linux.zip", url: ffmpeg },
 	};
 }
 
@@ -147,20 +178,23 @@ async function download(url: string, destination: string): Promise<void> {
 
 async function ensureBrowsers(browsers: PlaywrightBrowsers): Promise<void> {
 	const marker = join(browserDir, ".version");
-	const expected = `${browsers.version}-${browsers.revision}`;
+	const expected = `${browsers.version}-${browsers.revision}-ffmpeg${browsers.ffmpegRevision}`;
 	mkdirSync(browserDir, { recursive: true });
 	if (existsSync(marker) && readFileSync(marker, "utf8").trim() === expected) {
 		const chromium = join(browserDir, browsers.chromium.name);
 		const headless = join(browserDir, browsers.headlessShell.name);
-		if (existsSync(chromium) && existsSync(headless)) {
+		const ffmpeg = join(browserDir, browsers.ffmpeg.name);
+		if (existsSync(chromium) && existsSync(headless) && existsSync(ffmpeg)) {
 			console.log(`Using cached Playwright browsers (${expected})`);
 			return;
 		}
 	}
 	rmSync(join(browserDir, browsers.chromium.name), { force: true });
 	rmSync(join(browserDir, browsers.headlessShell.name), { force: true });
+	rmSync(join(browserDir, browsers.ffmpeg.name), { force: true });
 	await download(browsers.chromium.url, join(browserDir, browsers.chromium.name));
 	await download(browsers.headlessShell.url, join(browserDir, browsers.headlessShell.name));
+	await download(browsers.ffmpeg.url, join(browserDir, browsers.ffmpeg.name));
 	writeFileSync(marker, `${expected}\n`);
 }
 
@@ -187,6 +221,8 @@ try {
 		`PLAYWRIGHT_VERSION=${browsers.version}`,
 		"--build-arg",
 		`CHROMIUM_REVISION=${browsers.revision}`,
+		"--build-arg",
+		`FFMPEG_REVISION=${browsers.ffmpegRevision}`,
 	];
 	if (noCache) buildArgs.push("--no-cache");
 	buildArgs.push(imageDir);

@@ -13,11 +13,13 @@
 
 ARG PLAYWRIGHT_VERSION=1.49.1
 ARG CHROMIUM_REVISION=1148
+ARG FFMPEG_REVISION=1010
 
 FROM node:26-bookworm
 
 ARG PLAYWRIGHT_VERSION
 ARG CHROMIUM_REVISION
+ARG FFMPEG_REVISION
 
 ENV DEBIAN_FRONTEND=noninteractive \
     LANG=C.UTF-8 \
@@ -33,6 +35,7 @@ RUN apt-get update \
         unzip \
         git \
         git-lfs \
+        ffmpeg \
         openssh-client \
         jq \
         build-essential \
@@ -97,12 +100,16 @@ RUN npm install -g "playwright@${PLAYWRIGHT_VERSION}" "pnpm@12.15.0"
 
 COPY browsers/chromium-linux.zip /tmp/chromium-linux.zip
 COPY browsers/chromium-headless-shell-linux.zip /tmp/chromium-headless-shell-linux.zip
+COPY browsers/ffmpeg-linux.zip /tmp/ffmpeg-linux.zip
 RUN mkdir -p "/opt/playwright/chromium-${CHROMIUM_REVISION}" "/opt/playwright/chromium_headless_shell-${CHROMIUM_REVISION}" \
+    "/opt/playwright/ffmpeg-${FFMPEG_REVISION}" \
     && unzip -q /tmp/chromium-linux.zip -d "/opt/playwright/chromium-${CHROMIUM_REVISION}" \
     && unzip -q /tmp/chromium-headless-shell-linux.zip -d "/opt/playwright/chromium_headless_shell-${CHROMIUM_REVISION}" \
-    && rm -f /tmp/chromium-linux.zip /tmp/chromium-headless-shell-linux.zip \
+    && unzip -q /tmp/ffmpeg-linux.zip -d "/opt/playwright/ffmpeg-${FFMPEG_REVISION}" \
+    && rm -f /tmp/chromium-linux.zip /tmp/chromium-headless-shell-linux.zip /tmp/ffmpeg-linux.zip \
     && chmod 0755 "/opt/playwright/chromium-${CHROMIUM_REVISION}/chrome-linux/chrome" \
-    && chmod 0755 "/opt/playwright/chromium_headless_shell-${CHROMIUM_REVISION}/chrome-linux/headless_shell"
+    && chmod 0755 "/opt/playwright/chromium_headless_shell-${CHROMIUM_REVISION}/chrome-linux/headless_shell" \
+    && chmod 0755 "/opt/playwright/ffmpeg-${FFMPEG_REVISION}/ffmpeg-linux"
 
 # A tiny askpass helper lets git push use the placeholder GITHUB_TOKEN;
 # Microsandbox substitutes the real value only for the configured git host.
