@@ -58,7 +58,7 @@ export interface Session {
 }
 
 /** Lifecycle phase of an active run, shared by the server and every client. */
-export type RunPhase = "preparing-workspace" | "queued" | "starting-box" | "running" | "syncing";
+export type RunPhase = "preparing-workspace" | "queued" | "starting-box" | "running";
 
 export interface SessionSummary {
 	id: string;

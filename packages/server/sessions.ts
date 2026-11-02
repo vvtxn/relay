@@ -2,7 +2,6 @@ import { Effect } from "effect";
 import type { HttpServerRequest, HttpServerResponse } from "effect/http";
 import { resolve } from "node:path";
 import { realpath, stat } from "node:fs/promises";
-import { threadBranchName } from "@vvtxn/box/workspaces.ts";
 import { getGitBranch, validateWorkspacePath } from "@vvtxn/relay/core/workspace.ts";
 import { attempt, type StoreError } from "@vvtxn/relay/core/effect.ts";
 import { homeDir } from "@vvtxn/relay/core/paths.ts";
@@ -208,14 +207,12 @@ export function handleOpenSession(
 		);
 
 		const runPhase = services.runs.getRunPhase(sessionId);
-		const threadBranch = services.config.threadBranches && services.boxes.enabled && branch !== null;
 		return json({
 			header: handle.getHeader(),
 			entries: handle.getEntries(),
 			tokens: handle.getTokens(),
 			cost: handle.getCost(),
 			branch,
-			...(threadBranch ? { threadBranch: threadBranchName(sessionId) } : {}),
 			running: runPhase !== null,
 			...(runPhase ? { runPhase } : {}),
 			...(box ? { box: boxSummary(box) } : {}),

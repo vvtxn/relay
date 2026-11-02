@@ -18,6 +18,8 @@ export interface BoxManifest {
 	runtime: { kind: string; version: string };
 	settings: BoxSettings;
 	state: BoxState;
+	/** Hash of the runtime credential env; values are never persisted. */
+	secretHash?: string;
 	createdAt: string;
 	lastUsedAt: string;
 	pausedAt?: string;
@@ -107,6 +109,7 @@ function parseManifest(raw: unknown): BoxManifest {
 				: { kind: "microsandbox", version: "unknown" },
 		settings,
 		state: parseState(value.state),
+		...(typeof value.secretHash === "string" ? { secretHash: value.secretHash } : {}),
 		createdAt,
 		lastUsedAt,
 		...(typeof value.pausedAt === "string" ? { pausedAt: value.pausedAt } : {}),

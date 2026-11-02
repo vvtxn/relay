@@ -93,9 +93,10 @@ export class MicrosandboxRuntime implements BoxRuntime {
 			.labels(input.labels)
 			.patch((patch) => patch.text(GIT_ASKPASS_PATH, GIT_ASKPASS_SCRIPT, { mode: 0o755, replace: true }));
 		for (const secret of input.secrets) {
-			for (const host of secret.allowedHosts) {
-				builder = builder.secretEnv(secret.envVar, secret.value, host);
-			}
+			builder = builder.secret((entry) => {
+				const configured = entry.env(secret.envVar).value(secret.value);
+				return secret.allowedHosts.reduce((current, host) => current.allow(host), configured);
+			});
 		}
 		try {
 			const sandbox = await builder.create();

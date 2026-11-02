@@ -90,7 +90,7 @@ export function SessionPage() {
 					onOpenSettings={goToSettings}
 				>
 					<StatusBar
-						branch={session.data!.threadBranch ?? session.data!.branch}
+						branch={session.data!.branch}
 						box={session.data!.box}
 						userName={me.data!.name}
 						avatarUrl={me.data!.avatarUrl}

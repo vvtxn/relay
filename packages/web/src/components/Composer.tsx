@@ -191,8 +191,6 @@ function statusLabel(state: SessionStreamState): string {
 			return state.queuePosition !== null ? `Waiting for box (#${state.queuePosition})...` : "Waiting for box...";
 		case "starting-box":
 			return "Starting box...";
-		case "syncing":
-			return "Syncing changes...";
 	}
 	switch (state.status.kind) {
 		case "thinking":

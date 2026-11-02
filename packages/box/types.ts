@@ -38,7 +38,7 @@ export interface BoxSpec {
 	projectCwd: string;
 	/** Omitted for a standalone box; the current run path always supplies one. */
 	sessionId?: string;
-	/** Session workspace host path; file tools and sync operate here. */
+	/** Session workspace host path; file tools operate here. */
 	workspace?: string;
 	/** Session workspace path inside the box (for example `/workspace/<key>`). */
 	execPath?: string;
@@ -89,28 +89,10 @@ export interface ExecResult {
 	truncated: boolean;
 }
 
-/** One path applied from a box workspace to the project checkout. */
-export interface BoxSyncFile {
-	/** Git name-status code (`M`, `A`, `D`, `R100`, ...). */
-	status: string;
-	path: string;
-}
-
-/** Result of applying a box workspace's changes to the project checkout. */
-export interface BoxSyncResult {
-	projectCwd: string;
-	files: BoxSyncFile[];
-	summary: string;
-	/** Branch updated by a thread-branch sync (checkout syncs omit it). */
-	branch?: string;
-	/** Commit created on the thread branch. */
-	commit?: string;
-}
-
 export interface BoxLease {
 	readonly boxId: string;
 	readonly status: BoxStatus;
-	/** Session workspace host path used by file tools and sync. */
+	/** Session workspace host path used by file tools. */
 	readonly workspace: string;
 	/** Default working directory inside the box for exec. */
 	readonly execPath: string;

@@ -3,21 +3,17 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, rmdirSync, rmSync, wr
 import { isAbsolute, join, relative, resolve } from "node:path";
 import { Effect } from "effect";
 import { BoxError, toBoxError } from "./errors.ts";
-import type { BoxSyncResult } from "./types.ts";
-import { cleanupTempWorkspaces, prepareWorkspace } from "./workspace.ts";
-import { syncWorkspace, syncWorkspaceToBranch, withProjectSyncLock } from "./sync.ts";
+import { cleanupTempWorkspaces, configureGitRemotes, prepareWorkspace } from "./workspace.ts";
 
 /** A durable workspace owned by one session (thread). */
 export interface SessionWorkspace {
 	sessionId: string;
 	ownerId: string;
 	projectCwd: string;
-	/** Host path used by file tools and sync. */
+	/** Host path used by file tools. */
 	hostPath: string;
 	/** Path inside a box VM (the project workspace root is mounted at /workspace). */
 	execPath: string;
-	/** Dedicated branch in the project repository for this thread. */
-	branch: string;
 }
 
 export interface WorkspaceManager {
@@ -29,10 +25,6 @@ export interface WorkspaceManager {
 	}): Effect.Effect<SessionWorkspace, BoxError>;
 	/** Resolve an existing session workspace without creating or cloning one. */
 	find(input: { sessionId: string; ownerId: string; projectCwd: string }): SessionWorkspace | null;
-	/** Commit changes to the session's thread branch without touching the checkout. */
-	sync(workspace: SessionWorkspace): Effect.Effect<BoxSyncResult, BoxError>;
-	/** Checkout path used when thread branches are disabled. */
-	syncCheckout(workspace: Pick<SessionWorkspace, "hostPath" | "projectCwd">): Effect.Effect<BoxSyncResult, BoxError>;
 	removeSessions(sessionIds: ReadonlySet<string>): Effect.Effect<number, BoxError>;
 	gc(activeSessionIds: ReadonlySet<string>): Effect.Effect<number, BoxError>;
 }
@@ -69,11 +61,6 @@ export function sessionExecPath(sessionId: string): string {
 	return `/workspace/${sessionWorkspaceName(sessionId)}`;
 }
 
-/** Branch in the project repository where this thread's changes are committed. */
-export function threadBranchName(sessionId: string): string {
-	return `relay/thread/${sessionId}`;
-}
-
 class WorkspaceManagerImpl implements WorkspaceManager {
 	private readonly root: string;
 	private readonly index = new Map<string, SessionWorkspace>();
@@ -107,22 +94,7 @@ class WorkspaceManagerImpl implements WorkspaceManager {
 			projectCwd: resolve(input.projectCwd),
 			hostPath,
 			execPath: sessionExecPath(input.sessionId),
-			branch: threadBranchName(input.sessionId),
 		};
-	}
-
-	sync(workspace: SessionWorkspace): Effect.Effect<BoxSyncResult, BoxError> {
-		return Effect.tryPromise({
-			try: () => syncWorkspaceToBranch(workspace.hostPath, workspace.projectCwd, workspace.branch),
-			catch: (error) => toBoxError(error, "Could not commit the session workspace to its branch"),
-		});
-	}
-
-	syncCheckout(workspace: Pick<SessionWorkspace, "hostPath" | "projectCwd">): Effect.Effect<BoxSyncResult, BoxError> {
-		return Effect.tryPromise({
-			try: () => syncWorkspace(workspace.hostPath, workspace.projectCwd),
-			catch: (error) => toBoxError(error, "Could not sync the session workspace to the checkout"),
-		});
 	}
 
 	removeSessions(sessionIds: ReadonlySet<string>): Effect.Effect<number, BoxError> {
@@ -173,9 +145,9 @@ class WorkspaceManagerImpl implements WorkspaceManager {
 			projectCwd: resolve(input.projectCwd),
 			hostPath,
 			execPath: sessionExecPath(input.sessionId),
-			branch: threadBranchName(input.sessionId),
 		};
 		if (existsSync(hostPath)) {
+			await configureGitRemotes(hostPath);
 			this.writeMarker(workspace);
 			this.index.set(input.sessionId, workspace);
 			return workspace;
@@ -187,11 +159,7 @@ class WorkspaceManagerImpl implements WorkspaceManager {
 			if (existsSync(hostPath)) return;
 			mkdirSync(projectRoot, { recursive: true, mode: 0o700 });
 			cleanupTempWorkspaces(projectRoot);
-			// A concurrent run may be syncing into the checkout; clone from a
-			// stable working tree rather than racing its patch.
-			await withProjectSyncLock(input.projectCwd, () =>
-				prepareWorkspace(input.projectCwd, projectRoot, hostPath, input.exclude),
-			);
+			await prepareWorkspace(input.projectCwd, projectRoot, hostPath, input.exclude);
 			this.writeMarker(workspace);
 			this.index.set(input.sessionId, workspace);
 		});

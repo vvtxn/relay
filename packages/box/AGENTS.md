@@ -14,9 +14,8 @@ box/
 ├── profiles.ts       # tiny/small/medium resource bundles
 ├── manager.ts        # lifecycle, leases, budgets, queue, idle sweeper
 ├── manifest.ts       # versioned box.json file store
-├── workspace.ts      # reflink clone / linked-worktree clone + sync baseline
+├── workspace.ts      # reflink clone / linked-worktree clone + HTTPS remote rewrite
 ├── workspaces.ts     # per-session durable workspaces, markers, GC
-├── sync.ts           # git baseline + checkout/thread-branch sync
 ├── sanitize.ts       # removes host credentials from the clone
 ├── config.ts         # .relay/box.json parsing + defaults merge
 ├── env.ts            # box command environment allowlist
@@ -39,23 +38,16 @@ box/
 - `resize()` is live within the boot-time `maxCpus`/`maxMemory` ceilings; disk is grow-only.
 - Capacity is reserved atomically before runtime calls. Failed starts/resizes must release the reservation. Queued
   requests report their position through `BoxSpec.onQueued`.
-- Never copy host credentials into a box. Sanitization runs on every new session workspace clone; explicit env/secrets
-  only.
+- Never copy host credentials into a box as plaintext. Sanitization runs on every new session workspace clone;
+  explicit env/secrets only. Local mode mirrors the host's `gh auth token` through the runtime secret mechanism, so the
+  guest sees a placeholder substituted only for the allowed git host.
 - The project directory and box data directory must not contain each other. Session workspace clones live under
   `RELAY_SESSION_WORKSPACE_ROOT`, which must not overlap the project directory either.
-- Each Git-cloned session workspace gets a hidden `refs/relay/baseline` commit of its post-sanitize state. Sync diffs
-  against that ref, so pre-existing checkout dirt is never replayed. Never delete/rewrite the baseline except when
-  advancing it after a successful sync.
-- The default sync commits the session patch to `relay/thread/<sessionId>` in the project repository using a
-  three-way apply onto the branch tip (or project HEAD for a new branch). The checkout is never modified, so threads
-  do not clobber each other; review with `git diff <base>...<branch>` and merge when ready. `RELAY_THREAD_BRANCHES=0`
-  applies changes to the checkout instead. Thread branches are retained when a session is pruned so review work is
-  never silently deleted.
-- Checkout sync applies a patch to the project checkout working tree (not the index) and fails on a
-  diverged/conflicting checkout instead of overwriting it. Both modes serialize per project. A successful sync
-  advances the baseline.
-- `syncWorkspace` must use `--no-ext-diff`: a user-level `diff.external` (e.g. difftastic) would otherwise turn the
-  patch into a human-readable diff and break `git apply`.
+- Session workspaces are self-contained clones. SSH remotes are rewritten to HTTPS inside the clone so token-based
+  askpass works; the original checkout and its remotes are never modified. The agent commits, pushes, and opens pull
+  requests from the workspace instead of syncing patches back into the local checkout.
+- The manifest stores a hash of the runtime secret set (never the values). When the configured credentials change, the
+  next lease recreates the VM so it picks up the new token.
 - `MicrosandboxRuntime` is lazy-loaded. A missing platform package or KVM must not prevent Relay from starting.
 - Runtime methods are the remote seam: keep them serializable and free of host-path assumptions where possible.
 - Box bash uses `sh -lc` (not every image has bash).
@@ -70,8 +62,8 @@ pnpm box:image                 # build + load relay-box:local
 ```
 
 `RELAY_BOX_IMAGE=auto` (the default) selects `relay-box:local` when it is loaded and falls back to `node:26-bookworm`.
-The prepared image embeds Node 26, pnpm, Playwright + Chromium at `/opt/playwright`, git, ripgrep, and build/database
-tooling. When this image is active the runtime prompt requires real-browser verification of rendered UI changes; the
+The prepared image embeds Node 26, pnpm, Playwright + Chromium and its ffmpeg recorder, system ffmpeg, git, GitHub CLI,
+ripgrep, and build/database tooling. When this image is active the runtime prompt requires real-browser verification of rendered UI changes; the
 agent should use the `browser` tool / embedded browsers, never run `playwright install`, and never add probe `.mjs`
 files to the repository. Verify box behavior end-to-end with
 `pnpm relay:local` (boxes are on by default) when KVM is available. Stress the real runtime: create/exec, live
