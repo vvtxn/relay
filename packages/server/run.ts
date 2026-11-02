@@ -22,13 +22,6 @@ type Subscriber = (event: ServerEvent) => void;
 type RunFinishReason = Extract<ServerEvent, { type: "run_finished" }>["reason"];
 type DraftToolCall = RunStateEvent["toolCalls"][number];
 
-/**
- * Box work often includes a few environment/setup rounds before the actual
- * edit. The core default stays conservative; server runs get headroom, and the
- * agent loop emits budget warnings near the end.
- */
-const SERVER_MAX_TOOL_ROUNDS = 40;
-
 /** Mutable run state, owned by the run's fiber and read by snapshot/handlers. */
 interface RunState {
 	draftText: string;
@@ -386,9 +379,6 @@ export class RunManager {
 				const runWorkspace: RunWorkspace = {
 					hostPath: workspace.hostPath,
 					execPath: workspace.execPath,
-					projectCwd: workspace.projectCwd,
-					sync: () =>
-						config.threadBranches ? workspaces.sync(workspace) : workspaces.syncCheckout(workspace),
 				};
 				sandbox = createSandboxProvider({
 					boxes,
@@ -436,7 +426,6 @@ export class RunManager {
 					provider,
 					model: config.model,
 					tools: createToolRegistry(workspaceTools.filter((tool) => tool.readonly)),
-					maxToolRounds: 10,
 					temperature: config.temperature,
 					contextLimit: {
 						maxTokens: config.maxTokens,
@@ -488,7 +477,6 @@ export class RunManager {
 							preserveRecentTurns: config.preserveRecentTurns,
 						},
 						maxTokens: config.maxCompletionTokens,
-						maxToolRounds: SERVER_MAX_TOOL_ROUNDS,
 						signal: abort.signal,
 					}),
 					handleEvent,
@@ -496,34 +484,6 @@ export class RunManager {
 
 				if (abort.signal.aborted) return "cancelled";
 				if (Ref.getUnsafe(runRef).hadError) return "error";
-
-				// A successful boxed run lands its changes in the thread branch
-				// (or the project checkout when thread branches are disabled). The
-				// box tool can sync mid-run too; this is the safety net for the
-				// agent forgetting to call it. A failed sync is a run error because
-				// the project did not receive the work.
-				if (sandbox?.syncAvailable) {
-					const synced = yield* sandbox.sync().pipe(
-						Effect.map((result) => ({ ok: true as const, result })),
-						Effect.catchTag("BoxError", (error) => Effect.succeed({ ok: false as const, error })),
-					);
-					if (!synced.ok) {
-						publish({
-							type: "error",
-							message: `Could not sync the workspace changes to the project: ${synced.error.message}`,
-						});
-						return "error";
-					}
-					if (synced.result.files.length > 0) {
-						console.log(
-							`relay box: synced ${synced.result.files.length} workspace change(s) from ${sessionId}`,
-						);
-					}
-				} else if (sandbox) {
-					console.warn(
-						"relay box: the session workspace has no sync baseline; changes stay in the workspace",
-					);
-				}
 				return "completed";
 			});
 

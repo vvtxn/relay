@@ -66,11 +66,12 @@ core/
 
 The stream never fails: provider errors are retried (`Effect.retry` with `Schedule.exponential`, 1s/2s, gated on
 `ProviderError.retryable`), a stalled stream fails after 60s of silence (`Stream.timeoutOrElse`, also retryable), and
-once the budget is exhausted — or any other failure surfaces — an `error` event is emitted and the stream completes.
-Consumers render errors in-band. Features: self-reflection every 12 rounds, round-budget system notes when 10 and 3
-tool rounds remain, repeated-call loop detection, and empty-response retry. An assistant turn with no text and no
-tool calls is treated as a retryable provider failure instead of a blank completion that ends the run. `maxToolRounds`
-defaults to 30; the server passes 40.
+once the retry budget is exhausted — or any other failure surfaces — an `error` event is emitted and the stream completes.
+Consumers render errors in-band. Features: self-reflection every 12 rounds, repeated-call loop detection, and
+empty-response retry. An assistant turn with no text and no tool calls is treated as a retryable provider failure
+instead of a blank completion that ends the run. There is no default tool-round cap: a run continues until the model
+stops calling tools. Callers may pass `maxToolRounds` to impose an explicit safety cap (the loop then emits system notes
+when 10 and 3 rounds remain).
 
 ### Agent Runner (`runner.ts`)
 
@@ -157,8 +158,9 @@ calls to the same file are serialized by the agent loop while calls to different
 truncated, only output that exceeds the 10k character cap.
 
 `createDelegateTool(options)` builds the `delegate` tool: each call runs a fresh, isolated `run()` with the given
-(typically read-only) tool registry — no conversation history, its own round cap, and the parent abort signal. The
-subagent's system prompt defaults to `buildSystemPrompt({ mode: "subagent", tools })` and can be overridden wholesale
+(typically read-only) tool registry — no conversation history and the parent abort signal. A subagent has no round cap
+unless the caller passes `maxToolRounds`. The subagent's system prompt defaults to
+`buildSystemPrompt({ mode: "subagent", tools })` and can be overridden wholesale
 via `systemPrompt`. The final report returns as a `ToolResult`, and subagent cost is aggregated into `meta.cost` so
 the server can roll it into the session total. The tool is `readonly`, so calls run in the parallel readonly phase; an
 internal semaphore caps concurrent subagent loops (`maxConcurrency`, default 3). The server wires one per run with
@@ -247,6 +249,8 @@ After concluding that a task is complete, always run these commands from the rep
   explicitly unsandboxed, and the agent asks before actions that leave the box via prompt policy
 - Keep the Efficiency section concrete: batch lookups, read each file once (use `offset`/`limit`), use documented
   scripts/fixtures, and stop exploring once there is enough information to act
+- There is no default tool-round cap; long-running agents rely on context trimming and loop detection instead of an
+  arbitrary round limit. `maxToolRounds` remains available as an explicit opt-in cap.
 - Prompt guidance for a tool lives on the tool (`usageHint`) and is rendered by `buildSystemPrompt`; never hardcode
   tool names or availability in prompt prose
 - Use `ToolResult` with `isError` flag for error reporting; unexpected throws become `ToolError`

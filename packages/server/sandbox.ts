@@ -1,7 +1,6 @@
 import { Effect } from "effect";
-import type { BoxLease, BoxManager, BoxSettings, BoxStatus, BoxSyncResult } from "@vvtxn/box/types.ts";
+import type { BoxLease, BoxManager, BoxSettings, BoxStatus } from "@vvtxn/box/types.ts";
 import type { BoxError } from "@vvtxn/box/errors.ts";
-import { hasWorkspaceBaseline } from "@vvtxn/box/sync.ts";
 import { causeMessage } from "@vvtxn/relay/core/effect.ts";
 import type { RunPhase } from "@vvtxn/client/protocol.ts";
 
@@ -9,8 +8,6 @@ import type { RunPhase } from "@vvtxn/client/protocol.ts";
 export interface RunWorkspace {
 	hostPath: string;
 	execPath: string;
-	projectCwd: string;
-	sync: () => Effect.Effect<BoxSyncResult, BoxError>;
 }
 
 export interface SandboxPhaseInfo {
@@ -24,11 +21,9 @@ export interface SandboxPhaseInfo {
  */
 export interface SandboxProvider {
 	readonly workspace: RunWorkspace;
-	readonly syncAvailable: boolean;
 	withLease<T>(fn: (lease: BoxLease) => Effect.Effect<T, BoxError>): Effect.Effect<T, BoxError>;
 	/** Inspect the pinned box without provisioning one. */
 	status(): Effect.Effect<BoxStatus | null, BoxError>;
-	sync(): Effect.Effect<BoxSyncResult, BoxError>;
 	/** Release the pinned lease at the end of a run. */
 	release(): Effect.Effect<void>;
 }
@@ -48,9 +43,6 @@ export function createSandboxProvider(options: {
 	let lease: BoxLease | null = null;
 	return {
 		workspace,
-		get syncAvailable(): boolean {
-			return hasWorkspaceBaseline(workspace.hostPath);
-		},
 		withLease<T>(fn: (lease: BoxLease) => Effect.Effect<T, BoxError>): Effect.Effect<T, BoxError> {
 			return Effect.gen(function* () {
 				let current = lease;
@@ -76,12 +68,6 @@ export function createSandboxProvider(options: {
 		status(): Effect.Effect<BoxStatus | null, BoxError> {
 			const current = lease;
 			return current ? boxes.status(current.boxId) : Effect.succeed(null);
-		},
-		sync(): Effect.Effect<BoxSyncResult, BoxError> {
-			return Effect.gen(function* () {
-				onPhase?.("syncing");
-				return yield* workspace.sync();
-			});
 		},
 		release(): Effect.Effect<void> {
 			return Effect.gen(function* () {

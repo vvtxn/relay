@@ -68,8 +68,6 @@ function formatStatus(state: SessionStreamState): string {
 			return state.queuePosition !== null ? `Waiting for box (#${state.queuePosition})...` : "Waiting for box...";
 		case "starting-box":
 			return "Starting box...";
-		case "syncing":
-			return "Syncing changes...";
 	}
 	const status: AgentStatus = state.status;
 	switch (status.kind) {
@@ -179,7 +177,7 @@ function App({ onQuit, initialSessionId, info }: AppProps) {
 				cost: running ? Math.max(live.cost, response.cost) : response.cost,
 			};
 			syncStream(true);
-			branchName.value = response.threadBranch ?? response.branch;
+			branchName.value = response.branch;
 			boxLabel.value = response.box
 				? `${response.box.image.replace(/^localhost\//, "")} · ${response.box.state}`
 				: "";

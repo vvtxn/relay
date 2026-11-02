@@ -137,15 +137,11 @@ export function applyServerEvent(state: SessionStreamState, event: ServerEvent):
 				...state,
 				draftText: state.draftText + event.content,
 				status: { kind: "writing" },
-				// A box sync can finish mid-run; the model speaking again means
-				// the run is back to normal, not still syncing.
-				phase: state.phase === "syncing" ? "running" : state.phase,
 			};
 		case "tool_call_start":
 			return {
 				...state,
 				status: { kind: "running_tool", toolName: event.name },
-				phase: state.phase === "syncing" ? "running" : state.phase,
 			};
 		case "tool_call_args_delta":
 			return state;

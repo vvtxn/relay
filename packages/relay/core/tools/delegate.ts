@@ -5,7 +5,6 @@ import type { TrimOptions } from "../context.ts";
 import { buildSystemPrompt } from "../prompts.ts";
 import type { Tool, ToolRegistry, ToolResult } from "./types.ts";
 
-const DEFAULT_MAX_TOOL_ROUNDS = 10;
 const DEFAULT_MAX_CONCURRENCY = 3;
 const MAX_REPORT_CHARS = 10_000;
 
@@ -27,6 +26,7 @@ export interface DelegateToolOptions {
 	tools: ToolRegistry;
 	/** Full system prompt override; defaults to a subagent prompt built from `tools`. */
 	systemPrompt?: string;
+	/** Optional safety cap for each subagent loop; omit for no cap. */
 	maxToolRounds?: number;
 	/** Maximum subagents executing at the same time (extra calls queue). */
 	maxConcurrency?: number;
@@ -100,7 +100,7 @@ function runSubagent(prompt: string, options: DelegateToolOptions): Effect.Effec
 		model: options.model,
 		systemPrompt: options.systemPrompt ?? buildSystemPrompt({ mode: "subagent", tools: options.tools }),
 		tools: options.tools,
-		maxToolRounds: options.maxToolRounds ?? DEFAULT_MAX_TOOL_ROUNDS,
+		...(options.maxToolRounds !== undefined ? { maxToolRounds: options.maxToolRounds } : {}),
 		...(options.temperature !== undefined ? { temperature: options.temperature } : {}),
 		...(options.maxTokens !== undefined ? { maxTokens: options.maxTokens } : {}),
 		...(options.contextLimit !== undefined ? { contextLimit: options.contextLimit } : {}),

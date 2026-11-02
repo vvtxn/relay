@@ -29,6 +29,7 @@ export interface AgentConfig {
 	tools: ToolRegistry;
 	model: string;
 	systemPrompt: string;
+	/** Optional safety cap. Omit to run until the model stops calling tools. */
 	maxToolRounds?: number;
 	temperature?: number;
 	contextLimit?: TrimOptions;
@@ -36,7 +37,6 @@ export interface AgentConfig {
 	maxTokens?: number;
 }
 
-const DEFAULT_MAX_TOOL_ROUNDS = 30;
 const REFLECTION_INTERVAL = 12;
 const ROUND_BUDGET_WARNING = 10;
 const ROUND_BUDGET_FINAL = 3;
@@ -72,14 +72,14 @@ function runLoop(
 	config: AgentConfig,
 	emit: (event: AgentEvent) => Effect.Effect<void>,
 ): Effect.Effect<void> {
-	const maxRounds = config.maxToolRounds ?? DEFAULT_MAX_TOOL_ROUNDS;
+	const maxRounds = config.maxToolRounds;
 	const toolDefs = getDefinitions(config.tools);
 
 	return Effect.gen(function* () {
 		let context: Message[] = [{ role: "system", content: config.systemPrompt }, ...messages];
 		const recentCallSignatures: string[] = [];
 
-		for (let round = 0; round < maxRounds; round++) {
+		for (let round = 0; maxRounds === undefined || round < maxRounds; round++) {
 			if (config.signal?.aborted) return;
 
 			// Self-reflection: after many tool rounds, prompt the model to assess progress
@@ -91,20 +91,22 @@ function runLoop(
 				});
 			}
 
-			// Make the round budget visible before the hard stop. Models otherwise
-			// keep exploring until the loop errors out with no persisted explanation.
-			const remainingRounds = maxRounds - round;
-			if (round > 0 && remainingRounds === ROUND_BUDGET_WARNING) {
-				context.push({
-					role: "user",
-					content: `[system note] You have ${remainingRounds} tool rounds left. Stop broad exploration, finish the current approach, and make the necessary edit. Do not start another investigation.`,
-				});
-			}
-			if (round > 0 && remainingRounds === ROUND_BUDGET_FINAL) {
-				context.push({
-					role: "user",
-					content: `[system note] Only ${remainingRounds} tool rounds remain. Run the smallest necessary verification, then reply with the result. If you cannot finish, summarize exactly what remains.`,
-				});
+			// Make an explicitly configured round budget visible before the hard
+			// stop. A run without a cap keeps going until the model is done.
+			if (maxRounds !== undefined) {
+				const remainingRounds = maxRounds - round;
+				if (round > 0 && remainingRounds === ROUND_BUDGET_WARNING) {
+					context.push({
+						role: "user",
+						content: `[system note] You have ${remainingRounds} tool rounds left. Stop broad exploration, finish the current approach, and make the necessary edit. Do not start another investigation.`,
+					});
+				}
+				if (round > 0 && remainingRounds === ROUND_BUDGET_FINAL) {
+					context.push({
+						role: "user",
+						content: `[system note] Only ${remainingRounds} tool rounds remain. Run the smallest necessary verification, then reply with the result. If you cannot finish, summarize exactly what remains.`,
+					});
+				}
 			}
 
 			const useTools = toolDefs.length > 0;
@@ -275,7 +277,9 @@ function runLoop(
 			// Loop back to call the LLM again with tool results
 		}
 
-		yield* emit({ type: "error", error: new Error(`Exceeded maximum tool rounds (${maxRounds})`) });
+		if (maxRounds !== undefined) {
+			yield* emit({ type: "error", error: new Error(`Exceeded maximum tool rounds (${maxRounds})`) });
+		}
 	});
 }
 

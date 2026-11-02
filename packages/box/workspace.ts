@@ -4,7 +4,6 @@ import { cp } from "node:fs/promises";
 import { join, relative, resolve, sep } from "node:path";
 import { BoxError } from "./errors.ts";
 import { sanitizeWorkspace } from "./sanitize.ts";
-import { createWorkspaceBaseline } from "./sync.ts";
 
 const COPY_TIMEOUT_MS = 5 * 60_000;
 const MIN_FREE_BYTES = 512 * 1024 * 1024;
@@ -30,6 +29,81 @@ function run(command: string, args: string[], timeoutMs = COPY_TIMEOUT_MS): Prom
 			else reject(new BoxError({ message: `${command} exited with code ${code}: ${stderr.trim()}` }));
 		});
 	});
+}
+
+function capture(command: string, args: string[], timeoutMs = COPY_TIMEOUT_MS): Promise<string> {
+	return new Promise((resolvePromise, reject) => {
+		const child = spawn(command, args, { stdio: ["ignore", "pipe", "pipe"] });
+		let stdout = "";
+		let stderr = "";
+		child.stdout.on("data", (chunk: Buffer) => {
+			stdout += chunk.toString();
+		});
+		child.stderr.on("data", (chunk: Buffer) => {
+			stderr += chunk.toString();
+		});
+		const timer = setTimeout(() => {
+			child.kill("SIGKILL");
+			reject(new BoxError({ message: `${command} timed out after ${timeoutMs}ms` }));
+		}, timeoutMs);
+		child.once("error", (error) => {
+			clearTimeout(timer);
+			reject(error);
+		});
+		child.once("close", (code) => {
+			clearTimeout(timer);
+			if (code === 0) resolvePromise(stdout);
+			else reject(new BoxError({ message: `${command} exited with code ${code}: ${stderr.trim()}` }));
+		});
+	});
+}
+
+/**
+ * SSH remotes cannot use the box's token-based askpass helper. Rewrite pushes
+ * over SSH to HTTPS inside the clone (the original checkout is untouched), so
+ * the mirrored `GITHUB_TOKEN` authenticates git as well as the GitHub CLI.
+ */
+export async function configureGitRemotes(workspace: string): Promise<void> {
+	let remotes: string[];
+	try {
+		remotes = (await capture("git", ["-C", workspace, "remote"]))
+			.split("\n")
+			.map((line) => line.trim())
+			.filter(Boolean);
+	} catch {
+		return;
+	}
+	for (const remote of remotes) {
+		try {
+			const url = (await capture("git", ["-C", workspace, "remote", "get-url", remote])).trim();
+			const rule = httpsRewriteFor(url);
+			if (!rule) continue;
+			const key = `url.https://${rule.host}/.insteadOf`;
+			const existing = await capture("git", ["-C", workspace, "config", "--local", "--get-all", key]).catch(
+				() => "",
+			);
+			if (existing.split("\n").includes(rule.prefix)) continue;
+			await run("git", ["-C", workspace, "config", "--local", "--add", key, rule.prefix]);
+		} catch {
+			// Push authentication is best-effort; the workspace is still usable.
+		}
+	}
+}
+
+function httpsRewriteFor(remote: string): { host: string; prefix: string } | null {
+	const scp = /^[^@/\s]+@([^:/\s]+):/.exec(remote);
+	if (scp?.[1]) {
+		const separator = remote.indexOf(":");
+		return { host: scp[1], prefix: remote.slice(0, separator + 1) };
+	}
+	try {
+		const parsed = new URL(remote);
+		if (parsed.protocol !== "ssh:" && parsed.protocol !== "git:") return null;
+		const user = parsed.username ? `${parsed.username}@` : "";
+		return { host: parsed.host, prefix: `${parsed.protocol}//${user}${parsed.host}/` };
+	} catch {
+		return null;
+	}
 }
 
 function checkFreeSpace(destinationParent: string): void {
@@ -141,16 +215,7 @@ export async function prepareWorkspace(
 
 		rmSync(join(temp, ".relay"), { recursive: true, force: true });
 		const removed = await sanitizeWorkspace(temp, excludes);
-		try {
-			if (!(await createWorkspaceBaseline(temp))) {
-				console.warn("relay box: sync baseline unavailable (the project is not a Git repository)");
-			}
-		} catch (error) {
-			console.warn(
-				"relay box: could not create the sync baseline; box changes will not sync:",
-				error instanceof Error ? error.message : error,
-			);
-		}
+		await configureGitRemotes(temp);
 
 		if (existsSync(boxWorkspace)) {
 			throw new BoxError({ message: `Box workspace already exists: ${boxWorkspace}` });

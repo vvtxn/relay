@@ -22,7 +22,7 @@ server/
 ├── sessions.ts      # /api/me, /api/config, session CRUD, message submission, /api/runs
 ├── run.ts           # RunManager: one fiber per run, SSE fan-out, box/host execution
 ├── sandbox.ts       # lazy BoxLease provider shared by bash/browser/future sandbox tools
-├── box-tools.ts     # box bash executor + model-facing status/resize/sync tool
+├── box-tools.ts     # box bash executor + model-facing status/resize tool
 ├── browser-tool.ts  # one-shot Playwright check inside a leased box
 ├── boxes.ts         # /api/boxes routes (create/list/resize/pause/resume/stop/rm)
 ├── box-summary.ts   # BoxStatus -> wire BoxSummary projection
@@ -71,21 +71,21 @@ Owns active runs, one per session:
   (registered synchronously, so the SSE snapshot-then-subscribe sequence cannot drop events)
 - `cancel()` interrupts the fiber; a single uninterruptible finalizer aborts the provider call, flushes the session
   handle, publishes `run_finished`, and releases the session when idle and unwatched
-- Runs publish a `run_status` phase (`preparing-workspace`, `queued`, `starting-box`, `running`, `syncing`) and the
+- Runs publish a `run_status` phase (`preparing-workspace`, `queued`, `starting-box`, `running`) and the
   catch-up `run_state` snapshot carries the phase, box id, and queue position
-- With boxes enabled, a run owns a durable session workspace. File tools run on the host against it; `sandbox.ts`
-  leases a box lazily on the first bash/browser call and pins that lease until the run finalizer, so services and
-  browser checks share one VM. A run with no sandbox tool never holds a box. A successful run syncs the workspace
-  before `run_finished`; the agent can call the `box` tool's `sync` action earlier. With `RELAY_THREAD_BRANCHES=1`
-  (default) the patch is committed to `relay/thread/<sessionId>` in the project repo without touching the checkout;
-  set it to `0` for checkout sync. A sync conflict marks the run as an error instead of overwriting a diverged
-  checkout.
+- With boxes enabled, a run owns a durable session workspace: a self-contained clone of the project. File tools run on
+  the host against it; `sandbox.ts` leases a box lazily on the first bash/browser call and pins that lease until the run
+  finalizer, so services and browser checks share one VM. A run with no sandbox tool never holds a box. The original
+  checkout is never modified; the agent commits, pushes, and opens pull requests from the workspace using git/gh. In
+  local mode the server mirrors the host's `gh auth token` into the box's secret environment (the guest sees a
+  placeholder substituted only for the allowed git host). SSH remotes are rewritten to HTTPS inside the clone so the
+  token-based askpass helper works. A changed secret set recreates pooled VMs on their next lease.
 - Host runs (`RELAY_BOX=0`) execute directly on the host with no sandbox and no approval prompts; `main.ts` logs a
   warning at startup. In both modes the system prompt adds a Safety section telling the agent to stop and ask before
   actions that leave the box or are hard to undo
-- Runs pass `maxToolRounds: 40` to the agent loop (the core default stays 30). The loop emits system notes when 10 and
-  3 rounds remain so the model wraps up instead of silently hitting the cap; agent error events are logged with the
-  session id for diagnosis.
+- Runs leave `maxToolRounds` unset, so the agent loop has no arbitrary round cap and continues until the model stops
+  calling tools. An explicit cap remains available to library consumers; the loop emits budget notes when one is set.
+  Agent error events are logged with the session id for diagnosis.
 - Each run registers a `delegate` subagent tool (relay core) with the read-only workspace tools, and builds its
   system prompt from the run's registry (`buildSystemPrompt`); subagent cost rides on the tool result's `meta.cost`
   and is added to the session total. When the prepared box image is active, the prompt adds a firm Browser
@@ -113,7 +113,9 @@ Active runs are never removed.
 
 The per-session project cwd comes from the client (CLI sends its terminal cwd); the durable session workspace is
 created lazily under `RELAY_SESSION_WORKSPACE_ROOT` and mounted into the project's box pool. File tools are confined to
-that workspace; bash is not (documented in relay core AGENTS.md).
+that workspace; bash is not (documented in relay core AGENTS.md). Local mode reads `gh auth token` for the project's
+origin host at startup so the box can push branches and open pull requests; `RELAY_BOX_GITHUB_TOKEN` overrides it, and
+cloud mode never reads the host's login.
 
 Workspace creation and registration run through `validateWorkspacePath` (core): the path must be an absolute, existing
 directory whose canonical (symlink-resolved) path sits within `config.workspaceRoots`. `handleCreateSession` stores the
@@ -225,8 +227,7 @@ summary when boxes are enabled.
   `RELAY_BOX_MAX_RUNNING`, `RELAY_BOX_MAX_CPUS`, `RELAY_BOX_MEMORY_BUDGET_MIB`,
   `RELAY_BOX_VM_OVERHEAD_MIB`, `RELAY_BOX_PAUSE_MS`, `RELAY_BOX_STOP_MS`, `RELAY_BOX_RETENTION_MS`,
   `RELAY_BOX_ACQUIRE_TIMEOUT_MS`, `RELAY_BOX_DATA_DIR`, `RELAY_BOX_CACHE_DIR`,
-  `RELAY_SESSION_WORKSPACE_ROOT`, `RELAY_THREAD_BRANCHES`,
-  `RELAY_BOX_GITHUB_TOKEN`, `RELAY_BOX_GIT_HOST`
+  `RELAY_SESSION_WORKSPACE_ROOT`, `RELAY_BOX_GITHUB_TOKEN`, `RELAY_BOX_GIT_HOST`
 
 ## Running
 

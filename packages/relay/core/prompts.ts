@@ -167,11 +167,12 @@ function boxSection(box: BuildSystemPromptOptions["box"]): string {
 	if (!box) return "";
 	return `## Box
 
-You are working in a durable session workspace. File tools edit it directly; bash and browser tools lease a managed
-box that mounts the workspace, and sandbox tool calls reuse one box for the run.
-Successful runs commit the workspace changes to the session's thread branch (or sync them to the project checkout
-when thread branches are disabled); use \`box\` with action \`sync\` to commit a verified change earlier.
+You are working in a durable session workspace cloned from the user's project. File tools edit it directly; bash and
+browser tools lease a managed box that mounts the workspace, and sandbox tool calls reuse one box for the run. The
+user's original checkout is never modified by the run.
 
+- Commit changes with git and push from this workspace; when GitHub credentials are configured, they are mirrored from
+  the host so \`gh\` and git can open pull requests without touching the local checkout.
 - Requested profile: **${box.profile}** (${box.cpus} vCPU, ${box.memoryMiB} MiB RAM). The highest allowed profile is ${box.maxProfile}.
 - Start small. Use the \`box\` tool to inspect the current size and to resize before heavy work.
 - Before Playwright/browser tests, large builds, or running several services, resize to \`small\` or \`medium\`.
@@ -192,10 +193,10 @@ when thread branches are disabled); use \`box\` with action \`sync\` to commit a
 function safetySection(box: BuildSystemPromptOptions["box"], host: boolean | undefined): string {
 	if (!box && !host) return "";
 	const location = box
-		? `You are working in a durable session workspace whose bash and services run in an isolated box. Inside that
-workspace and box you may delete files, rewrite history, install packages, and run services without asking.
-Completed runs persist those changes to the session's thread branch (or the project checkout when thread branches
-are disabled).`
+		? `You are working in a durable session workspace cloned from the user's project, whose bash and services run in
+an isolated box. Inside that workspace and box you may delete files, rewrite history, install packages, and run
+services without asking. The run never modifies the user's original checkout; only pushed branches and pull requests
+leave the box.`
 		: `You are working directly on the host with no sandbox. Treat every command as potentially destructive.`;
 	const ask = box
 		? `Ask before actions that leave the box or are hard to undo, unless the user explicitly requested that exact

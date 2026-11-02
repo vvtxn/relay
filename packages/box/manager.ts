@@ -1,4 +1,5 @@
 import { existsSync, mkdirSync, rmSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { isAbsolute, relative, resolve } from "node:path";
 import { Effect } from "effect";
 import { boxExecEnv } from "./env.ts";
@@ -62,6 +63,13 @@ function sameEnv(left: Record<string, string> | undefined, right: Record<string,
 	if (keys.length !== Object.keys(b).length) return false;
 	return keys.every((key) => b[key] === a[key]);
 }
+
+/** Fingerprint runtime secrets so a credential change recreates stale VMs. */
+function secretHash(secrets: readonly { envVar: string; value: string; allowedHosts: string[] }[]): string {
+	return createHash("sha256").update(JSON.stringify(secrets)).digest("hex");
+}
+
+const EMPTY_SECRET_HASH = secretHash([]);
 
 interface PendingAcquire {
 	boxId: string;
@@ -773,6 +781,7 @@ export class BoxManagerImpl implements BoxManager {
 			// clone is materialized by the workspace manager on first run.
 			mkdirSync(workspace, { recursive: true, mode: 0o700 });
 			const now = new Date().toISOString();
+			const hash = secretHash(this.config.secrets);
 			const manifest: BoxManifest = {
 				version: MANIFEST_VERSION,
 				boxId,
@@ -783,6 +792,7 @@ export class BoxManagerImpl implements BoxManager {
 				runtime: { kind: this.runtime.kind, version: MICROSANDBOX_VERSION },
 				settings,
 				state: "provisioning",
+				...(hash !== EMPTY_SECRET_HASH ? { secretHash: hash } : {}),
 				createdAt: now,
 				lastUsedAt: now,
 			};
@@ -811,6 +821,27 @@ export class BoxManagerImpl implements BoxManager {
 		if (manifest.settings.image === "auto") {
 			manifest = { ...manifest, settings: { ...manifest.settings, image: await this.resolveImageValue() } };
 			checkAborted();
+		}
+		// Credentials are baked into a Microsandbox VM at creation. When the
+		// configured secret set changes (for example the host gh login), rebuild
+		// the VM so pushes can authenticate.
+		const hash = secretHash(this.config.secrets);
+		if ((manifest.secretHash ?? EMPTY_SECRET_HASH) !== hash) {
+			await this.runtime.destroy(manifest.sandboxName).catch(() => {});
+			const remaining = await this.runtime.status(manifest.sandboxName).catch(() => "absent" as const);
+			if (remaining !== "absent") {
+				throw new BoxError({
+					message: `Could not recreate box ${manifest.boxId} to apply updated credentials`,
+				});
+			}
+			const refreshed = await this.updateManifest(manifest.boxId, (current) => {
+				const next = { ...current };
+				if (hash === EMPTY_SECRET_HASH) delete next.secretHash;
+				else next.secretHash = hash;
+				return next;
+			});
+			if (!refreshed) throw new BoxError({ message: `Box ${manifest.boxId} disappeared during startup` });
+			manifest = refreshed;
 		}
 		// Persist the effective settings before the runtime sees them.
 		const persisted = await this.updateManifest(manifest.boxId, (current) => ({

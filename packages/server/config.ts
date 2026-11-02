@@ -1,5 +1,6 @@
 /** Server configuration — read once from the environment at startup. */
 
+import { execFileSync } from "node:child_process";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { homeDir, relayDir } from "@vvtxn/relay/core/paths.ts";
@@ -58,8 +59,6 @@ export interface ServerConfig {
 	workspaceRoots: string[];
 	/** Maximum persisted sessions kept per owner and workspace. `0` = unlimited. */
 	maxSessionsPerWorkspace: number;
-	/** Commit session-workspace changes to per-thread branches instead of the checkout. */
-	threadBranches: boolean;
 	/** Allowed GitHub logins or numeric ids (empty = allow any). */
 	allowedGithub: string[];
 	/** Backend storing per-user API keys: local files (default) or the database. */
@@ -144,7 +143,46 @@ function boxProfileEnv(value: string | undefined, fallback: BoxProfile, name: st
 	return value;
 }
 
-function boxConfigFromEnv(env: Record<string, string | undefined>): BoxManagerConfig {
+/** GitHub host from a project's origin remote, for mirroring local gh auth. */
+function projectGitHost(cwd: string): string | undefined {
+	try {
+		const remote = execFileSync("git", ["-C", cwd, "remote", "get-url", "origin"], {
+			encoding: "utf8",
+			timeout: 2_000,
+			stdio: ["ignore", "pipe", "ignore"],
+		}).trim();
+		const scp = /^[^@/\s]+@([^:/\s]+):/.exec(remote);
+		if (scp?.[1]) return scp[1];
+		const url = new URL(remote);
+		return url.protocol === "ssh:" ||
+			url.protocol === "git:" ||
+			url.protocol === "https:" ||
+			url.protocol === "http:"
+			? url.hostname
+			: undefined;
+	} catch {
+		return undefined;
+	}
+}
+
+/** Read the signed-in host token from the GitHub CLI, when available. */
+function hostGitHubToken(host: string): string | undefined {
+	try {
+		const token = execFileSync("gh", ["auth", "token", "--hostname", host], {
+			encoding: "utf8",
+			timeout: 5_000,
+			stdio: ["ignore", "pipe", "ignore"],
+		}).trim();
+		return token || undefined;
+	} catch {
+		return undefined;
+	}
+}
+
+function boxConfigFromEnv(
+	env: Record<string, string | undefined>,
+	options: { flavor: RelayFlavor; defaultCwd: string },
+): BoxManagerConfig {
 	const dataDir = expandHomePath(envValue(env, "RELAY_BOX_DATA_DIR") ?? join(relayDir(), "boxes"));
 	const cacheDir = expandHomePath(envValue(env, "RELAY_BOX_CACHE_DIR") ?? join(relayDir(), "box-cache"));
 	const workspaceRoot = expandHomePath(
@@ -154,9 +192,19 @@ function boxConfigFromEnv(env: Record<string, string | undefined>): BoxManagerCo
 	// default memory budget. Raise both to enable `medium`.
 	const maxProfile = boxProfileEnv(env.RELAY_BOX_MAX_PROFILE, "small", "RELAY_BOX_MAX_PROFILE");
 	const requestedProfile = boxProfileEnv(env.RELAY_BOX_PROFILE, "tiny", "RELAY_BOX_PROFILE");
-	const gitToken =
+	const explicitToken =
 		envValue(env, "RELAY_BOX_GITHUB_TOKEN") ?? envValue(env, "GITHUB_TOKEN") ?? envValue(env, "GH_TOKEN");
-	const gitHost = envValue(env, "RELAY_BOX_GIT_HOST") ?? "github.com";
+	// Local mode mirrors the host's `gh` session into the box pool: the token
+	// stays on the host and is substituted only for the git host. Cloud mode
+	// requires an explicit token because the server belongs to many users.
+	const gitHost =
+		envValue(env, "RELAY_BOX_GIT_HOST") ??
+		(options.flavor === "local" ? projectGitHost(options.defaultCwd) : undefined) ??
+		"github.com";
+	const gitToken = explicitToken ?? (options.flavor === "local" ? hostGitHubToken(gitHost) : undefined);
+	// `gh` talks to api.github.com; git push uses github.com. Both must be
+	// allowed for the placeholder to be substituted.
+	const gitHosts = gitHost === "github.com" ? ["github.com", "api.github.com", "uploads.github.com"] : [gitHost];
 	const profile = profileRank(requestedProfile) > profileRank(maxProfile) ? maxProfile : requestedProfile;
 	const resources = profileResources(profile);
 	// Pause/stop/retention accept zero to disable that transition.
@@ -186,7 +234,7 @@ function boxConfigFromEnv(env: Record<string, string | undefined>): BoxManagerCo
 			365 * 24 * 60 * 60_000,
 		),
 		maxProfile,
-		secrets: gitToken ? [{ envVar: "GITHUB_TOKEN", value: gitToken, allowedHosts: [gitHost] }] : [],
+		secrets: gitToken ? [{ envVar: "GITHUB_TOKEN", value: gitToken, allowedHosts: gitHosts }] : [],
 		defaults: {
 			image: env.RELAY_BOX_IMAGE?.trim() || "auto",
 			profile,
@@ -377,14 +425,13 @@ export function serverConfigFromEnv(env: Record<string, string | undefined> = { 
 			"RELAY_MAX_SESSIONS_PER_WORKSPACE",
 			10_000,
 		),
-		threadBranches: booleanEnv(env.RELAY_THREAD_BRANCHES, true, "RELAY_THREAD_BRANCHES"),
 		allowedGithub,
 		settingsStore,
 		dataDir,
 		secretKey,
 		secretKeyFile,
 		staticDir: envValue(env, "RELAY_STATIC_DIR") ?? null,
-		box: boxConfigFromEnv(env),
+		box: boxConfigFromEnv(env, { flavor, defaultCwd: defaultWorkspace.path }),
 	};
 }
 

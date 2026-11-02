@@ -244,8 +244,7 @@ The single source of truth for the server↔client contract, used by the CLI (No
 An HTTP + SSE server built on `effect/http` and `@effect/platform-node`:
 
 - **RunManager** — one active run per session; bridges agent events onto per-session SSE streams; boxed runs are
-  unrestricted inside the VM and sync their session workspace changes back to a thread branch when they complete
-  successfully, while host mode is explicitly unsandboxed
+  unrestricted inside the VM and edit a durable session workspace, while host mode is explicitly unsandboxed
 - **Sessions** — create/open/list against Turso (cloud, primary) or local SQLite (self-hosted); per-session workspace
   cwd (file tools are confined to it)
 - **Auth** — GitHub App OAuth in cloud mode, or a fixed loopback identity in local mode, with per-request identity
@@ -273,7 +272,8 @@ changes and exposes a `browser` tool that runs Playwright inside the managed box
 tool to resize before Playwright/browser tests, large builds, or multiple services. The default ceiling is `small`;
 set `RELAY_BOX_MAX_PROFILE=medium` and raise `RELAY_BOX_MEMORY_BUDGET_MIB` above 8 GiB to enable `medium`.
 
-Build the prepared toolchain image once (Node 26, pnpm, Playwright + Chromium, git, ripgrep, build tools, databases):
+Build the prepared toolchain image once (Node 26, pnpm, Playwright + Chromium, git, GitHub CLI, ripgrep, build tools,
+databases):
 
 ```bash
 pnpm box:image
@@ -294,16 +294,16 @@ the running-box count, so paused boxes and concurrent sessions cannot oversubscr
 Use `relay box list|new|resize|pause|resume|stop|rm` to manage boxes; `relay box new [path]` creates a pooled worker
 without starting a thread.
 
-Sessions are the working copies. A successful boxed run commits its session workspace changes to
-`relay/thread/<sessionId>` in the project repository without touching the checkout; the agent can commit earlier with
-the `box` tool's `sync` action. Set `RELAY_THREAD_BRANCHES=0` to apply changes to the checkout instead. Each workspace
-records a hidden baseline when it is cloned, so only changes made in the workspace are applied; pre-existing
-uncommitted changes in the checkout are not replayed. A checkout that has diverged since the clone fails the apply
-instead of being overwritten.
+Sessions are the working copies. Each session gets a durable clone of the project workspace under
+`RELAY_SESSION_WORKSPACE_ROOT`; the agent edits, commits, pushes, and opens pull requests there, and the user's local
+checkout is never modified. Sanitization removes host credentials from the clone, then SSH remotes are rewritten to
+HTTPS so the box's token-based git authentication works.
 
-When `RELAY_BOX_GITHUB_TOKEN` (or `GITHUB_TOKEN`) is set, the agent can commit and push from inside the box; the real
-token stays on the host and is substituted only for `RELAY_BOX_GIT_HOST` (default `github.com`). Without a token, local
-commits work but pushes fail.
+In local mode the host's GitHub CLI session is mirrored into the box automatically: the server reads
+`gh auth token` at startup, keeps the token on the host, and Microsandbox substitutes it only for the project's git
+host and the GitHub API (defaults to the origin host, then `github.com`). Set `RELAY_BOX_GITHUB_TOKEN` (or
+`GITHUB_TOKEN`/`GH_TOKEN`) to override it. Cloud mode never reads the host's gh login; configure the token explicitly
+there. Without a token, local commits work but pushes and pull requests fail.
 
 ### `packages/relay/api/` — LLM Provider Layer
 
@@ -321,7 +321,7 @@ The agent loop is an async generator (`run()`) that streams `AgentEvent`s:
 1. Build context (system prompt + history + tool definitions)
 2. Stream LLM response, yielding `text_delta`, `tool_call_start`, `tool_call_args_delta`, `tool_call_end` events
 3. Execute tool calls, yield `tool_result` events
-4. Repeat until the LLM responds without tool calls (up to configurable max rounds)
+4. Repeat until the LLM responds without tool calls (no default round cap)
 
 **Built-in tools:**
 

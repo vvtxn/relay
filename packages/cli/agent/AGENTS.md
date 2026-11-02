@@ -117,10 +117,9 @@ Relay is designed for several CLI processes attached to one background server. `
 workspace threads with their run phase and queue position; `relay attach <id>` opens one. Runs continue on the server
 when a CLI exits, and another client can attach or watch the same thread. Nodes in the session state now include the
 server run phase, box id, and queue position, so the status line can show `Preparing workspace`, `Waiting for box`,
-`Starting box`, `Running`, or `Syncing`. Multiple viewers are safe: the server keeps a stable live handle for an
-active run and does not reset tokens/cost when another client subscribes. Attached sessions report their
-`threadBranch` (`relay/thread/<id>`) when thread branches are enabled; the status bar shows that branch, and the
-work is committed there instead of the checkout.
+`Starting box`, or `Running`. Multiple viewers are safe: the server keeps a stable live handle for an
+active run and does not reset tokens/cost when another client subscribes. Attached sessions report the workspace's
+current git branch in the status bar.
 
 ### Workspace scoping
 

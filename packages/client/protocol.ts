@@ -138,8 +138,6 @@ export interface OpenSessionResponse {
 	cost: number;
 	/** Current git branch of the session workspace, when available. */
 	branch: string | null;
-	/** Branch where this thread's changes are committed, when thread branches are enabled. */
-	threadBranch?: string;
 	/** True while a run is active on this session (another client may be driving it). */
 	running: boolean;
 	/** Phase of the active run, when `running` is true. */
