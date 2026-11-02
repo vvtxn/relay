@@ -38,6 +38,7 @@ export interface Theme {
 	codeBlock: string;
 	link: string;
 	linkUrl: string;
+	mention: string;
 	blockquote: string;
 	listBullet: string;
 	hr: string;
@@ -77,6 +78,7 @@ export const theme: Theme = {
 	codeBlock: "#C0C0C0",
 	link: "#D8D8D8",
 	linkUrl: "#808080",
+	mention: "#8FD0D8",
 	blockquote: "#808080",
 	listBullet: "#808080",
 	hr: "#303030",
@@ -121,6 +123,7 @@ export const lightTheme: Theme = {
 	codeBlock: "#262626",
 	link: "#262626",
 	linkUrl: "#6A6A6A",
+	mention: "#1F7A85",
 	blockquote: "#6A6A6A",
 	listBullet: "#6A6A6A",
 	hr: "#D6D6D6",

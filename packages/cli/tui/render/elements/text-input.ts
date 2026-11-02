@@ -119,7 +119,7 @@ export const TextInputElement: ElementHandler<TextInputInstance> = (instance, co
 
 	const colorToUse = isPlaceholder ? instance.props.placeholderColor : instance.props.color;
 	const defaultAnsi = colorToUse ? toAnsi(colorToUse) : null;
-	const mentionAnsi = toAnsi(theme.accent) ?? "\x1b[36m";
+	const mentionAnsi = toAnsi(theme.mention) ?? "\x1b[36m";
 
 	const positions: Position[] = [];
 	for (let row = 0; row < height; row++) {
