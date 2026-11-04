@@ -760,6 +760,11 @@ body {
 	word-break: break-word;
 }
 
+/* `@path` file mentions embedded in user turns, matching the CLI composer. */
+.mention {
+	color: var(--relay-mention, #8fd0d8);
+}
+
 .message-content {
 	display: flex;
 	flex-direction: column;

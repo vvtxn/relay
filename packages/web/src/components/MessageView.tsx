@@ -1,6 +1,7 @@
 import { Show } from "solid-js";
 import type { UIMessage } from "@vvtxn/relay/core/display.ts";
 import { Markdown } from "./Markdown.tsx";
+import { MentionText } from "./MentionText.tsx";
 import { ToolCalls } from "./ToolCalls.tsx";
 
 /**
@@ -16,7 +17,9 @@ export function MessageView(props: { msg: UIMessage }) {
 	if (props.msg.role === "user") {
 		return (
 			<article class="message user">
-				<div class="message-body">{props.msg.content}</div>
+				<div class="message-body">
+					<MentionText text={props.msg.content} />
+				</div>
 			</article>
 		);
 	}

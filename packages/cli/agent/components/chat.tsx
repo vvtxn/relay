@@ -1,4 +1,7 @@
 import { Box, Markdown, memo, Text } from "#/tui/render/components.tsx";
+import { RESET_FG } from "#/tui/core/ansi.ts";
+import { toAnsi } from "#/tui/core/primitives/color.ts";
+import { splitMentions } from "#/tui/core/primitives/mentions.ts";
 import { theme } from "#/tui/theme.ts";
 import { groupToolCalls } from "@vvtxn/relay/core/display.ts";
 import type { UIMessage } from "@vvtxn/relay/core/display.ts";
@@ -9,6 +12,21 @@ export type { UIMessage };
 
 /** Files previewed under one grouped row; the rest stay behind `ctrl+o`. */
 const PREVIEW_MAX_FILES = 3;
+
+/**
+ * Color `@path` file mentions in a user turn with the shared `mention` accent,
+ * re-applying the base color after each so the rest of the line stays muted.
+ * The TUI has no inline text flow, so styling is embedded as ANSI (the same
+ * approach `Markdown` uses) and rendered through a single `Text`.
+ */
+function mentionStyledText(content: string): string {
+	const base = toAnsi(theme.textMuted) ?? "";
+	const mention = toAnsi(theme.mention) ?? "";
+	const body = splitMentions(content)
+		.map((segment) => (segment.mention ? `${mention}${segment.text}${RESET_FG}${base}` : segment.text))
+		.join("");
+	return `${base}${body}${RESET_FG}`;
+}
 
 // ---------------------------------------------------------------------------
 // MessageView
@@ -27,7 +45,7 @@ export const MessageView = memo(function MessageView({ msg }: { key?: number; ms
 	if (msg.role === "user") {
 		return (
 			<Box bgColor={theme.surface} paddingX={1} paddingY={1}>
-				<Text color={theme.textMuted}>{msg.content}</Text>
+				<Text>{mentionStyledText(msg.content)}</Text>
 			</Box>
 		);
 	}
