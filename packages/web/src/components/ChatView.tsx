@@ -2,6 +2,7 @@ import { createEffect, createMemo, createSignal, For, Show } from "solid-js";
 import { viewMessages } from "@vvtxn/client/session-state.ts";
 import { streamState } from "#/state/session.ts";
 import { MessageView } from "./MessageView.tsx";
+import { RelayAnimation } from "./RelayAnimation.tsx";
 
 const NEAR_BOTTOM_PX = 64;
 
@@ -37,6 +38,7 @@ export function ChatView(props: { model: string; version: string }) {
 					when={messages().length > 0}
 					fallback={
 						<div class="welcome">
+							<RelayAnimation />
 							<div class="welcome-mark">RELAY</div>
 							<div class="welcome-meta">
 								<span>v{props.version}</span>
