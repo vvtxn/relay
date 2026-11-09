@@ -119,9 +119,10 @@ The terminal and the browser use the same font. The browser loads it automatical
 `pnpm relay fonts install` and select the printed family in your terminal settings. `pnpm relay fonts status` reports
 whether it is installed.
 
-The GitHub login runs on the server origin (`127.0.0.1:7433`); there is no separate dev server. After the first
-`pnpm relay`, the server hands the CLI session token over locally, so the terminal and browser act as the same user.
-Sign out only affects the current client.
+The GitHub login runs on the server origin (`127.0.0.1:7433`); there is no separate dev server. Opening the web app
+through another loopback host such as `localhost` redirects to that origin, so the OAuth cookies stay on the host
+GitHub redirects back to. After the first `pnpm relay`, the server hands the CLI session token over locally, so the
+terminal and browser act as the same user. Sign out only affects the current client.
 
 Lower-level tasks remain for running a server in the foreground:
 

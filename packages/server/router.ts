@@ -116,6 +116,40 @@ function originAllowed(services: ServerServices, request: HttpServerRequest.Http
 	return origin === publicOrigin || origin === requestUrl(request).origin;
 }
 
+/**
+ * Keep browser traffic on the configured public origin when it arrives through
+ * another loopback alias.
+ *
+ * OAuth handshake cookies are host-only, while GitHub redirects to the callback
+ * in `RELAY_PUBLIC_URL`. Starting the flow on `localhost` would store the state
+ * and PKCE cookies there, and the callback on `127.0.0.1` would never see them.
+ */
+function canonicalLoopbackRedirect(
+	services: ServerServices,
+	request: HttpServerRequest.HttpServerRequest,
+): HttpServerResponse.HttpServerResponse | null {
+	const { config } = services;
+	if (config.authMode !== "github") return null;
+	if (request.method !== "GET" && request.method !== "HEAD") return null;
+
+	const url = requestUrl(request);
+	let publicUrl: URL;
+	try {
+		publicUrl = new URL(config.publicUrl);
+	} catch {
+		return null;
+	}
+	if (!isLoopbackHost(url.hostname) || !isLoopbackHost(publicUrl.hostname)) return null;
+	if (url.origin === publicUrl.origin) return null;
+
+	// Only browser navigations and the login entrypoint. API clients, asset
+	// requests, and SSE streams stay on whatever origin they used.
+	const accept = Option.getOrUndefined(HttpHeaders.get(request.headers, "accept")) ?? "";
+	if (url.pathname !== "/api/auth/login" && !accept.includes("text/html")) return null;
+
+	return HttpServerResponse.redirect(`${publicUrl.origin}${url.pathname}${url.search}`);
+}
+
 /** Rejects cross-origin state-changing requests (all routes here live under /api). */
 function withCsrf(services: ServerServices, effect: RouteEffect): RouteEffect {
 	return Effect.gen(function* () {
@@ -198,6 +232,17 @@ export function createAppLayer(services: ServerServices) {
 				index: "index.html",
 				spa: true,
 			});
+
+			// Cloud OAuth cookies are host-only. Send browser traffic that reaches
+			// us through another loopback alias to the configured public origin.
+			yield* router.addGlobalMiddleware((handler) =>
+				Effect.gen(function* () {
+					const request = yield* HttpServerRequest.HttpServerRequest;
+					const redirect = canonicalLoopbackRedirect(services, request);
+					if (redirect) return redirect;
+					return yield* handler;
+				}),
+			);
 
 			// Health is always public. OAuth routes only exist in GitHub mode;
 			// local auth has no login or logout.
