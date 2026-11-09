@@ -138,7 +138,10 @@ Two transports:
   `GitHubAuthProvider` → `DatabaseUserStore` and issues an opaque session token (hashed at rest in `auth_sessions`).
   Non-browser clients send `Authorization: Bearer <token>` (the CLI reads the token handed over to
   `~/.relay/session.json`: a loopback login writes it, and so does any cookie-authenticated request while it is
-  missing or stale). Credentials are required in this mode.
+  missing or stale). Credentials are required in this mode. Browser requests that arrive through a loopback alias
+  other than the one in `RELAY_PUBLIC_URL` (for example `localhost` instead of `127.0.0.1`) are redirected to the
+  public origin before OAuth starts: the handshake cookies are host-only, while GitHub redirects to the configured
+  callback origin.
 
 `createServices()` returns long-lived services with `localUser` resolved in local mode (null in GitHub mode).
 `handleRequest` resolves the caller per request (`resolveRequestUser` in `identity.ts`) and passes
