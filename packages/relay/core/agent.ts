@@ -37,7 +37,7 @@ export interface AgentConfig {
 	maxTokens?: number;
 }
 
-const REFLECTION_INTERVAL = 12;
+const CONVERGENCE_INTERVAL = 8;
 const ROUND_BUDGET_WARNING = 10;
 const ROUND_BUDGET_FINAL = 3;
 const MAX_API_RETRIES = 3;
@@ -82,12 +82,13 @@ function runLoop(
 		for (let round = 0; maxRounds === undefined || round < maxRounds; round++) {
 			if (config.signal?.aborted) return;
 
-			// Self-reflection: after many tool rounds, prompt the model to assess progress
-			// Uses "user" role so trimContext can drop it if context grows too large
-			if (round > 0 && round % REFLECTION_INTERVAL === 0) {
+			// Convergence: after several tool rounds, push the model to stop
+			// expanding the investigation and either act or report. Uses "user"
+			// role so trimContext can drop it if context grows too large.
+			if (round > 0 && round % CONVERGENCE_INTERVAL === 0) {
 				context.push({
 					role: "user",
-					content: `[system note] You have completed ${round} tool rounds. Briefly assess: are you making progress toward the user's goal? If stuck or repeating yourself, try a different approach.`,
+					content: `[system note] You have used ${round} tool rounds. Stop expanding the investigation. Act on what you have, or report your findings and what remains uncertain.`,
 				});
 			}
 

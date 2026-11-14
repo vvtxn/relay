@@ -6,11 +6,8 @@ const MAX_OUTPUT = 10_000;
 export const readFileTool = defineTool({
 	name: "read_file",
 	description:
-		"Read the contents of a file. Returns the file content as text. For large files, pass offset and limit to read a line range.",
+		"Read the contents of a file. Use this instead of cat/head/tail. For large files, pass offset and limit to read a line range.",
 	readonly: true,
-	usageHint:
-		"Read the contents of a file. Always use this instead of `cat`/`head`/`tail`. For large files, use `offset` and " +
-		"`limit` to read the relevant range instead of re-reading the same truncated beginning.",
 	parameters: {
 		type: "object",
 		properties: {

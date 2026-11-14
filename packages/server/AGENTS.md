@@ -81,17 +81,17 @@ Owns active runs, one per session:
   placeholder substituted only for the allowed git host). SSH remotes are rewritten to HTTPS inside the clone so the
   token-based askpass helper works. A changed secret set recreates pooled VMs on their next lease.
 - Host runs (`RELAY_BOX=0`) execute directly on the host with no sandbox and no approval prompts; `main.ts` logs a
-  warning at startup. In both modes the system prompt adds a Safety section telling the agent to stop and ask before
+  warning at startup. In both modes the system prompt adds a one-line safety policy telling the agent to ask before
   actions that leave the box or are hard to undo
 - Runs leave `maxToolRounds` unset, so the agent loop has no arbitrary round cap and continues until the model stops
-  calling tools. An explicit cap remains available to library consumers; the loop emits budget notes when one is set.
-  Agent error events are logged with the session id for diagnosis.
-- Each run registers a `delegate` subagent tool (relay core) with the read-only workspace tools, and builds its
-  system prompt from the run's registry (`buildSystemPrompt`); subagent cost rides on the tool result's `meta.cost`
-  and is added to the session total. When the prepared box image is active, the prompt adds a firm Browser
-  Verification section: UI changes must be checked with the embedded Playwright/Chromium before completion. The
-  `browser` tool leases a box through the same generic sandbox provider, sharing the run's pinned lease; it must never
-  spawn a second sandbox.
+  calling tools. The loop emits a convergence note every 8 rounds; an explicit cap remains available to library
+  consumers, and the loop emits budget notes when one is set. Agent error events are logged with the session id for
+  diagnosis.
+- Each run registers a `delegate` subagent tool (relay core) with the read-only workspace tools, and builds a compact
+  system prompt with the run's box/host context (`buildSystemPrompt`); subagent cost rides on the tool result's
+  `meta.cost` and is added to the session total. When the prepared box image is active, the prompt includes a one-line
+  browser-verification instruction; mechanics live in the `browser` tool description. The `browser` tool leases a box
+  through the same generic sandbox provider, sharing the run's pinned lease; it must never spawn a second sandbox.
 - `subscribe`/`subscribeStream` register SSE consumers; `getRunState` serves the catch-up snapshot, and
   `listActive`/`GET /api/runs` expose owner-scoped run state to every client.
 

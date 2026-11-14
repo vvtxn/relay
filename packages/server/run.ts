@@ -445,11 +445,8 @@ export class RunManager {
 				// The sandbox is the shell/browser boundary: boxed runs are
 				// unrestricted inside it, and host runs are explicitly unsandboxed.
 				const tools = createToolRegistry([...baseTools, ...sandboxTools]);
-				// Rendered from the registry the run actually exposes, so the tool
-				// guidance can never drift from the available tools.
 				const systemPrompt = buildSystemPrompt({
 					mode: "main",
-					tools,
 					...(sandbox && boxSettings && boxImage
 						? {
 								box: {

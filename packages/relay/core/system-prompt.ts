@@ -1,14 +1,12 @@
 import { buildSystemPrompt } from "./prompts.ts";
-import { defaultTools } from "./tools/index.ts";
 
 /**
- * Default system prompt for coding agents using `defaultTools`, shared across
- * clients.
+ * Default system prompt for coding agents, shared across clients.
  *
  * Frontends may pass their own prompt via `AgentConfig.systemPrompt`, or build
- * one tuned to their registry with {@link buildSystemPrompt}.
+ * one tuned to their runtime with {@link buildSystemPrompt}.
  */
-const SYSTEM_PROMPT = buildSystemPrompt({ mode: "main", tools: defaultTools });
+const SYSTEM_PROMPT = buildSystemPrompt({ mode: "main" });
 
 export { SYSTEM_PROMPT };
 export { buildSystemPrompt } from "./prompts.ts";

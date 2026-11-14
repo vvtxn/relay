@@ -14,10 +14,6 @@ const DELEGATE_DESCRIPTION =
 	"to look, what the report should contain). Issue several delegate calls in one turn to run investigations in " +
 	"parallel, and prefer delegating broad exploration that would flood your own context.";
 
-const DELEGATE_USAGE_HINT =
-	"Delegate self-contained investigations to a read-only subagent; issue several in one turn to run them in " +
-	"parallel, and give each a complete, specific prompt.";
-
 /** Options for {@link createDelegateTool}. */
 export interface DelegateToolOptions {
 	provider: LLMProvider;
@@ -73,7 +69,6 @@ export function createDelegateTool(options: DelegateToolOptions): Tool {
 			},
 		},
 		readonly: true,
-		usageHint: DELEGATE_USAGE_HINT,
 		execute: (input) =>
 			Effect.gen(function* () {
 				const { prompt } = (input ?? {}) as { prompt?: unknown };
@@ -95,7 +90,7 @@ function runSubagent(prompt: string, options: DelegateToolOptions): Effect.Effec
 	const config: AgentConfig = {
 		provider: options.provider,
 		model: options.model,
-		systemPrompt: options.systemPrompt ?? buildSystemPrompt({ mode: "subagent", tools: options.tools }),
+		systemPrompt: options.systemPrompt ?? buildSystemPrompt({ mode: "subagent" }),
 		tools: options.tools,
 		...(options.maxToolRounds !== undefined ? { maxToolRounds: options.maxToolRounds } : {}),
 		...(options.temperature !== undefined ? { temperature: options.temperature } : {}),
