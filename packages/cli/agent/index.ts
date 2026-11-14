@@ -1,8 +1,9 @@
 import { startServer } from "@vvtxn/server/main.ts";
 import { VERSION } from "@vvtxn/relay/version.ts";
 import { createClient } from "./client.ts";
-import { resolveWorkspacePath } from "./config.ts";
+import { resolveWorkspacePath, type ThemeMode } from "./config.ts";
 import { ensureApiKey, ensureAuthenticated, ensureServer, printStatus, runWeb, stopServer } from "./server.ts";
+import { parseThemeMode, prepareTheme } from "./theme.ts";
 import { runFontsCommand } from "./fonts.ts";
 import { runWorkspaceCommand } from "./workspace.ts";
 import { runBoxCommand } from "./box.ts";
@@ -11,11 +12,17 @@ import { runAttach, runThreads } from "./threads.ts";
 const args = process.argv.slice(2);
 const command = args[0];
 
-/** Flags for the default command: `relay [--continue] [--workspace <path>] [--session <id>]`. */
-function parseRunFlags(argv: string[]): { resume: boolean; workspace: string | null; session: string | null } {
+/** Flags for the default command: `relay [--continue] [--workspace <path>] [--session <id>] [--theme <mode>]`. */
+function parseRunFlags(argv: string[]): {
+	resume: boolean;
+	workspace: string | null;
+	session: string | null;
+	theme: ThemeMode | null;
+} {
 	let resume = false;
 	let workspace: string | null = null;
 	let session: string | null = null;
+	let theme: ThemeMode | null = null;
 	for (let index = 0; index < argv.length; index++) {
 		const arg = argv[index];
 		if (arg === "-c" || arg === "--continue") {
@@ -30,11 +37,14 @@ function parseRunFlags(argv: string[]): { resume: boolean; workspace: string | n
 			if (!value) throw new Error("--session requires a thread id");
 			session = value;
 			index += 1;
+		} else if (arg === "--theme") {
+			theme = parseThemeMode(argv[index + 1]);
+			index += 1;
 		} else if (arg?.startsWith("-")) {
 			throw new Error(`Unknown option: ${arg}`);
 		}
 	}
-	return { resume, workspace, session };
+	return { resume, workspace, session, theme };
 }
 
 try {
@@ -99,6 +109,9 @@ try {
 			// page; block here until one is saved rather than opening a TUI that
 			// cannot send a message.
 			await ensureApiKey(state);
+			// Resolve the palette before importing the TUI: component modules
+			// capture colors at load time and markdown caches parsed segments.
+			await prepareTheme(flags.theme);
 			await import("./app.tsx");
 		}
 	}

@@ -69,7 +69,10 @@ The executable needs no Node.js installation. It extracts its web/font/libSQL as
 first launch. Tagged releases attach `relay` and `relay.sha256`. Set `RELAY_FLAVOR=cloud` in `.env` to run the same
 executable against Turso and GitHub.
 
-Server settings (`serverUrl` for the terminal client) are configured in `~/.relay/config.json`.
+Server settings (`serverUrl` for the terminal client) are configured in `~/.relay/config.json`. The terminal palette
+defaults to `auto`: it is derived from the terminal's foreground, background, and ANSI colors when the terminal
+answers color queries, and falls back to the dark Graphite palette otherwise. Set `theme` to `dark` or `light` in the
+config, or pass `relay --theme <auto|dark|light>` for one run (`RELAY_THEME` also works).
 
 ## Quick Start
 

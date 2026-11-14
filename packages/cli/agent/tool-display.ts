@@ -2,13 +2,27 @@
 
 import { theme } from "#/tui/theme.ts";
 
-/** Per-tool accents — the same tokens the web client colors tool names with. */
+/**
+ * Per-tool accents — the same tokens the web client colors tool names with.
+ * Getters read the active palette at render time so the startup theme swap is
+ * reflected even if this module was imported first.
+ */
 export const TOOL_COLORS: Record<string, string> = {
-	read_file: theme.toolRead,
-	write_file: theme.toolWrite,
-	edit_file: theme.toolEdit,
-	grep: theme.toolGrep,
-	bash: theme.toolRun,
+	get read_file() {
+		return theme.toolRead;
+	},
+	get write_file() {
+		return theme.toolWrite;
+	},
+	get edit_file() {
+		return theme.toolEdit;
+	},
+	get grep() {
+		return theme.toolGrep;
+	},
+	get bash() {
+		return theme.toolRun;
+	},
 };
 
 /** Widest tool display name (`delegate`), so rows stay aligned. */

@@ -11,7 +11,8 @@ tui/
 │   ├── index.ts                # Re-exports Terminal
 │   ├── ansi.ts                 # ANSI escape code constants (cursor, screen, mouse)
 │   ├── terminal.ts             # Terminal buffer, rendering, cursor control
-│   ├── input.ts                # Keyboard input handling
+│   ├── terminal-palette.ts     # OSC 10/11/4 palette query, DA1 fence, reply parsing
+│   ├── input.ts                # Keyboard input handling (drops OSC/private-CSI replies)
 │   └── primitives/             # Drawing primitives
 │       ├── color.ts            # Color parsing, ANSI conversion, bg inheritance
 │       ├── char-width.ts       # wcwidth (combining/wide) + ANSI-aware measurement
@@ -46,7 +47,8 @@ tui/
 │   │   └── welcome-screen.tsx  # WelcomeScreen component
 │   └── types/
 │       └── index.ts            # TypeScript type definitions, ElementRegistry, props
-└── theme.ts                    # Centralized color theme (hex colors for all UI elements)
+├── theme.ts                    # Active CLI palette (mutable copy of the shared tokens)
+└── theme-derive.ts             # Builds a palette from the terminal's fg/bg + ANSI colors
 ```
 
 ## Key Concepts
@@ -101,6 +103,16 @@ which is what makes rounded corners safe (an arc cannot mask a partial-cell fill
 composer and the command palette modal are border-only rounded boxes (no fill, so there is nothing to bleed);
 everywhere else, hierarchy comes from the background steps (`background` → `surface` → `surfaceElevated`) plus padding,
 not outlines.
+
+### Terminal Palette Theming
+
+`theme.ts` exports the active palette as a mutable CLI-local copy of the shared tokens (`setTheme()` replaces it in
+place). This is deliberate: the CLI applies the palette once at startup, before component modules load, because some
+tokens are captured at module load and markdown caches parsed colors. `theme-derive.ts` is pure and browser-safe: it
+turns the terminal's default foreground/background into neutral steps and uses the reported ANSI palette for semantic
+accents, falling back to ANSI slot names when only fg/bg answered. `terminal-palette.ts` owns the escape-sequence I/O:
+OSC 10/11/4 queries fenced by DA1, raw-mode stdin, BEL/ST reply parsing, and a bounded timeout. `input.ts` discards
+late OSC replies and private CSI device reports so they can never become keystrokes.
 
 ### Core Classes
 

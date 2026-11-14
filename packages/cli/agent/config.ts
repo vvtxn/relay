@@ -3,20 +3,40 @@ import { join, resolve } from "node:path";
 import { expandHome } from "@vvtxn/relay/core/display.ts";
 import { homeDir, relayDir } from "@vvtxn/relay/core/paths.ts";
 
+/** How the CLI picks its palette. */
+const themeModes = ["auto", "dark", "light"] as const;
+export type ThemeMode = (typeof themeModes)[number];
+
+export function isThemeMode(value: unknown): value is ThemeMode {
+	return typeof value === "string" && (themeModes as readonly string[]).includes(value);
+}
+
 export interface RelayConfig {
 	/** Base URL of the Relay server this CLI talks to. */
 	serverUrl: string;
+	/**
+	 * Palette preference: `auto` derives it from the terminal's colors, while
+	 * `dark` and `light` use the built-in Graphite palettes.
+	 */
+	theme: ThemeMode;
 }
 
 const defaults: RelayConfig = {
 	serverUrl: "http://127.0.0.1:7433",
+	theme: "auto",
 };
 
 function loadUserConfig(): Partial<RelayConfig> {
 	const path = join(relayDir(), "config.json");
 	try {
 		const raw = readFileSync(path, "utf8");
-		return JSON.parse(raw) as Partial<RelayConfig>;
+		const parsed: unknown = JSON.parse(raw);
+		if (parsed === null || typeof parsed !== "object") return {};
+		const record = parsed as Record<string, unknown>;
+		const config: Partial<RelayConfig> = {};
+		if (typeof record.serverUrl === "string" && record.serverUrl !== "") config.serverUrl = record.serverUrl;
+		if (isThemeMode(record.theme)) config.theme = record.theme;
+		return config;
 	} catch {
 		try {
 			const dir = relayDir();
