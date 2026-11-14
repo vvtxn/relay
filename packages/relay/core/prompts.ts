@@ -244,7 +244,7 @@ Every change that affects rendered UI must be verified in a real browser before 
 function toolUsageSection(tools: readonly Tool[]): string {
 	if (tools.length === 0) return "";
 	const lines = tools.map((tool) => {
-		const hint = tool.usageHint?.trim() || firstSentence(tool.definition.function.description);
+		const hint = tool.usageHint?.trim() || firstSentence(tool.definition.description);
 		const name = toolName(tool);
 		return hint ? `- **${name}** — ${hint}` : `- **${name}**`;
 	});
@@ -271,7 +271,7 @@ function toolList(source: ToolRegistry | readonly Tool[] | undefined): readonly 
 }
 
 function toolName(tool: Tool): string {
-	return tool.definition.function.name;
+	return tool.definition.name;
 }
 
 /** First sentence of a description, trimmed for prompt rendering. */

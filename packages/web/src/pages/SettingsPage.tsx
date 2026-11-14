@@ -1,7 +1,7 @@
 import { createEffect, createSignal, Show } from "solid-js";
 import { useNavigate, useParams } from "@tanstack/solid-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/solid-query";
-import { meQuery, settingsQuery } from "#/api/queries.ts";
+import { configQuery, meQuery, settingsQuery } from "#/api/queries.ts";
 import { setApiKey } from "#/api/mutations.ts";
 import { readStoredSessionId } from "#/api/storage.ts";
 import { RelayError } from "@vvtxn/client/services.ts";
@@ -15,6 +15,7 @@ function SettingsPanel(props: { onBack: () => void }) {
 	const navigate = useNavigate();
 	const queryClient = useQueryClient();
 	const me = useQuery(() => meQuery);
+	const config = useQuery(() => configQuery);
 	const settings = useQuery(() => settingsQuery);
 	const [draftKey, setDraftKey] = createSignal("");
 	const [message, setMessage] = createSignal("");
@@ -121,7 +122,9 @@ function SettingsPanel(props: { onBack: () => void }) {
 						</section>
 
 						<section class="settings-section">
-							<h2 class="settings-section-title">API key</h2>
+							<h2 class="settings-section-title">
+								{config.data?.provider === "anthropic" ? "Anthropic API key" : "API key"}
+							</h2>
 							<p class="settings-hint">
 								Used by the server to call the model on your behalf. Stored per account and never shown
 								again.

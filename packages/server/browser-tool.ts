@@ -117,48 +117,45 @@ function optionalNumber(value: unknown, fallback: number, max: number): number {
 export function createBrowserTool(provider: SandboxProvider): Tool {
 	return {
 		definition: {
-			type: "function",
-			function: {
-				name: "browser",
-				description:
-					"Run a one-shot Playwright check inside the current managed box. Navigate a URL, optionally wait for a selector, evaluate a DOM expression, or run an inline async script. Use this for rendered UI verification; do not create probe .mjs files or install browsers.",
-				parameters: {
-					type: "object",
-					properties: {
-						action: {
-							type: "string",
-							enum: ["check"],
-							description: "The browser check to run.",
-						},
-						url: {
-							type: "string",
-							description: "Absolute http(s) URL to open.",
-						},
-						waitFor: {
-							type: "string",
-							description: "Optional CSS selector to wait for before evaluating.",
-						},
-						waitMs: {
-							type: "number",
-							description: "Extra settle time after navigation in milliseconds (default 500).",
-						},
-						timeoutMs: {
-							type: "number",
-							description: "Navigation/selector timeout in milliseconds (default 30000).",
-						},
-						evaluate: {
-							type: "string",
-							description: "Optional JavaScript expression evaluated in the page after navigation.",
-						},
-						script: {
-							type: "string",
-							description:
-								"Optional async JavaScript body evaluated in the page, e.g. `return document.title;`; return a JSON-serializable value.",
-						},
+			name: "browser",
+			description:
+				"Run a one-shot Playwright check inside the current managed box. Navigate a URL, optionally wait for a selector, evaluate a DOM expression, or run an inline async script. Use this for rendered UI verification; do not create probe .mjs files or install browsers.",
+			parameters: {
+				type: "object",
+				properties: {
+					action: {
+						type: "string",
+						enum: ["check"],
+						description: "The browser check to run.",
 					},
-					required: ["action", "url"],
-					additionalProperties: false,
+					url: {
+						type: "string",
+						description: "Absolute http(s) URL to open.",
+					},
+					waitFor: {
+						type: "string",
+						description: "Optional CSS selector to wait for before evaluating.",
+					},
+					waitMs: {
+						type: "number",
+						description: "Extra settle time after navigation in milliseconds (default 500).",
+					},
+					timeoutMs: {
+						type: "number",
+						description: "Navigation/selector timeout in milliseconds (default 30000).",
+					},
+					evaluate: {
+						type: "string",
+						description: "Optional JavaScript expression evaluated in the page after navigation.",
+					},
+					script: {
+						type: "string",
+						description:
+							"Optional async JavaScript body evaluated in the page, e.g. `return document.title;`; return a JSON-serializable value.",
+					},
 				},
+				required: ["action", "url"],
+				additionalProperties: false,
 			},
 		},
 		usageHint:

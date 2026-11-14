@@ -16,7 +16,7 @@ import {
 	loadOrCreateLocalMasterKey,
 	type UserSettingsStore,
 } from "@vvtxn/relay/core/index.ts";
-import { CompletionsProvider } from "@vvtxn/relay/api/providers/completions.ts";
+import { createProvider } from "@vvtxn/relay/api/providers/index.ts";
 import { createDatabaseClient, type DatabaseClient } from "@vvtxn/relay/core/database.ts";
 import { storeEffect, type StoreError } from "@vvtxn/relay/core/effect.ts";
 import { DatabaseSessionStore } from "@vvtxn/relay/core/sessions/index.ts";
@@ -179,7 +179,7 @@ const runsLayer = Layer.effect(
 		const providerFor = (ownerId: string) =>
 			Effect.gen(function* () {
 				const apiKey = yield* userSettings.getApiKey(ownerId);
-				return apiKey ? new CompletionsProvider({ apiKey, baseURL: config.baseURL }) : null;
+				return apiKey ? createProvider({ provider: config.provider, apiKey, baseURL: config.baseURL }) : null;
 			});
 		return new RunManager({ config, providerFor, boxes, workspaces });
 	}),

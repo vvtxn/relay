@@ -1,6 +1,7 @@
 import type { Effect } from "effect";
 import type { DatabaseClient } from "../database.ts";
 import { storeEffect, type StoreError } from "../effect.ts";
+import { normalizeEntry } from "./normalize.ts";
 import type {
 	Entry,
 	NewEntry,
@@ -81,7 +82,7 @@ function optionalNumber(row: Record<string, unknown>, key: string): number | und
 }
 
 function rowToEntry(row: Record<string, unknown>): Entry {
-	return JSON.parse(stringValue(row, "data")) as Entry;
+	return normalizeEntry(JSON.parse(stringValue(row, "data")) as Entry);
 }
 
 export class DatabaseSessionStore implements SessionStore {

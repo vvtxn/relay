@@ -65,7 +65,7 @@ export type ToolRegistry = Map<string, Tool>;
 export function createToolRegistry(tools: Tool[]): ToolRegistry {
 	const registry: ToolRegistry = new Map();
 	for (const tool of tools) {
-		registry.set(tool.definition.function.name, tool);
+		registry.set(tool.definition.name, tool);
 	}
 	return registry;
 }
@@ -94,12 +94,9 @@ export function defineTool(opts: {
 }): Tool {
 	return {
 		definition: {
-			type: "function",
-			function: {
-				name: opts.name,
-				description: opts.description,
-				parameters: opts.parameters,
-			},
+			name: opts.name,
+			description: opts.description,
+			parameters: opts.parameters,
 		},
 		...(opts.readonly !== undefined ? { readonly: opts.readonly } : {}),
 		...(opts.usageHint !== undefined ? { usageHint: opts.usageHint } : {}),

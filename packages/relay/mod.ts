@@ -7,9 +7,9 @@
  *
  * @example Recommended usage with {@link runAgentLoop}
  * ```ts
- * import { runAgentLoop, CompletionsProvider, createToolRegistry, defaultTools, SYSTEM_PROMPT } from "@vvtxn/relay";
+ * import { runAgentLoop, createProvider, createToolRegistry, defaultTools, SYSTEM_PROMPT } from "@vvtxn/relay";
  *
- * const provider = new CompletionsProvider({ apiKey, baseURL: "https://openrouter.ai/api/v1" });
+ * const provider = createProvider({ provider: "openai", apiKey, baseURL: "https://openrouter.ai/api/v1" });
  * const tools = createToolRegistry(defaultTools);
  *
  * await runAgentLoop(messages, {
@@ -175,17 +175,21 @@ export { decodeWorkspaceToken, encodeWorkspaceToken } from "./core/workspace-tok
 // API types
 export type {
 	CompletionRequest,
-	CompletionResponse,
+	CompletionResult,
+	FinishReason,
 	JsonSchema,
 	LLMProvider,
+	LLMStreamEvent,
 	Message,
 	ProviderConfig,
-	StreamChunk,
+	ProviderKind,
+	Role,
 	ToolCall,
+	ToolChoice,
 	ToolDefinition,
 	Usage,
 } from "./api/types.ts";
 
 // API providers
 export { isRetryableStatus, ProviderError, toProviderError } from "./api/errors.ts";
-export { CompletionsProvider } from "./api/providers/completions.ts";
+export { AnthropicProvider, createProvider, OpenAICompletionsProvider } from "./api/providers/index.ts";

@@ -90,6 +90,7 @@ export function handleConfig(services: RequestServices): Effect.Effect<HttpServe
 	const { config } = services;
 	return Effect.succeed(
 		json({
+			provider: config.provider,
 			model: config.model,
 			contextTokens: config.maxTokens,
 			maxSessionsPerWorkspace: config.maxSessionsPerWorkspace,

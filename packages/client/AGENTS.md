@@ -24,7 +24,8 @@ Box payloads (`BoxSummary`, `BoxListResponse`, `CreateBoxRequest`, `BoxResizeReq
 
 The single source of truth for the server↔client contract. All types are plain JSON so any runtime can consume them.
 REST payloads cover health, auth info, identity (`MeResponse` includes an optional `avatarUrl`), per-user settings
-(`SettingsResponse` carries only `{ set, hint }` for the stored API key), workspace, sessions CRUD, files, and boxes.
+(`SettingsResponse` carries only `{ set, hint }` for the stored API key), model/config info (`ConfigResponse` exposes the
+server's `provider` and `model`), workspace, sessions CRUD, files, and boxes.
 `ServerEvent` mirrors the agent runner callbacks 1:1 plus server lifecycle events: `run_state` snapshots (run id,
 phase, draft, box id, queue position), `run_status` phase transitions, and `run_finished`. `RunSummary`/
 `RunListResponse` back `GET /api/runs`, and `SessionSummary` carries optional `running`/`runPhase` flags.

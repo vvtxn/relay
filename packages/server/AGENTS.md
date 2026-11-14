@@ -209,7 +209,9 @@ summary when boxes are enabled.
 
 ## Environment
 
-- `LLM_BASE_URL`, `LLM_MODEL`, `LLM_TEMPERATURE`, `LLM_MAX_TOKENS`, `LLM_MAX_COMPLETION_TOKENS`
+- `LLM_PROVIDER` (`openai` default, or `anthropic`), `LLM_BASE_URL`, `LLM_MODEL`, `LLM_TEMPERATURE`, `LLM_MAX_TOKENS`,
+  `LLM_MAX_COMPLETION_TOKENS`. `LLM_MODEL` is required for Anthropic; the base URL defaults to
+  `https://api.anthropic.com/v1` (OpenAI keeps `https://openrouter.ai/api/v1`).
 - Flavor: `RELAY_FLAVOR=cloud|local` (default cloud; set by the package scripts). Cloud implies Turso + GitHub;
   local implies SQLite + local auth.
 - Cloud required: `TURSO_DB_URL`, `TURSO_DB_TOKEN`, `GITHUB_APP_CLIENT_ID`, `GITHUB_APP_CLIENT_SECRET`. Local mode

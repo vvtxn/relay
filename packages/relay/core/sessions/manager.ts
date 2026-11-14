@@ -4,6 +4,7 @@ import { mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises"
 import { dirname, join } from "node:path";
 import type { Message } from "#/api/types.ts";
 import { storeEffect, type StoreError } from "../effect.ts";
+import { normalizeEntry } from "./normalize.ts";
 import { sessionDir, sessionFilePath } from "./paths.ts";
 import {
 	CURRENT_VERSION,
@@ -35,7 +36,7 @@ async function readSession(path: string): Promise<Session> {
 	const headerLine = lines[0];
 	if (!headerLine) throw new Error(`Session file has no header: ${path}`);
 	const header = JSON.parse(headerLine) as SessionHeader;
-	const entries = lines.slice(1).map((l) => JSON.parse(l) as Entry);
+	const entries = lines.slice(1).map((l) => normalizeEntry(JSON.parse(l) as Entry));
 	return { header, entries };
 }
 
@@ -49,12 +50,12 @@ function entryToMessage(entry: Entry): Message {
 			return {
 				role: entry.role,
 				content: entry.content,
-				...(entry.toolCalls?.length && { tool_calls: entry.toolCalls }),
+				...(entry.toolCalls?.length && { toolCalls: entry.toolCalls }),
 			};
 		case "tool_result":
 			return {
 				role: "tool",
-				tool_call_id: entry.toolCallId,
+				toolCallId: entry.toolCallId,
 				name: entry.toolName,
 				content: entry.content,
 			};

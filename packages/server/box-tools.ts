@@ -13,12 +13,9 @@ import type { SandboxProvider } from "./sandbox.ts";
 export function createBoxBashTool(provider: SandboxProvider): Tool {
 	return {
 		definition: {
-			type: "function",
-			function: {
-				name: bashToolDefinition.name,
-				description: bashToolDefinition.description,
-				parameters: bashToolDefinition.parameters,
-			},
+			name: bashToolDefinition.name,
+			description: bashToolDefinition.description,
+			parameters: bashToolDefinition.parameters,
 		},
 		usageHint: bashToolDefinition.usageHint,
 		execute: (input): Effect.Effect<ToolResult> =>
@@ -81,28 +78,25 @@ function describeStatus(status: BoxStatus): string {
 export function createBoxTool(manager: BoxManager, provider: SandboxProvider): Tool {
 	return {
 		definition: {
-			type: "function",
-			function: {
-				name: "box",
-				description:
-					"Inspect or resize the managed box used by bash and browser tools. Start tiny; use small or medium when the task needs Playwright/browser tests, large builds, or several services. The prepared box already contains Playwright and Chromium; verify UI changes before reporting done. Resizing is live and does not recreate the workspace.",
-				parameters: {
-					type: "object",
-					properties: {
-						action: {
-							type: "string",
-							enum: ["status", "resize"],
-							description: "Inspect the current box or change its resource profile.",
-						},
-						size: {
-							type: "string",
-							enum: ["tiny", "small", "medium"],
-							description: "Target profile for the resize action.",
-						},
+			name: "box",
+			description:
+				"Inspect or resize the managed box used by bash and browser tools. Start tiny; use small or medium when the task needs Playwright/browser tests, large builds, or several services. The prepared box already contains Playwright and Chromium; verify UI changes before reporting done. Resizing is live and does not recreate the workspace.",
+			parameters: {
+				type: "object",
+				properties: {
+					action: {
+						type: "string",
+						enum: ["status", "resize"],
+						description: "Inspect the current box or change its resource profile.",
 					},
-					required: ["action"],
-					additionalProperties: false,
+					size: {
+						type: "string",
+						enum: ["tiny", "small", "medium"],
+						description: "Target profile for the resize action.",
+					},
 				},
+				required: ["action"],
+				additionalProperties: false,
 			},
 		},
 		usageHint:

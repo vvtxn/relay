@@ -1,5 +1,6 @@
-// OpenAI-compatible types for /v1/chat/completions
-// Works with any provider exposing an OpenAI-compatible API (open-source models, KimiK2, etc.)
+// Provider-neutral LLM types used by the agent loop, sessions, and tools.
+// Wire formats (OpenAI chat/completions, Anthropic messages) live in the
+// provider adapters under ./providers and are translated at that boundary.
 
 import type { Stream } from "effect";
 import type { ProviderError } from "./errors.ts";
@@ -10,22 +11,23 @@ import type { ProviderError } from "./errors.ts";
 
 export type Role = "system" | "user" | "assistant" | "tool";
 
-export type FinishReason = "stop" | "tool_calls" | "length" | null;
+export type FinishReason = "stop" | "tool_calls" | "length" | "content_filter" | null;
 
 export interface ToolCall {
 	id: string;
-	type: "function";
-	function: {
-		name: string;
-		arguments: string; // JSON-serialized
-	};
+	name: string;
+	/** JSON-serialized arguments, as accumulated from the model stream. */
+	arguments: string;
 }
 
 export interface Message {
 	role: Role;
 	content: string | null;
-	tool_calls?: ToolCall[];
-	tool_call_id?: string;
+	/** Assistant tool calls, in the order the model emitted them. */
+	toolCalls?: ToolCall[];
+	/** Tool-result messages: the id of the call being answered. */
+	toolCallId?: string;
+	/** Tool-result messages: the tool name (some providers use it for context). */
 	name?: string;
 }
 
@@ -34,15 +36,12 @@ export interface Message {
 // ---------------------------------------------------------------------------
 
 export interface ToolDefinition {
-	type: "function";
-	function: {
-		name: string;
-		description: string;
-		parameters: JsonSchema;
-	};
+	name: string;
+	description: string;
+	parameters: JsonSchema;
 }
 
-export type ToolChoice = "auto" | "none" | { type: "function"; function: { name: string } };
+export type ToolChoice = "auto" | "none" | { name: string };
 
 /** JSON Schema subset used for tool parameter definitions. */
 export type JsonSchema = {
@@ -59,36 +58,27 @@ export interface CompletionRequest {
 	model: string;
 	messages: Message[];
 	tools?: ToolDefinition[];
-	tool_choice?: ToolChoice;
+	toolChoice?: ToolChoice;
 	temperature?: number;
-	max_tokens?: number;
-	stream?: boolean;
+	maxTokens?: number;
 	signal?: AbortSignal;
 }
 
 // ---------------------------------------------------------------------------
-// Response (non-streaming)
+// Usage / responses
 // ---------------------------------------------------------------------------
 
 export interface Usage {
-	prompt_tokens: number;
-	completion_tokens: number;
-	total_tokens: number;
+	inputTokens: number;
+	outputTokens: number;
+	totalTokens: number;
 	cost?: number;
 }
 
-export interface CompletionChoice {
-	index: number;
-	message: Message;
-	finish_reason: FinishReason;
-}
-
-export interface CompletionResponse {
+export interface CompletionResult {
 	id: string;
-	object: string;
-	created: number;
-	model: string;
-	choices: CompletionChoice[];
+	message: Message;
+	reason: FinishReason;
 	usage?: Usage;
 }
 
@@ -96,40 +86,21 @@ export interface CompletionResponse {
 // Streaming
 // ---------------------------------------------------------------------------
 
-export interface DeltaToolCall {
-	index: number;
-	id?: string;
-	type?: "function";
-	function?: {
-		name?: string;
-		arguments?: string;
-	};
-}
-
-export interface Delta {
-	role?: Role;
-	content?: string | null;
-	tool_calls?: DeltaToolCall[];
-}
-
-export interface StreamChoice {
-	index: number;
-	delta: Delta;
-	finish_reason: FinishReason;
-}
-
-export interface StreamChunk {
-	id: string;
-	object: string;
-	created: number;
-	model: string;
-	choices: StreamChoice[];
-	usage?: Usage;
-}
+/**
+ * Provider-neutral stream events. Every adapter translates its wire format
+ * into this sequence; the agent loop is the only consumer.
+ */
+export type LLMStreamEvent =
+	| { type: "text_delta"; text: string }
+	| { type: "tool_call_start"; index: number; id: string; name: string }
+	| { type: "tool_call_args_delta"; index: number; args: string }
+	| { type: "finish"; id: string; reason: FinishReason; usage?: Usage };
 
 // ---------------------------------------------------------------------------
 // Provider
 // ---------------------------------------------------------------------------
+
+export type ProviderKind = "openai" | "anthropic";
 
 export interface ProviderConfig {
 	apiKey: string;
@@ -137,6 +108,6 @@ export interface ProviderConfig {
 }
 
 export interface LLMProvider {
-	complete(request: CompletionRequest): Promise<CompletionResponse>;
-	stream(request: CompletionRequest): Stream.Stream<StreamChunk, ProviderError>;
+	complete(request: CompletionRequest): Promise<CompletionResult>;
+	stream(request: CompletionRequest): Stream.Stream<LLMStreamEvent, ProviderError>;
 }
