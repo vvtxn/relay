@@ -158,8 +158,6 @@ export function createBrowserTool(provider: SandboxProvider): Tool {
 				additionalProperties: false,
 			},
 		},
-		usageHint:
-			"Use browser for rendered UI checks inside the sandbox. It runs Playwright against a URL and returns title, DOM text, console errors, and any evaluated result. Never create .mjs probe scripts or install browsers.",
 		execute: (input): Effect.Effect<ToolResult> =>
 			Effect.gen(function* () {
 				const value = (input ?? {}) as BrowserInput;

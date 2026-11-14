@@ -9,11 +9,7 @@ export const BASH_DEFAULT_TIMEOUT = 30_000;
 export const bashToolDefinition = {
 	name: "bash",
 	description:
-		"Execute a shell command. Use only for running project scripts (e.g. pnpm run, vp run), build/test commands, git operations, and installing packages. Do NOT use bash for file reading, searching, or directory listing — use the dedicated tools (read_file, grep) instead. Commands run in the current working directory.",
-	usageHint:
-		"Run project scripts (`pnpm run`, `vp run`), build/test commands, git operations, and package installs. Do " +
-		"NOT use bash for file reading, searching, or listing — use the dedicated tools. Avoid interactive commands " +
-		"(REPLs, editors, password prompts) and background processes with `&`.",
+		"Execute a shell command. Use only for running project scripts (e.g. pnpm run, vp run), build/test commands, git operations, and installing packages. Do NOT use bash for file reading, searching, or directory listing — use the dedicated tools (read_file, grep) instead. Avoid interactive commands and background processes with `&`. Commands run in the current working directory.",
 	parameters: {
 		type: "object",
 		properties: {

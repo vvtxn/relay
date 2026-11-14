@@ -6,13 +6,10 @@ const MAX_OUTPUT = 10_000;
 export const grepTool = defineTool({
 	name: "grep",
 	description:
-		"Search for a text pattern in files using ripgrep (rg). Returns matching lines with file paths and line numbers. " +
-		"Supports regex patterns by default. Use the glob parameter to filter by file type (e.g. '*.ts'). " +
-		"Falls back to grep if ripgrep is not installed.",
+		"Search for a text pattern in files using ripgrep (rg). Use this instead of grep/rg via bash. Returns matching " +
+		"lines with file paths and line numbers. Supports regex patterns by default. Use the glob parameter to filter " +
+		"by file type (e.g. '*.ts'). Falls back to grep if ripgrep is not installed.",
 	readonly: true,
-	usageHint:
-		"Search for a text pattern in files. Always use this instead of `grep`/`rg` via bash; use the `glob` parameter " +
-		"to filter by file type.",
 	parameters: {
 		type: "object",
 		properties: {

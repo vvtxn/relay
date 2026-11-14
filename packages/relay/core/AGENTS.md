@@ -27,8 +27,8 @@ core/
 │   ├── settings-file.ts  # FileUserSettingsStore: per-user encrypted files (the default backend)
 │   ├── secret.ts         # AES-GCM SecretCipher, master-key parsing/generation, owner-bound AAD
 │   └── service.ts        # authenticate(): provider + user store → AuthenticatedUser
-├── prompts.ts            # buildSystemPrompt(): section composition + registry-aware tool guidance
-├── system-prompt.ts      # SYSTEM_PROMPT default (built from defaultTools); re-exports the builder
+├── prompts.ts            # buildSystemPrompt(): compact identity, rules, workspace/safety context
+├── system-prompt.ts      # SYSTEM_PROMPT default; re-exports the builder
 ├── workspace.ts          # Workspace-rooted fs helpers: expandMentions, listProjectFiles, git metadata
 ├── workspace-token.ts    # URL-safe workspace path tokens shared by the web routes and CLI deep links
 ├── tools/                # Tool system
@@ -67,7 +67,7 @@ core/
 The stream never fails: provider errors are retried (`Effect.retry` with `Schedule.exponential`, 1s/2s, gated on
 `ProviderError.retryable`), a stalled stream fails after 60s of silence (`Stream.timeoutOrElse`, also retryable), and
 once the retry budget is exhausted — or any other failure surfaces — an `error` event is emitted and the stream completes.
-Consumers render errors in-band. Features: self-reflection every 12 rounds, repeated-call loop detection, and
+Consumers render errors in-band. Features: a convergence nudge every 8 rounds, repeated-call loop detection, and
 empty-response retry. An assistant turn with no text and no tool calls is treated as a retryable provider failure
 instead of a blank completion that ends the run. There is no default tool-round cap: a run continues until the model
 stops calling tools. Callers may pass `maxToolRounds` to impose an explicit safety cap (the loop then emits system notes
@@ -135,7 +135,6 @@ Tools are defined using `defineTool()`:
 interface Tool {
 	definition: ToolDefinition;
 	readonly?: boolean;
-	usageHint?: string;
 	resourceKey?(input: unknown): string | undefined;
 	execute(input: unknown): Effect.Effect<ToolResult, ToolError>;
 }
@@ -143,9 +142,8 @@ interface Tool {
 
 `defineTool` keeps authoring promise-based (`execute: (input) => Promise<ToolResult>`) and lifts the body into the
 Effect-based interface: an unexpected throw becomes a typed `ToolError`. Built-in tools (`defaultTools`): `bash` (Run),
-`read_file` (Read), `write_file` (Write), `edit_file` (Edit), `grep` (Grep). Each tool carries an optional `usageHint`
-— the prompt-level policy for that tool (see "System Prompt Composition"); the schema `description` stays the
-model-facing mechanics.
+`read_file` (Read), `write_file` (Write), `edit_file` (Edit), `grep` (Grep). The model-facing mechanics and tool-choice
+guidance live in each tool's schema `description`.
 
 `createWorkspaceTools(root)` returns the built-in tools rooted at a workspace directory: file tools resolve their `path`
 argument against `root` (escapes are rejected with an error result, and paths whose parent directories do not exist yet
@@ -160,31 +158,25 @@ truncated, only output that exceeds the 10k character cap.
 `createDelegateTool(options)` builds the `delegate` tool: each call runs a fresh, isolated `run()` with the given
 (typically read-only) tool registry — no conversation history and the parent abort signal. A subagent has no round cap
 unless the caller passes `maxToolRounds`. The subagent's system prompt defaults to
-`buildSystemPrompt({ mode: "subagent", tools })` and can be overridden wholesale
-via `systemPrompt`. The final report returns as a `ToolResult`, and subagent cost is aggregated into `meta.cost` so
-the server can roll it into the session total. The tool is `readonly`, so calls run in the parallel readonly phase; an
-internal semaphore caps concurrent subagent loops (`maxConcurrency`, default 3). The server wires one per run with
-`read_file` + `grep`.
+`buildSystemPrompt({ mode: "subagent" })` and can be overridden wholesale via `systemPrompt`. The final report returns
+as a `ToolResult`, and subagent cost is aggregated into `meta.cost` so the server can roll it into the session total.
+The tool is `readonly`, so calls run in the parallel readonly phase; an internal semaphore caps concurrent subagent
+loops (`maxConcurrency`, default 3). The server wires one per run with `read_file` + `grep`.
 
 ### System Prompt Composition (`prompts.ts`)
 
-`buildSystemPrompt({ mode, tools, box, host, extraInstructions })` composes the prompt from named sections:
+`buildSystemPrompt({ mode, box, host, extraInstructions })` builds a deliberately small prompt:
 
-- `mode: "main"` (default) renders identity, agency, efficiency guidance, box/host guidance, safety policy, tool usage,
-  workflow, code quality, self-review, and communication; `mode: "subagent"` renders a focused read-only investigator
-  prompt (identity, parallel-lookup policy, tool usage, report requirements).
-- The Safety section is rendered when the server reports a box or host execution context. It tells the agent that
-  in-box work is unrestricted and that it must ask (in a plain message, then stop) before actions that leave the box
-  or are hard to undo. This is prompt policy, not enforcement: the box and explicit host mode are the boundaries.
-- The Tool Usage section is rendered from `tools` (a `ToolRegistry` or `Tool[]`): each tool contributes a bullet from
-  its `usageHint`, falling back to the first sentence of its schema description. The Agency section names the read-only
-  tools from the same source, and Self-Review only mentions `read_file` when it is present — the prompt can never drift
-  from the exposed tool set, and custom tools are covered automatically.
+- `mode: "main"` (default) renders an identity, a few operating rules (hypothesis-driven investigation, stop once
+  actionable, batch independent calls, read before editing, use dedicated file tools, stay concise), optional
+  workspace context (durable clone + isolated box), and a one-line safety policy.
+- `mode: "subagent"` renders a single focused read-only investigator instruction.
+- Tool mechanics and tool-choice guidance live in each tool's schema `description`; the prompt does not list tools or
+  duplicate their guidance.
 - `extraInstructions` is appended verbatim at the end.
 
-`SYSTEM_PROMPT` in `system-prompt.ts` is the shared default:
-`buildSystemPrompt({ mode: "main", tools: defaultTools })`. The server builds its prompt per run from the registry it
-actually wires (workspace tools + `delegate`), and `createDelegateTool` defaults to the subagent mode for its registry.
+`SYSTEM_PROMPT` in `system-prompt.ts` is the shared default: `buildSystemPrompt({ mode: "main" })`. The server builds
+the prompt per run with its box/host context.
 
 ### Context Management
 
@@ -247,12 +239,10 @@ After concluding that a task is complete, always run these commands from the rep
   attaches the resolved file path for the workspace file tools; tools without a key are exclusive)
 - There is no per-tool permission wrapper. The box is the execution boundary; host mode (`RELAY_BOX=0`) is
   explicitly unsandboxed, and the agent asks before actions that leave the box via prompt policy
-- Keep the Efficiency section concrete: batch lookups, read each file once (use `offset`/`limit`), use documented
-  scripts/fixtures, and stop exploring once there is enough information to act
-- There is no default tool-round cap; long-running agents rely on context trimming and loop detection instead of an
-  arbitrary round limit. `maxToolRounds` remains available as an explicit opt-in cap.
-- Prompt guidance for a tool lives on the tool (`usageHint`) and is rendered by `buildSystemPrompt`; never hardcode
-  tool names or availability in prompt prose
+- Keep the system prompt small: identity, a few operating rules, workspace/safety context, and `extraInstructions`.
+  Tool mechanics and tool-choice guidance belong in the tool schema `description`.
+- There is no default tool-round cap; long-running agents rely on context trimming, the 8-round convergence nudge, and
+  loop detection instead of an arbitrary round limit. `maxToolRounds` remains available as an explicit opt-in cap.
 - Use `ToolResult` with `isError` flag for error reporting; unexpected throws become `ToolError`
 - `ToolResult.meta.diff` carries unified diff output from `write_file` and `edit_file` for UI rendering; the server persists it on `tool_result` entries (`ToolResultEntry.diff`) so reloaded transcripts keep the diff
 - `diff.ts` generates unified diffs with a pure Myers algorithm and emits git-style headers (`diff --git` + file name) so UIs can render them with path-aware diff viewers

@@ -17,7 +17,6 @@ export function createBoxBashTool(provider: SandboxProvider): Tool {
 			description: bashToolDefinition.description,
 			parameters: bashToolDefinition.parameters,
 		},
-		usageHint: bashToolDefinition.usageHint,
 		execute: (input): Effect.Effect<ToolResult> =>
 			Effect.gen(function* () {
 				const { command, timeout } = (input ?? {}) as { command?: unknown; timeout?: unknown };
@@ -99,8 +98,6 @@ export function createBoxTool(manager: BoxManager, provider: SandboxProvider): T
 				additionalProperties: false,
 			},
 		},
-		usageHint:
-			"Start with tiny. Before Playwright/browser tests, big builds, or several services, resize to small or medium. The prepared box has Playwright + Chromium; do not install browsers. Resize back down when heavy work is done; other boxes share the host budget. Commit and push your branch from the session workspace with git, and open pull requests with gh; the workspace is isolated from the user's checkout.",
 		execute: (input): Effect.Effect<ToolResult> =>
 			Effect.gen(function* () {
 				const { action, size } = (input ?? {}) as { action?: unknown; size?: unknown };
