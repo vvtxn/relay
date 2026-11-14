@@ -123,8 +123,9 @@ same font via `relay fonts install` — see `packages/relay/assets/fonts/README.
 ### Settings (`/s/:sessionId/settings` and `/settings`)
 
 `pages/SettingsPage.tsx` renders one auth-guarded `SettingsPanel` with grouped sections: **Account** (identity from
-`/api/me`, sign out), **Appearance** (dark/light switch, applied instantly and persisted locally), and **API key**. The
-key is per-user, stored encrypted server-side (local files by default), and the only place a key is entered;
+`/api/me`, sign out), **Appearance** (dark/light switch, applied instantly and persisted locally), and **API key** (the
+heading follows the server's configured provider). The key is per-user, stored encrypted server-side (local files by
+default), and the only place a key is entered;
 `GET /api/settings` returns just
 `{ set, hint }` and the page never echoes the key back.
 

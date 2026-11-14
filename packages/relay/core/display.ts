@@ -132,7 +132,7 @@ export function entriesToUIMessages(entries: Entry[]): UIMessage[] {
 			if (!hasContent && !hasToolCalls) continue;
 			const toolCalls: UIToolCall[] =
 				entry.toolCalls?.map((tc) => {
-					const uiTc = createUIToolCall(tc.function.name, tc.function.arguments);
+					const uiTc = createUIToolCall(tc.name, tc.arguments);
 					toolCallIdMap.set(tc.id, uiTc);
 					return uiTc;
 				}) ?? [];

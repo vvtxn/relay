@@ -109,4 +109,4 @@ export interface SessionStore {
 	listSummaries(scope: SessionScope): Effect.Effect<SessionSummary[], StoreError>;
 }
 
-export const CURRENT_VERSION = 1;
+export const CURRENT_VERSION = 2;

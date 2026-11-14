@@ -3,6 +3,7 @@
 import { execFileSync } from "node:child_process";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
+import type { ProviderKind } from "@vvtxn/relay/api/types.ts";
 import { homeDir, relayDir } from "@vvtxn/relay/core/paths.ts";
 import { validateWorkspacePathSync } from "@vvtxn/relay/core/workspace.ts";
 import { isBoxProfile, profileRank, profileResources } from "@vvtxn/box/profiles.ts";
@@ -29,6 +30,8 @@ export interface ServerConfig {
 	port: number;
 	/** Hostname to bind. Localhost-only by default. */
 	hostname: string;
+	/** LLM API flavor the server talks to. */
+	provider: ProviderKind;
 	/** Base URL for the LLM provider. */
 	baseURL: string;
 	/** Model passed to the provider. */
@@ -77,7 +80,8 @@ export interface ServerConfig {
 
 const DEFAULT_PORT = 7433;
 const DEFAULT_HOSTNAME = "127.0.0.1";
-const DEFAULT_BASE_URL = "https://openrouter.ai/api/v1";
+const DEFAULT_OPENAI_BASE_URL = "https://openrouter.ai/api/v1";
+const DEFAULT_ANTHROPIC_BASE_URL = "https://api.anthropic.com/v1";
 const DEFAULT_MODEL = "deepseek/deepseek-v4.1-flash";
 const DEFAULT_SESSION_TTL_DAYS = 30;
 const DEFAULT_CLOUD_SESSION_LIMIT = 10;
@@ -296,6 +300,14 @@ function parseFlavor(env: Record<string, string | undefined>): RelayFlavor {
 	return value;
 }
 
+function parseProvider(env: Record<string, string | undefined>): ProviderKind {
+	const value = envValue(env, "LLM_PROVIDER") ?? "openai";
+	if (value !== "openai" && value !== "anthropic") {
+		throw new Error(`LLM_PROVIDER must be "openai" or "anthropic" (got "${value}")`);
+	}
+	return value;
+}
+
 function resolveDatabase(
 	flavor: RelayFlavor,
 	env: Record<string, string | undefined>,
@@ -325,6 +337,15 @@ export function serverConfigFromEnv(env: Record<string, string | undefined> = { 
 	const port = positiveInt(env.RELAY_PORT, DEFAULT_PORT, "RELAY_PORT", 65_535);
 	const hostname = envValue(env, "RELAY_HOST") ?? DEFAULT_HOSTNAME;
 	const flavor = parseFlavor(env);
+	const provider = parseProvider(env);
+	const configuredModel = envValue(env, "LLM_MODEL");
+	if (!configuredModel && provider === "anthropic") {
+		throw new Error("LLM_MODEL is required when LLM_PROVIDER=anthropic");
+	}
+	const model = configuredModel ?? DEFAULT_MODEL;
+	const baseURL =
+		envValue(env, "LLM_BASE_URL") ??
+		(provider === "anthropic" ? DEFAULT_ANTHROPIC_BASE_URL : DEFAULT_OPENAI_BASE_URL);
 
 	const dataDir = expandHomePath(envValue(env, "RELAY_DATA_DIR") ?? relayDir());
 	const database = resolveDatabase(flavor, env, dataDir);
@@ -405,8 +426,9 @@ export function serverConfigFromEnv(env: Record<string, string | undefined> = { 
 		flavor,
 		port,
 		hostname,
-		baseURL: env.LLM_BASE_URL ?? DEFAULT_BASE_URL,
-		model: env.LLM_MODEL ?? DEFAULT_MODEL,
+		provider,
+		baseURL,
+		model,
 		temperature: Number(env.LLM_TEMPERATURE ?? 0.1),
 		maxTokens: Number(env.LLM_MAX_TOKENS ?? 350_000),
 		preserveRecentTurns: Number(env.LLM_PRESERVE_RECENT_TURNS ?? 6),

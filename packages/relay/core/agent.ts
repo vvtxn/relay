@@ -1,5 +1,5 @@
 import { Deferred, Duration, Effect, Queue, Schedule, Stream } from "effect";
-import type { DeltaToolCall, LLMProvider, Message, ToolCall, Usage } from "#/api/types.ts";
+import type { LLMProvider, Message, ToolCall, Usage } from "#/api/types.ts";
 import { ProviderError } from "../api/errors.ts";
 import { getDefinitions } from "./tools/types.ts";
 import type { ToolRegistry, ToolResult } from "#/core/tools/types.ts";
@@ -120,6 +120,15 @@ function runLoop(
 				let lastUsage: Usage | undefined;
 				let generationId: string | undefined;
 
+				const entryFor = (index: number) => {
+					let entry = toolCallAccumulator.get(index);
+					if (!entry) {
+						entry = { id: "", name: "", args: "" };
+						toolCallAccumulator.set(index, entry);
+					}
+					return entry;
+				};
+
 				yield* Stream.runForEach(
 					config.provider
 						.stream({
@@ -127,7 +136,7 @@ function runLoop(
 							messages: effectiveContext,
 							...(useTools ? { tools: toolDefs } : {}),
 							...(config.temperature !== undefined ? { temperature: config.temperature } : {}),
-							...(config.maxTokens !== undefined ? { max_tokens: config.maxTokens } : {}),
+							...(config.maxTokens !== undefined ? { maxTokens: config.maxTokens } : {}),
 							...(config.signal !== undefined ? { signal: config.signal } : {}),
 						})
 						.pipe(
@@ -142,23 +151,33 @@ function runLoop(
 									),
 							}),
 						),
-					(chunk) =>
+					(event) =>
 						Effect.gen(function* () {
-							if (chunk.id) generationId = chunk.id;
-							if (chunk.usage) lastUsage = chunk.usage;
+							switch (event.type) {
+								case "text_delta":
+									textParts.push(event.text);
+									yield* emit({ type: "text_delta", content: event.text });
+									break;
 
-							const choice = chunk.choices[0];
-							if (!choice) return;
-
-							const delta = choice.delta;
-							if (delta.content) {
-								textParts.push(delta.content);
-								yield* emit({ type: "text_delta", content: delta.content });
-							}
-							if (delta.tool_calls) {
-								for (const tc of delta.tool_calls) {
-									yield* processToolCallDelta(tc, toolCallAccumulator, emit);
+								case "tool_call_start": {
+									const entry = entryFor(event.index);
+									entry.id = event.id;
+									entry.name = event.name;
+									yield* emit({ type: "tool_call_start", id: event.id, name: event.name });
+									break;
 								}
+
+								case "tool_call_args_delta": {
+									const entry = entryFor(event.index);
+									entry.args += event.args;
+									yield* emit({ type: "tool_call_args_delta", id: entry.id, args: event.args });
+									break;
+								}
+
+								case "finish":
+									generationId = event.id || generationId;
+									if (event.usage) lastUsage = event.usage;
+									break;
 							}
 						}),
 				);
@@ -185,7 +204,7 @@ function runLoop(
 				const assistantMessage: Message = {
 					role: "assistant",
 					content: text || null,
-					...(toolCalls.length > 0 && { tool_calls: toolCalls }),
+					...(toolCalls.length > 0 && { toolCalls }),
 				};
 				return { assistantMessage, toolCalls, lastUsage, generationId };
 			}).pipe(
@@ -219,25 +238,17 @@ function runLoop(
 			}
 
 			// Loop detection: check if the model is repeating the exact same tool calls
-			const callSignature = toolCalls.map((tc) => `${tc.function.name}:${tc.function.arguments}`).join("|");
+			const callSignature = toolCalls.map((tc) => `${tc.name}:${tc.arguments}`).join("|");
 			const repeated = recentCallSignatures.filter((s) => s === callSignature).length;
 			recentCallSignatures.push(callSignature);
 			if (recentCallSignatures.length > 10) recentCallSignatures.shift();
-
-			if (repeated >= 2) {
-				context.push({
-					role: "user",
-					content:
-						"[system note] You have repeated the same tool calls 3 times. You are stuck in a loop. Stop and either try a completely different approach or respond to the user explaining what went wrong.",
-				});
-			}
 
 			// Execute tool calls with dependency-aware ordering: readonly tools run
 			// in parallel first; side-effect tools run concurrently across distinct
 			// resources, while calls that share a resource (same file) or involve an
 			// exclusive tool (e.g. bash) keep their relative order.
-			const readonlyCalls = toolCalls.filter((tc) => config.tools.get(tc.function.name)?.readonly);
-			const sideEffectCalls = toolCalls.filter((tc) => !config.tools.get(tc.function.name)?.readonly);
+			const readonlyCalls = toolCalls.filter((tc) => config.tools.get(tc.name)?.readonly);
+			const sideEffectCalls = toolCalls.filter((tc) => !config.tools.get(tc.name)?.readonly);
 
 			const results: { tc: ToolCall; result: ToolResult }[] = [];
 			if (readonlyCalls.length > 0) {
@@ -260,12 +271,23 @@ function runLoop(
 				yield* emit({ type: "tool_result", id: tc.id, result });
 				const toolMsg: Message = {
 					role: "tool",
-					tool_call_id: tc.id,
-					name: tc.function.name,
+					toolCallId: tc.id,
+					name: tc.name,
 					content: result.content,
 				};
 				context.push(toolMsg);
 				toolResultMessages.push(toolMsg);
+			}
+
+			// Insert the loop note after the tool results so it never splits an
+			// assistant tool call from its results (Anthropic requires strict
+			// adjacency; OpenAI tool grouping expects it too).
+			if (repeated >= 2) {
+				context.push({
+					role: "user",
+					content:
+						"[system note] You have repeated the same tool calls 3 times. You are stuck in a loop. Stop and either try a completely different approach or respond to the user explaining what went wrong.",
+				});
 			}
 
 			if (config.contextLimit) {
@@ -300,28 +322,28 @@ function executeTool(
 		// Hints must only mention tools this run actually exposes (subagents
 		// have no bash, for example).
 		const hasBash = tools.has("bash");
-		const tool = tools.get(tc.function.name);
+		const tool = tools.get(tc.name);
 		if (!tool) {
 			return {
 				tc,
-				result: enrichError(tc.function.name, `Unknown tool: ${tc.function.name}`, "unknown_tool", hasBash),
+				result: enrichError(tc.name, `Unknown tool: ${tc.name}`, "unknown_tool", hasBash),
 			};
 		}
 
 		let parsedArgs: unknown;
 		try {
-			parsedArgs = JSON.parse(tc.function.arguments);
+			parsedArgs = JSON.parse(tc.arguments);
 		} catch {
-			return { tc, result: enrichError(tc.function.name, tc.function.arguments, "invalid_args", hasBash) };
+			return { tc, result: enrichError(tc.name, tc.arguments, "invalid_args", hasBash) };
 		}
 
-		sanitizeToolArgs(tc.function.name, parsedArgs);
+		sanitizeToolArgs(tc.name, parsedArgs);
 
 		const result = yield* tool.execute(parsedArgs).pipe(
 			// Tools report expected failures as `ToolResult.isError` values; only
 			// unexpected throws reach this handler.
 			Effect.catchCause((cause) =>
-				Effect.succeed(enrichError(tc.function.name, causeMessage(cause), "execution", hasBash)),
+				Effect.succeed(enrichError(tc.name, causeMessage(cause), "execution", hasBash)),
 			),
 		);
 		return { tc, result };
@@ -382,17 +404,17 @@ function conflicts(a: string | undefined, b: string | undefined): boolean {
  * unrelated calls.
  */
 function resourceKeyFor(tc: ToolCall, tools: ToolRegistry): string | undefined {
-	const tool = tools.get(tc.function.name);
+	const tool = tools.get(tc.name);
 	if (!tool) return `unknown:${tc.id}`;
 	if (!tool.resourceKey) return undefined;
 
 	let parsed: unknown;
 	try {
-		parsed = JSON.parse(tc.function.arguments);
+		parsed = JSON.parse(tc.arguments);
 	} catch {
 		return `invalid:${tc.id}`;
 	}
-	sanitizeToolArgs(tc.function.name, parsed);
+	sanitizeToolArgs(tc.name, parsed);
 	return tool.resourceKey(parsed);
 }
 
@@ -448,36 +470,11 @@ function getExecutionHint(error: string, hasBash: boolean): string {
 	return "The tool execution failed. Review the error message and try a different approach.";
 }
 
-function processToolCallDelta(
-	delta: DeltaToolCall,
-	accumulator: Map<number, { id: string; name: string; args: string }>,
-	emit: (event: AgentEvent) => Effect.Effect<void>,
-): Effect.Effect<void> {
-	return Effect.gen(function* () {
-		let entry = accumulator.get(delta.index);
-
-		if (!entry) {
-			entry = { id: delta.id ?? "", name: "", args: "" };
-			accumulator.set(delta.index, entry);
-		}
-
-		if (delta.id) entry.id = delta.id;
-		if (delta.function?.name) {
-			entry.name = delta.function.name;
-			yield* emit({ type: "tool_call_start", id: entry.id, name: entry.name });
-		}
-		if (delta.function?.arguments) {
-			entry.args += delta.function.arguments;
-			yield* emit({ type: "tool_call_args_delta", id: entry.id, args: delta.function.arguments });
-		}
-	});
-}
-
 function buildToolCalls(accumulator: Map<number, { id: string; name: string; args: string }>): ToolCall[] {
 	const sorted = [...accumulator.entries()].sort(([a], [b]) => a - b);
 	return sorted.map(([, tc]) => ({
 		id: tc.id,
-		type: "function" as const,
-		function: { name: tc.name, arguments: tc.args },
+		name: tc.name,
+		arguments: tc.args,
 	}));
 }

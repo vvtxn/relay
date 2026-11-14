@@ -15,7 +15,7 @@ import type {
 } from "@vvtxn/relay/core/sessions/index.ts";
 import type { WorkspaceRejection } from "@vvtxn/relay/core/workspace.ts";
 import type { ToolResult } from "@vvtxn/relay/core/tools/index.ts";
-import type { Usage } from "@vvtxn/relay/api/types.ts";
+import type { ProviderKind, Usage } from "@vvtxn/relay/api/types.ts";
 
 export type { RunPhase, SessionSummary };
 
@@ -45,6 +45,8 @@ export interface WorkspaceResponse {
 
 /** Model + context info for status displays. */
 export interface ConfigResponse {
+	/** LLM API flavor the server is configured for. */
+	provider: ProviderKind;
 	model: string;
 	/** Context window budget used for the token bar. */
 	contextTokens: number;

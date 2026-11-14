@@ -7,7 +7,7 @@ Terminal-based coding agent with custom TUI framework.
 ```
 ├── packages/
 │   ├── relay/              # Core agent library (@vvtxn/relay)
-│   │   ├── api/            # LLM provider types and CompletionsProvider
+│   │   ├── api/            # Provider-neutral LLM types + OpenAI/Anthropic adapters
 │   │   └── core/           # Agent loop, runner, tools, sessions, context, display
 │   ├── client/             # Wire protocol + RelayClient + Effect service layer (@vvtxn/client)
 │   ├── server/             # HTTP + SSE server hosting the runtime (@vvtxn/server)

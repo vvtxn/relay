@@ -18,9 +18,9 @@ export function estimateMessageTokens(message: Message): number {
 	let tokens = MESSAGE_OVERHEAD;
 	if (message.content) tokens += estimateTokens(message.content);
 	if (message.name) tokens += estimateTokens(message.name);
-	if (message.tool_calls) {
-		for (const tc of message.tool_calls) {
-			tokens += estimateTokens(tc.function.name) + estimateTokens(tc.function.arguments);
+	if (message.toolCalls) {
+		for (const tc of message.toolCalls) {
+			tokens += estimateTokens(tc.name) + estimateTokens(tc.arguments);
 		}
 	}
 	return tokens;
@@ -54,7 +54,7 @@ function groupIntoTurns(messages: Message[]): Turn[] {
 			const group: Message[] = [msg];
 			let groupTokens = estimateMessageTokens(msg);
 
-			if (msg.tool_calls?.length) {
+			if (msg.toolCalls?.length) {
 				let j = i + 1;
 				while (j < messages.length) {
 					const next = messages[j];
@@ -125,8 +125,8 @@ function turnToSummary(turn: Turn): Message {
 			const preview = msg.content.slice(0, 200).replace(/\n/g, " ");
 			parts.push(`User: ${preview}${msg.content.length > 200 ? "…" : ""}`);
 		} else if (msg.role === "assistant") {
-			if (msg.tool_calls?.length) {
-				const names = msg.tool_calls.map((tc) => tc.function.name).join(", ");
+			if (msg.toolCalls?.length) {
+				const names = msg.toolCalls.map((tc) => tc.name).join(", ");
 				parts.push(`Called: ${names}`);
 			}
 			if (msg.content) {

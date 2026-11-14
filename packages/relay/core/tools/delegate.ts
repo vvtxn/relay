@@ -54,25 +54,22 @@ export function createDelegateTool(options: DelegateToolOptions): Tool {
 
 	return {
 		definition: {
-			type: "function",
-			function: {
-				name: "delegate",
-				description: DELEGATE_DESCRIPTION,
-				parameters: {
-					type: "object",
-					properties: {
-						prompt: {
-							type: "string",
-							description:
-								"The complete task for the subagent, including what to find and what the report should contain.",
-						},
-						description: {
-							type: "string",
-							description: 'Short label for the UI, e.g. "Find auth entry points".',
-						},
+			name: "delegate",
+			description: DELEGATE_DESCRIPTION,
+			parameters: {
+				type: "object",
+				properties: {
+					prompt: {
+						type: "string",
+						description:
+							"The complete task for the subagent, including what to find and what the report should contain.",
 					},
-					required: ["prompt"],
+					description: {
+						type: "string",
+						description: 'Short label for the UI, e.g. "Find auth entry points".',
+					},
 				},
+				required: ["prompt"],
 			},
 		},
 		readonly: true,

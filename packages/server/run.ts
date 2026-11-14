@@ -582,7 +582,7 @@ export class RunManager {
 						// `tokens` is the current context-window usage (this call's
 						// prompt + completion), not a running total: clients render it
 						// against the model's context limit. `cost` does accumulate.
-						session.tokens = event.usage.prompt_tokens + event.usage.completion_tokens;
+						session.tokens = event.usage.inputTokens + event.usage.outputTokens;
 						if (event.usage.cost) session.cost += event.usage.cost;
 						session.handle?.setTokens(session.tokens);
 						session.handle?.setCost(session.cost);
@@ -602,8 +602,8 @@ export class RunManager {
 							type: "message",
 							role: "assistant",
 							content: event.assistantMessage.content,
-							...(event.assistantMessage.tool_calls?.length && {
-								toolCalls: event.assistantMessage.tool_calls,
+							...(event.assistantMessage.toolCalls?.length && {
+								toolCalls: event.assistantMessage.toolCalls,
 							}),
 						});
 						// Draft tool calls carry the full results (including isError and the diff),
@@ -611,7 +611,7 @@ export class RunManager {
 						const results = Ref.getUnsafe(runRef).draftToolCalls;
 						const resultById = new Map(results.map((tc) => [tc.id, tc.result]));
 						for (const tr of event.toolResults) {
-							const toolCallId = tr.tool_call_id;
+							const toolCallId = tr.toolCallId;
 							const toolName = tr.name;
 							if (!toolCallId || !toolName) continue;
 							const result = resultById.get(toolCallId);

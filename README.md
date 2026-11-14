@@ -3,8 +3,8 @@
 A coding agent with a terminal UI, built with Node.js and TypeScript.
 
 Relay is a monorepo (pnpm workspace) containing a terminal UI framework powered by a custom JSX runtime and Yoga flexbox
-layout, a browser client built with SolidJS, an OpenAI-compatible LLM API layer with streaming support, and an agentic
-loop with built-in tools. One agent runtime is hosted by an HTTP + SSE server; the terminal and web clients talk to it
+layout, a browser client built with SolidJS, a provider-neutral LLM API layer (OpenAI-compatible and Anthropic
+Messages) with streaming support, and an agentic loop with built-in tools. One agent runtime is hosted by an HTTP + SSE server; the terminal and web clients talk to it
 over the same wire protocol. Tooling (format, lint, type-check, builds) runs through [Vite+](https://viteplus.dev/).
 
 > **Note — Project Transition**
@@ -24,8 +24,8 @@ over the same wire protocol. Tooling (format, lint, type-check, builds) runs thr
 - **Custom JSX-based TUI framework** — Flexbox layout via Yoga, double-buffered rendering, reactive signals, vim-mode
   text input
 - **Streaming chat** — Real-time message rendering with live drafts and tool call cards
-- **OpenAI-compatible API layer** — Works with any provider exposing `/v1/chat/completions` (OpenRouter, OpenAI, local
-  models, etc.)
+- **Provider-neutral LLM API layer** — OpenAI-compatible `/chat/completions` endpoints (OpenRouter, OpenAI, local
+  models, etc.) or the Anthropic Messages API, selected with `LLM_PROVIDER`
 - **Streaming agent loop** — Async generator that yields events for real-time UI updates as the LLM thinks and uses
   tools
 - **Built-in tools** — Bash, file read/write/edit, and grep for filesystem interaction
@@ -69,7 +69,10 @@ The executable needs no Node.js installation. It extracts its web/font/libSQL as
 first launch. Tagged releases attach `relay` and `relay.sha256`. Set `RELAY_FLAVOR=cloud` in `.env` to run the same
 executable against Turso and GitHub.
 
-Server settings (`serverUrl` for the terminal client) are configured in `~/.relay/config.json`.
+Server settings (`serverUrl` for the terminal client) are configured in `~/.relay/config.json`. The terminal palette
+defaults to `auto`: it is derived from the terminal's foreground, background, and ANSI colors when the terminal
+answers color queries, and falls back to the dark Graphite palette otherwise. Set `theme` to `dark` or `light` in the
+config, or pass `relay --theme <auto|dark|light>` for one run (`RELAY_THEME` also works).
 
 ## Quick Start
 
@@ -191,7 +194,7 @@ canonical (symlink-resolved) path must sit within an allowed root.
 ```
 ├── packages/
 │   ├── relay/              # Core agent library (@vvtxn/relay)
-│   │   ├── api/            # LLM provider types and CompletionsProvider
+│   │   ├── api/            # Provider-neutral LLM types + OpenAI/Anthropic adapters
 │   │   └── core/           # Agent loop, runner, tools, sessions, context, display
 │   ├── client/             # Wire protocol + RelayClient (@vvtxn/client)
 │   ├── server/             # HTTP + SSE server hosting the runtime (@vvtxn/server)
@@ -309,12 +312,13 @@ there. Without a token, local commits work but pushes and pull requests fail.
 
 ### `packages/relay/api/` — LLM Provider Layer
 
-Provides an OpenAI-compatible API client with streaming SSE support. Any provider that exposes `/v1/chat/completions`
-works out of the box.
+Provides a provider-neutral streaming client. The core only sees neutral message, tool-call, usage, and stream-event
+types; each adapter translates its own wire format at the boundary.
 
-- `types.ts` — Standardized types (`Message`, `CompletionRequest`, `ToolDefinition`, etc.)
-- `providers/completions.ts` — Generic completions provider with streaming and cost tracking
-- `streaming/stream.ts` — SSE stream parser
+- `types.ts` — Neutral types (`Message`, `CompletionRequest`, `LLMStreamEvent`, `ToolDefinition`, etc.)
+- `providers/openai.ts` — OpenAI-compatible `/chat/completions` adapter (OpenRouter cost tracking included)
+- `providers/anthropic.ts` — Anthropic Messages adapter (`/v1/messages`)
+- `streaming/sse.ts` — Shared SSE event reader; `streaming/openai.ts` / `streaming/anthropic.ts` translate events
 
 ### `packages/relay/core/` — Agent Loop & Tools
 
