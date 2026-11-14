@@ -16,6 +16,25 @@ function isFinalByte(code: number): boolean {
 	return code >= 0x40 && code <= 0x7e;
 }
 
+/** True for an OSC body we asked the terminal about (10/11/4 replies). */
+function isTerminalReply(body: string): boolean {
+	return /^(10|11|4);/.test(body);
+}
+
+/** True while an incomplete OSC body could still become a terminal reply. */
+function isReplyPrefix(body: string): boolean {
+	return (
+		body === "" ||
+		body === "1" ||
+		body === "10" ||
+		body === "11" ||
+		body === "4" ||
+		body.startsWith("10;") ||
+		body.startsWith("11;") ||
+		body.startsWith("4;")
+	);
+}
+
 /** Parse an SGR mouse report (`\x1b[<button;x;yM` / `m`) into a key event. */
 function parseMouse(seq: string): KeyEvent {
 	const final = seq[seq.length - 1];
@@ -30,9 +49,12 @@ class InputManager {
 	private globalHandlers: Set<KeyHandler> = new Set();
 	private handlers: Set<KeyHandler> = new Set();
 	private isRawMode = false;
+	/** Incomplete escape sequence carried across stdin chunks. */
+	private pending = "";
 
 	start() {
 		if (this.isRawMode) return;
+		this.pending = "";
 
 		if (process.stdin.isTTY) {
 			process.stdin.setRawMode(true);
@@ -78,21 +100,75 @@ class InputManager {
 	};
 
 	splitSequences(data: string): string[] {
+		const input = this.pending + data;
+		this.pending = "";
 		const sequences: string[] = [];
 		let i = 0;
-		while (i < data.length) {
-			if (data[i] === "\x1b" && data[i + 1] === "[") {
+		while (i < input.length) {
+			if (input[i] !== "\x1b") {
+				sequences.push(input[i] ?? "");
+				i++;
+				continue;
+			}
+
+			const kind = input[i + 1];
+
+			if (kind === "[") {
 				let end = i + 2;
-				while (end < data.length && !isFinalByte(data.charCodeAt(end))) {
+				while (end < input.length && !isFinalByte(input.charCodeAt(end))) {
 					end++;
 				}
-				if (end < data.length) end++;
-				sequences.push(data.slice(i, end));
-				i = end;
-			} else {
-				sequences.push(data[i] ?? "");
-				i++;
+				if (end >= input.length) {
+					this.pending = input.slice(i);
+					break;
+				}
+				const sequence = input.slice(i, end + 1);
+				// Device reports (DA1/DA2, and any other private CSI reply) are
+				// terminal chatter, not user input.
+				if (!sequence.startsWith("\x1b[?") && !sequence.startsWith("\x1b[>")) {
+					sequences.push(sequence);
+				}
+				i = end + 1;
+				continue;
 			}
+
+			if (kind === "]") {
+				let end = -1;
+				for (let cursor = i + 2; cursor < input.length; cursor++) {
+					if (input[cursor] === "\x07") {
+						end = cursor + 1;
+						break;
+					}
+					if (input[cursor] === "\x1b" && input[cursor + 1] === "\\") {
+						end = cursor + 2;
+						break;
+					}
+				}
+				if (end < 0) {
+					// Only hold the chunk when the partial body could still be a
+					// color reply; otherwise this is Alt+] or another key chord.
+					if (isReplyPrefix(input.slice(i + 2))) {
+						this.pending = input.slice(i);
+						break;
+					}
+					sequences.push(input[i] ?? "");
+					i++;
+					continue;
+				}
+				const terminatedByBel = input[end - 1] === "\x07";
+				const body = input.slice(i + 2, terminatedByBel ? end - 1 : end - 2);
+				if (isTerminalReply(body)) {
+					// A late reply to the startup palette query: discard it.
+					i = end;
+					continue;
+				}
+				sequences.push(input[i] ?? "");
+				i++;
+				continue;
+			}
+
+			sequences.push(input[i] ?? "");
+			i++;
 		}
 		return sequences;
 	}

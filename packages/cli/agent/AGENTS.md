@@ -16,7 +16,8 @@ agent/
 ├── fonts.ts              # relay fonts install|status|path (shared font for the terminal)
 ├── app.tsx               # App component, signals, SSE event folding, command palettes
 ├── client.ts             # RelayClient singleton (server URL from config/env)
-├── config.ts             # RelayConfig: serverUrl (env RELAY_SERVER_URL or ~/.relay/config.json)
+├── config.ts             # RelayConfig: serverUrl + theme mode (env RELAY_SERVER_URL / RELAY_THEME or ~/.relay/config.json)
+├── theme.ts              # Palette preference → terminal query → derived theme, applied before app.tsx loads
 ├── diffs.ts              # Session diff collection + preview/viewer row building (pure)
 ├── tool-display.ts       # Shared tool-call colors and label column width
 ├── components/
@@ -96,16 +97,18 @@ Edit/write tool results arrive with a unified diff on `UIToolCall.diff` (live fr
 
 ### Boot Flow
 
-`index.ts` parses `-c`/`--continue`, `--workspace <path>`, and `--session <id>` (the default command's flags),
-ensures a server exists (see above), then sets `RELAY_SERVER_URL` before importing `app.tsx`. `relay attach <id>` is
+`index.ts` parses `-c`/`--continue`, `--workspace <path>`, `--session <id>`, and `--theme <auto|dark|light>` (the
+default command's flags), ensures a server exists (see above), then sets `RELAY_SERVER_URL` before importing
+`app.tsx`. `relay attach <id>` is
 the explicit form: it opens the session, scopes the TUI to its canonical cwd, and sets `RELAY_CLI_SESSION`. It then
 checks `/api/me` (using the token handed over by the browser session in `~/.relay/session.json`). Local mode resolves
 the local identity without a token, so this passes immediately; GitHub mode opens the web client and waits for the
 sign-in to complete (`ensureAuthenticated`).
 `--workspace` is validated and registered server-side at this point; the server's
 canonical path becomes `RELAY_CLI_WORKSPACE`. It then checks `/api/settings` — if no LLM API key is configured it opens
-the web Settings page and waits (`ensureApiKey`), so the TUI never starts in an unusable state. `bootstrap()` then
-health-checks the server, fetches `/api/me` + `/api/config`, and resolves the initial session for the effective
+the web Settings page and waits (`ensureApiKey`), so the TUI never starts in an unusable state. `prepareTheme()` then
+resolves the palette (querying the terminal in `auto` mode), and only afterwards is `app.tsx` imported. `bootstrap()`
+then health-checks the server, fetches `/api/me` + `/api/config`, and resolves the initial session for the effective
 workspace (`config.ts` `workspaceCwd()`): an explicit `--session`/`relay attach` target wins, `--continue` resumes the
 most recent thread, otherwise a session is created (the server reuses an idle empty one, so repeated launches do not
 pile up blank threads). `Root` renders `BootScreen` (loading) or `BootError` (friendly failure) and mounts `App` only
@@ -139,6 +142,19 @@ AbortController; `run_finished(cancelled)` arrives on the stream like any other 
 
 - `RELAY_SERVER_URL` env overrides `~/.relay/config.json` `serverUrl` (default `http://127.0.0.1:7433`)
 - `config.json` is auto-created with defaults on first run
+- `RELAY_THEME` env overrides `~/.relay/config.json` `theme` (`auto` default, or `dark`/`light`); `--theme` on `relay`
+  and `relay attach` overrides both
+
+### Theming
+
+The CLI palette is a CLI-local copy of the shared tokens (`#/tui/theme.ts`). Before importing `app.tsx`, `theme.ts`
+resolves the preference and — in `auto` mode — asks the terminal for its default foreground/background (OSC 10/11) and
+its 16 ANSI colors (OSC 4), fenced by DA1 (`tui/core/terminal-palette.ts`). `tui/theme-derive.ts` builds the palette:
+neutrals are foreground/background blends, semantic accents use the reported ANSI colors (or ANSI slot names when the
+terminal stays silent), and patch rendering uses the derived success/error accents. A terminal that answers nothing
+falls back to the built-in dark theme (or light when `COLORFGBG` suggests a light background). The applied palette must
+be set before `app.tsx` loads: components capture some tokens at module load and markdown caches parsed segments. Tool
+colors are getters so they still track the active object; don't add new module-level token captures.
 
 The LLM API key is stored per user, encrypted at rest (local files by default), and set from the web app's Settings
 page. The CLI never prompts for one: at startup (`ensureApiKey`) it opens the Settings page and waits until a key is
@@ -190,6 +206,8 @@ pnpm relay threads                   # list threads, run phases, and box queue s
 pnpm relay threads --all             # ...across every registered workspace
 pnpm relay attach <sessionId>        # open the TUI on an existing thread
 pnpm relay --session <sessionId>     # ...same, as a default-command flag
+pnpm relay --theme light             # ...with a fixed palette (auto|dark|light)
+pnpm relay attach <sessionId> --theme dark
 pnpm relay web       # open the cloud browser client at the current workspace
 pnpm relay:local web # open the local browser client
 pnpm relay stop      # stop the cloud background server

@@ -1,7 +1,8 @@
 import type { RunSummary, SessionSummary } from "@vvtxn/client/protocol.ts";
 import { createClient } from "./client.ts";
-import { workspaceCwd } from "./config.ts";
+import { workspaceCwd, type ThemeMode } from "./config.ts";
 import { ensureApiKey, ensureAuthenticated, ensureServer } from "./server.ts";
+import { parseThemeMode, prepareTheme } from "./theme.ts";
 
 interface ThreadRow {
 	cwd: string;
@@ -67,10 +68,22 @@ export async function runThreads(args: string[]): Promise<void> {
 
 /** `relay attach <session>` — open the TUI on an existing thread. */
 export async function runAttach(args: string[]): Promise<void> {
-	const sessionId = args.find((arg) => !arg.startsWith("-"));
+	let sessionId: string | null = null;
+	let theme: ThemeMode | null = null;
+	for (let index = 0; index < args.length; index++) {
+		const arg = args[index];
+		if (arg === "--theme") {
+			theme = parseThemeMode(args[index + 1]);
+			index += 1;
+		} else if (arg?.startsWith("-")) {
+			throw new Error(`Unknown option: ${arg}`);
+		} else if (sessionId === null) {
+			sessionId = arg ?? null;
+		} else {
+			throw new Error(`Unexpected argument: ${arg}`);
+		}
+	}
 	if (!sessionId) throw new Error("relay attach requires a session id (see `relay threads`)");
-	const unknown = args.find((arg) => arg.startsWith("-"));
-	if (unknown) throw new Error(`Unknown option: ${unknown}`);
 
 	const state = await ensureServer({ cwd: process.cwd() });
 	process.env.RELAY_SERVER_URL = state.url;
@@ -79,5 +92,6 @@ export async function runAttach(args: string[]): Promise<void> {
 	const session = await createClient(state.url).openSession(sessionId);
 	process.env.RELAY_CLI_WORKSPACE = session.header.cwd;
 	process.env.RELAY_CLI_SESSION = sessionId;
+	await prepareTheme(theme);
 	await import("./app.tsx");
 }
