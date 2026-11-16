@@ -17,13 +17,22 @@ export const configQuery = queryOptions({
 	gcTime: Infinity,
 });
 
-/** Per-user settings (API key presence). Mutations invalidate this key. */
+/** Per-user settings (LLM selection + API key presence). Mutated from Settings. */
 export const settingsQuery = queryOptions({
 	queryKey: queryKeys.settings,
 	queryFn: () => runApi((api) => api.getSettings()),
 	// Prefetched at boot; this app is the only writer (mutations invalidate).
 	staleTime: 5 * 60_000,
 });
+
+/** Model picker options for one preset (live catalog with a curated fallback). */
+export function modelsQuery(preset: string) {
+	return queryOptions({
+		queryKey: queryKeys.models(preset),
+		queryFn: () => runApi((api) => api.listModels(preset)),
+		staleTime: 10 * 60_000,
+	});
+}
 
 export const workspaceQuery = queryOptions({
 	queryKey: queryKeys.workspace,

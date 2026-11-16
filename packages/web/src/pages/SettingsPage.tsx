@@ -1,8 +1,9 @@
-import { createEffect, createSignal, Show } from "solid-js";
+import { createEffect, createSignal, For, Show } from "solid-js";
 import { useNavigate, useParams } from "@tanstack/solid-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/solid-query";
-import { configQuery, meQuery, settingsQuery } from "#/api/queries.ts";
-import { setApiKey } from "#/api/mutations.ts";
+import type { UpdateSettingsRequest } from "@vvtxn/client/protocol.ts";
+import { configQuery, meQuery, modelsQuery, settingsQuery } from "#/api/queries.ts";
+import { updateSettings } from "#/api/mutations.ts";
 import { readStoredSessionId } from "#/api/storage.ts";
 import { RelayError } from "@vvtxn/client/services.ts";
 import { queryKeys } from "#/api/query-client.ts";
@@ -11,15 +12,65 @@ import { BootScreen } from "#/components/BootScreen.tsx";
 import { setTheme, theme } from "#/state/theme.ts";
 import { VERSION } from "#/version.ts";
 
+type ProviderDraft = "openai" | "anthropic";
+
+const CUSTOM_PRESET = "custom";
+const DEFAULT_PRESET = "default";
+const OTHER_MODEL = "__other__";
+
+function ContextHint(props: { tokens: number | undefined }) {
+	return (
+		<Show when={props.tokens}>
+			{(tokens) => <span class="settings-context">{(tokens() / 1000).toFixed(0)}k context</span>}
+		</Show>
+	);
+}
+
 function SettingsPanel(props: { onBack: () => void }) {
 	const navigate = useNavigate();
 	const queryClient = useQueryClient();
 	const me = useQuery(() => meQuery);
 	const config = useQuery(() => configQuery);
 	const settings = useQuery(() => settingsQuery);
+
+	const [presetId, setPresetId] = createSignal(DEFAULT_PRESET);
+	const [modelId, setModelId] = createSignal("");
+	const [otherModelDraft, setOtherModelDraft] = createSignal("");
+	const [providerDraft, setProviderDraft] = createSignal<ProviderDraft>("openai");
+	const [baseUrlDraft, setBaseUrlDraft] = createSignal("");
+	const [modelTextDraft, setModelTextDraft] = createSignal("");
+	const [contextDraft, setContextDraft] = createSignal("");
 	const [draftKey, setDraftKey] = createSignal("");
 	const [message, setMessage] = createSignal("");
 	const [error, setError] = createSignal("");
+
+	const selectedPreset = () => settings.data?.presets.find((preset) => preset.id === presetId());
+	const isCustom = () => presetId() === CUSTOM_PRESET;
+	const isDefault = () => presetId() === DEFAULT_PRESET;
+	const hasModels = () => !isCustom() && !isDefault();
+	const models = useQuery(() => ({ ...modelsQuery(presetId()), enabled: hasModels() }));
+	const modelOptions = () => models.data?.models ?? selectedPreset()?.models ?? [];
+	const keyApplies = () => settings.data?.llm.preset === presetId() && settings.data.apiKey.set;
+	const interfaceLabel = () =>
+		config.data?.provider === "anthropic" || providerDraft() === "anthropic"
+			? "Anthropic Messages"
+			: "OpenAI-compatible chat completions";
+
+	// Hydrate the form from the server whenever the saved settings change.
+	createEffect(() => {
+		const data = settings.data;
+		if (!data) return;
+		const preset = data.presets.find((entry) => entry.id === data.llm.preset);
+		setPresetId(data.llm.preset);
+		const savedModel = data.llm.model ?? preset?.models[0]?.id ?? "";
+		const known = preset?.models.some((model) => model.id === savedModel) ?? false;
+		setModelId(known || !savedModel ? savedModel : OTHER_MODEL);
+		setOtherModelDraft(known || !savedModel ? "" : savedModel);
+		setProviderDraft(data.llm.provider ?? data.defaults.provider);
+		setBaseUrlDraft(data.llm.baseURL ?? "");
+		setModelTextDraft(data.llm.model ?? "");
+		setContextDraft(data.llm.contextTokens ? String(data.llm.contextTokens) : "");
+	});
 
 	// Auth seam: a 401 sends the user back through the boot/login flow.
 	createEffect(() => {
@@ -29,12 +80,15 @@ function SettingsPanel(props: { onBack: () => void }) {
 	});
 
 	const save = useMutation(() => ({
-		mutationFn: (apiKey: string | null) => setApiKey(apiKey),
+		mutationFn: (request: UpdateSettingsRequest) => updateSettings(request),
 		onSuccess: async () => {
 			setDraftKey("");
 			setMessage("Saved.");
 			setError("");
-			await queryClient.invalidateQueries({ queryKey: queryKeys.settings });
+			await Promise.all([
+				queryClient.invalidateQueries({ queryKey: queryKeys.settings }),
+				queryClient.invalidateQueries({ queryKey: queryKeys.config }),
+			]);
 		},
 		onError: (err) => {
 			setMessage("");
@@ -42,11 +96,69 @@ function SettingsPanel(props: { onBack: () => void }) {
 		},
 	}));
 
+	function canSave(): boolean {
+		if (isCustom()) {
+			if (baseUrlDraft().trim().length === 0 || modelTextDraft().trim().length === 0) return false;
+			const context = contextDraft().trim();
+			if (context.length > 0) {
+				const tokens = Number(context);
+				if (!Number.isInteger(tokens) || tokens < 4096) return false;
+			}
+			return true;
+		}
+		if (hasModels() && modelId() === OTHER_MODEL && otherModelDraft().trim().length === 0) return false;
+		return true;
+	}
+
+	function buildRequest(): UpdateSettingsRequest {
+		const request: UpdateSettingsRequest = { preset: presetId() };
+		if (isCustom()) {
+			request.provider = providerDraft();
+			request.baseURL = baseUrlDraft().trim();
+			request.model = modelTextDraft().trim();
+			const context = contextDraft().trim();
+			request.contextTokens = context.length > 0 ? Number(context) : null;
+		} else if (!isDefault()) {
+			const other = modelId() === OTHER_MODEL;
+			request.model = other ? otherModelDraft().trim() : modelId();
+			const option = other ? undefined : modelOptions().find((model) => model.id === modelId());
+			request.contextTokens = option?.contextTokens ?? null;
+		}
+		const key = draftKey().trim();
+		if (key) request.apiKey = key;
+		return request;
+	}
+
 	function submit(event: SubmitEvent): void {
 		event.preventDefault();
-		const value = draftKey().trim();
-		if (!value) return;
-		save.mutate(value);
+		if (!canSave()) return;
+		save.mutate(buildRequest());
+	}
+
+	function clearKey(): void {
+		const saved = settings.data;
+		if (!saved) return;
+		save.mutate({ preset: saved.llm.preset, apiKey: null });
+	}
+
+	function onPresetChange(id: string): void {
+		const data = settings.data;
+		const preset = data?.presets.find((entry) => entry.id === id);
+		setPresetId(id);
+		setMessage("");
+		setError("");
+		const saved = data?.llm;
+		const savedModel = saved?.preset === id ? (saved.model ?? "") : (preset?.models[0]?.id ?? "");
+		const known = preset?.models.some((model) => model.id === savedModel) ?? false;
+		setModelId(known || !savedModel ? savedModel : OTHER_MODEL);
+		setOtherModelDraft(known || !savedModel ? "" : savedModel);
+		if (id === CUSTOM_PRESET && data) {
+			const reuse = saved?.preset === CUSTOM_PRESET;
+			setProviderDraft((reuse ? saved.provider : null) ?? data.defaults.provider);
+			setBaseUrlDraft(reuse ? (saved.baseURL ?? "") : "");
+			setModelTextDraft(reuse ? (saved.model ?? "") : "");
+			setContextDraft(reuse && saved.contextTokens ? String(saved.contextTokens) : "");
+		}
 	}
 
 	/** Editing the key retires the previous save/error notice. */
@@ -122,9 +234,7 @@ function SettingsPanel(props: { onBack: () => void }) {
 						</section>
 
 						<section class="settings-section">
-							<h2 class="settings-section-title">
-								{config.data?.provider === "anthropic" ? "Anthropic API key" : "API key"}
-							</h2>
+							<h2 class="settings-section-title">Model & API key</h2>
 							<p class="settings-hint">
 								Used by the server to call the model on your behalf. Stored per account and never shown
 								again.
@@ -135,54 +245,197 @@ function SettingsPanel(props: { onBack: () => void }) {
 									{settings.error instanceof Error ? settings.error.message : String(settings.error)}
 								</p>
 							</Show>
-							<Show when={!settings.isError}>
+							<Show when={!settings.isError && settings.data}>
 								<div class="settings-row">
-									<span class="settings-label">Status</span>
+									<label class="settings-label" for="relay-preset">
+										Provider
+									</label>
+									<select
+										id="relay-preset"
+										class="input settings-select"
+										value={presetId()}
+										onChange={(event) => onPresetChange(event.currentTarget.value)}
+									>
+										<For each={settings.data?.presets ?? []}>
+											{(preset) => <option value={preset.id}>{preset.label}</option>}
+										</For>
+									</select>
+								</div>
+								<Show when={selectedPreset()?.hint}>
+									{(hint) => <p class="settings-hint">{hint()}</p>}
+								</Show>
+
+								<Show when={isCustom()}>
+									<div class="settings-row">
+										<label class="settings-label" for="relay-provider">
+											API family
+										</label>
+										<select
+											id="relay-provider"
+											class="input settings-select"
+											value={providerDraft()}
+											onChange={(event) =>
+												setProviderDraft(event.currentTarget.value as ProviderDraft)
+											}
+										>
+											<option value="openai">OpenAI-compatible</option>
+											<option value="anthropic">Anthropic Messages</option>
+										</select>
+									</div>
+									<div class="settings-row settings-stack">
+										<label class="settings-label" for="relay-base-url">
+											Base URL
+										</label>
+										<input
+											id="relay-base-url"
+											class="input"
+											type="url"
+											placeholder="https://example.com/v1"
+											value={baseUrlDraft()}
+											onInput={(event) => setBaseUrlDraft(event.currentTarget.value)}
+										/>
+									</div>
+									<div class="settings-row settings-stack">
+										<label class="settings-label" for="relay-model-text">
+											Model id
+										</label>
+										<input
+											id="relay-model-text"
+											class="input"
+											placeholder="model-id"
+											value={modelTextDraft()}
+											onInput={(event) => setModelTextDraft(event.currentTarget.value)}
+										/>
+									</div>
+									<div class="settings-row settings-stack">
+										<label class="settings-label" for="relay-context">
+											Context tokens (optional)
+										</label>
+										<input
+											id="relay-context"
+											class="input"
+											type="number"
+											min="4096"
+											step="1024"
+											placeholder="e.g. 128000"
+											value={contextDraft()}
+											onInput={(event) => setContextDraft(event.currentTarget.value)}
+										/>
+									</div>
+								</Show>
+
+								<Show when={hasModels()}>
+									<div class="settings-row">
+										<label class="settings-label" for="relay-model">
+											Model
+										</label>
+										<select
+											id="relay-model"
+											class="input settings-select"
+											value={modelId()}
+											onChange={(event) => setModelId(event.currentTarget.value)}
+										>
+											<For each={modelOptions()}>
+												{(model) => <option value={model.id}>{model.label}</option>}
+											</For>
+											<option value={OTHER_MODEL}>Other…</option>
+										</select>
+									</div>
+									<Show when={modelId() === OTHER_MODEL}>
+										<div class="settings-row settings-stack">
+											<label class="settings-label" for="relay-model-other">
+												Model id
+											</label>
+											<input
+												id="relay-model-other"
+												class="input"
+												placeholder="model-id"
+												value={otherModelDraft()}
+												onInput={(event) => setOtherModelDraft(event.currentTarget.value)}
+											/>
+										</div>
+									</Show>
+									<p class="settings-hint">
+										<ContextHint
+											tokens={
+												modelOptions().find((model) => model.id === modelId())?.contextTokens
+											}
+										/>
+										{models.isFetching ? " · refreshing catalog…" : ""}
+										{models.data?.source === "curated" && !models.isFetching
+											? " · curated list"
+											: ""}
+									</p>
+								</Show>
+
+								<Show when={settings.data?.effective}>
+									{(effective) => (
+										<p class="settings-hint">
+											Next run: {effective().label} · {effective().model} (
+											{(effective().contextTokens / 1000).toFixed(0)}k context)
+										</p>
+									)}
+								</Show>
+
+								<div class="settings-row">
+									<span class="settings-label">API key</span>
 									<span class="settings-value">
 										<Show
-											when={settings.data?.apiKey.set}
-											fallback={<span class="settings-empty">not set</span>}
+											when={keyApplies()}
+											fallback={<span class="settings-empty">not set for this provider</span>}
 										>
 											set (••••{settings.data?.apiKey.hint})
 										</Show>
 									</span>
 								</div>
-							</Show>
-							<form class="settings-form" onSubmit={submit}>
-								<input
-									class="input"
-									type="password"
-									autocomplete="new-password"
-									name="relay-api-key"
-									placeholder="Paste your API key"
-									value={draftKey()}
-									onInput={onKeyInput}
-								/>
-								<div class="settings-actions">
-									<button
-										type="submit"
-										class="btn primary"
-										disabled={save.isPending || !draftKey().trim()}
-									>
-										{save.isPending ? "Saving…" : "Save"}
-									</button>
-									<Show when={settings.data?.apiKey.set}>
+
+								<form class="settings-form" onSubmit={submit}>
+									<input
+										class="input"
+										type="password"
+										autocomplete="new-password"
+										name="relay-api-key"
+										placeholder={
+											keyApplies()
+												? "Paste a new key to replace the saved one"
+												: `Paste your ${selectedPreset()?.label ?? ""} API key`
+										}
+										value={draftKey()}
+										onInput={onKeyInput}
+									/>
+									<p class="settings-hint">
+										Keys are bound to the selected provider. Switching providers requires entering a
+										new key; the old one is never sent to a different host.
+									</p>
+									<div class="settings-actions">
+										<Show when={keyApplies()}>
+											<button
+												type="button"
+												class="btn danger"
+												disabled={save.isPending}
+												onClick={clearKey}
+											>
+												Clear key
+											</button>
+										</Show>
 										<button
-											type="button"
-											class="btn danger"
-											disabled={save.isPending}
-											onClick={() => save.mutate(null)}
+											type="submit"
+											class="btn primary"
+											disabled={save.isPending || !canSave()}
 										>
-											Clear
+											{save.isPending ? "Saving…" : "Save"}
 										</button>
-									</Show>
-								</div>
-							</form>
-							<Show when={error()}>
-								<p class="settings-error">{error()}</p>
-							</Show>
-							<Show when={!error() && message()}>
-								<p class="settings-ok">{message()}</p>
+									</div>
+								</form>
+								<Show when={error()}>
+									<p class="settings-error">{error()}</p>
+								</Show>
+								<Show when={!error() && message()}>
+									<p class="settings-ok">{message()}</p>
+								</Show>
+								<Show when={isCustom()}>
+									<p class="settings-hint">Interface: {interfaceLabel()}.</p>
+								</Show>
 							</Show>
 						</section>
 					</div>

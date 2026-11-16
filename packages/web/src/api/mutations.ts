@@ -1,3 +1,4 @@
+import type { UpdateSettingsRequest } from "@vvtxn/client/protocol.ts";
 import { runApi } from "./runtime.ts";
 
 export const createSession = (cwd: string, options?: { forceNew?: boolean }) =>
@@ -10,8 +11,8 @@ export const registerWorkspace = (cwd: string) => runApi((api) => api.registerWo
 /** Hide a workspace registration (its sessions are kept). */
 export const unregisterWorkspace = (cwd: string) => runApi((api) => api.unregisterWorkspace(cwd));
 
-/** Set the caller's LLM API key, or clear it with null. */
-export const setApiKey = (apiKey: string | null) => runApi((api) => api.setApiKey(apiKey));
+/** Save the caller's LLM selection and/or API key. Omitted fields are kept. */
+export const updateSettings = (settings: UpdateSettingsRequest) => runApi((api) => api.updateSettings(settings));
 
 export const sendMessage = (sessionId: string, content: string) => runApi((api) => api.sendMessage(sessionId, content));
 

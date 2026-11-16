@@ -22,6 +22,7 @@ export const queryKeys = {
 	me: ["me"] as const,
 	config: ["config"] as const,
 	settings: ["settings"] as const,
+	models: (preset: string) => ["models", preset] as const,
 	workspace: ["workspace"] as const,
 	sessions: (cwd: string) => ["sessions", cwd] as const,
 	workspaces: ["workspaces"] as const,
