@@ -12,6 +12,7 @@ import type {
 } from "#/api/types.ts";
 import type { ProviderError } from "../errors.ts";
 import { toProviderError } from "../errors.ts";
+import { requestHeaders } from "../headers.ts";
 import { parseJson, postJson } from "../http.ts";
 import {
 	mapAnthropicStopReason,
@@ -74,15 +75,19 @@ interface AnthropicResponse {
 export class AnthropicProvider implements LLMProvider {
 	private readonly apiKey: string;
 	private readonly baseURL: string;
+	private readonly headers: Record<string, string> | undefined;
+	private readonly sessionHeader: string | undefined;
 
 	constructor(config: ProviderConfig) {
 		this.apiKey = config.apiKey;
 		this.baseURL = normalizeBaseURL(config.baseURL);
+		this.headers = config.headers;
+		this.sessionHeader = config.sessionHeader;
 	}
 
 	async complete(request: CompletionRequest): Promise<CompletionResult> {
 		const body = this.buildBody(request, false);
-		const response = await this.request(body, request.signal);
+		const response = await this.request(body, request);
 		const json = await parseJson<AnthropicResponse>(response);
 
 		const textParts: string[] = [];
@@ -116,7 +121,7 @@ export class AnthropicProvider implements LLMProvider {
 		const body = this.buildBody(request, true);
 		return Stream.unwrap(
 			Effect.tryPromise({
-				try: () => this.request(body, request.signal),
+				try: () => this.request(body, request),
 				catch: toProviderError,
 			}).pipe(
 				Effect.map((response) => Stream.fromAsyncIterable(parseAnthropicStream(response), toProviderError)),
@@ -145,15 +150,22 @@ export class AnthropicProvider implements LLMProvider {
 		};
 	}
 
-	private request(body: Record<string, unknown>, signal?: AbortSignal): Promise<Response> {
+	private request(body: Record<string, unknown>, request: CompletionRequest): Promise<Response> {
 		return postJson(`${this.baseURL}/messages`, {
-			headers: {
-				"x-api-key": this.apiKey,
-				"anthropic-version": ANTHROPIC_VERSION,
-			},
+			headers: requestHeaders(
+				{
+					"x-api-key": this.apiKey,
+					"anthropic-version": ANTHROPIC_VERSION,
+				},
+				{
+					headers: this.headers,
+					sessionHeader: this.sessionHeader,
+					sessionId: request.sessionId,
+				},
+			),
 			body,
 			model: String(body.model),
-			...(signal ? { signal } : {}),
+			...(request.signal ? { signal: request.signal } : {}),
 		});
 	}
 }

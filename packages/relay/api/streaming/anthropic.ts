@@ -11,6 +11,8 @@ export interface AnthropicUsage {
 	output_tokens?: number;
 	cache_read_input_tokens?: number;
 	cache_creation_input_tokens?: number;
+	/** Gateways such as OpenCode Console report the request cost in usage. */
+	cost?: number;
 }
 
 interface AnthropicContentBlock {
@@ -61,6 +63,7 @@ interface UsageState {
 	output: number;
 	cacheRead: number;
 	cacheWrite: number;
+	cost: number;
 	sawUsage: boolean;
 }
 
@@ -69,7 +72,7 @@ export async function* parseAnthropicStream(response: Response): AsyncIterable<L
 	let id = "";
 	let reason: FinishReason = null;
 	let sawMessageStop = false;
-	const usage: UsageState = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, sawUsage: false };
+	const usage: UsageState = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, sawUsage: false };
 	const blocks = new Map<number, OpenBlock>();
 
 	for await (const sse of parseSSE(response)) {
@@ -222,7 +225,12 @@ export function mapAnthropicUsage(usage: AnthropicUsage): Usage {
 	const cacheWrite = usage.cache_creation_input_tokens ?? 0;
 	const inputTokens = (usage.input_tokens ?? 0) + cacheRead + cacheWrite;
 	const outputTokens = usage.output_tokens ?? 0;
-	return { inputTokens, outputTokens, totalTokens: inputTokens + outputTokens };
+	return {
+		inputTokens,
+		outputTokens,
+		totalTokens: inputTokens + outputTokens,
+		...(typeof usage.cost === "number" ? { cost: usage.cost } : {}),
+	};
 }
 
 function updateUsage(state: UsageState, usage: AnthropicUsage | undefined): void {
@@ -232,12 +240,18 @@ function updateUsage(state: UsageState, usage: AnthropicUsage | undefined): void
 	if (usage.output_tokens !== undefined) state.output = usage.output_tokens;
 	if (usage.cache_read_input_tokens !== undefined) state.cacheRead = usage.cache_read_input_tokens;
 	if (usage.cache_creation_input_tokens !== undefined) state.cacheWrite = usage.cache_creation_input_tokens;
+	if (typeof usage.cost === "number") state.cost = usage.cost;
 }
 
 function toUsage(state: UsageState): Usage | undefined {
 	if (!state.sawUsage) return undefined;
 	const inputTokens = state.input + state.cacheRead + state.cacheWrite;
-	return { inputTokens, outputTokens: state.output, totalTokens: inputTokens + state.output };
+	return {
+		inputTokens,
+		outputTokens: state.output,
+		totalTokens: inputTokens + state.output,
+		...(state.cost > 0 ? { cost: state.cost } : {}),
+	};
 }
 
 function anthropicErrorStatus(type: string | undefined): number | undefined {

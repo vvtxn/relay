@@ -72,6 +72,10 @@ Each adapter owns its wire types and translates at the boundary. OpenAI snake_ca
   excludes cached tokens, so `inputTokens` sums input + cache read + cache write.
 - `createProvider()` picks the adapter for `LLM_PROVIDER` (`openai` or `anthropic`).
 
+`ProviderConfig` also accepts preset-provided `headers` and a `sessionHeader`; the adapters merge those, always send
+`User-Agent: relay/<version>`, and write `request.sessionId` into `sessionHeader` when both are present. OpenCode Go
+uses `x-opencode-session`; presets and their capabilities/curated models live in `core/llm-presets.ts`.
+
 ### Streaming
 
 `parseSSE()` in `streaming/sse.ts` is wire-format agnostic. The adapters interpret the event names/data:

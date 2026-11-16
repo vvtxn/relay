@@ -61,6 +61,12 @@ export interface CompletionRequest {
 	toolChoice?: ToolChoice;
 	temperature?: number;
 	maxTokens?: number;
+	/**
+	 * Stable id for the conversation. Gateways that route or cache prompt
+	 * prefixes per session (OpenCode Go, for example) receive it in the header
+	 * named by `ProviderConfig.sessionHeader`.
+	 */
+	sessionId?: string;
 	signal?: AbortSignal;
 }
 
@@ -105,6 +111,13 @@ export type ProviderKind = "openai" | "anthropic";
 export interface ProviderConfig {
 	apiKey: string;
 	baseURL: string;
+	/** Extra static headers merged into every request (preset-provided). */
+	headers?: Record<string, string>;
+	/**
+	 * Header that carries the request's `sessionId`, when the endpoint needs a
+	 * stable conversation id. Presets opt in; adapters stay gateway-agnostic.
+	 */
+	sessionHeader?: string;
 }
 
 export interface LLMProvider {

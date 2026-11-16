@@ -11,6 +11,7 @@ import type {
 } from "#/api/types.ts";
 import type { ProviderError } from "../errors.ts";
 import { toProviderError } from "../errors.ts";
+import { requestHeaders } from "../headers.ts";
 import { FETCH_TIMEOUT_MS, parseJson, postJson } from "../http.ts";
 import { mapOpenAIFinishReason, mapOpenAIUsage, parseOpenAIStream, type OpenAIUsage } from "../streaming/openai.ts";
 
@@ -58,16 +59,20 @@ interface OpenAICompletionResponse {
 export class OpenAICompletionsProvider implements LLMProvider {
 	private readonly apiKey: string;
 	private readonly baseURL: string;
+	private readonly headers: Record<string, string> | undefined;
+	private readonly sessionHeader: string | undefined;
 
 	constructor(config: ProviderConfig) {
 		this.apiKey = config.apiKey;
+		this.headers = config.headers;
+		this.sessionHeader = config.sessionHeader;
 		// Normalize: strip trailing slashes and /chat/completions if someone pastes the full endpoint URL
 		this.baseURL = config.baseURL.replace(/\/+$/, "").replace(/\/chat\/completions$/, "");
 	}
 
 	async complete(request: CompletionRequest): Promise<CompletionResult> {
 		const body = this.buildBody(request, false);
-		const response = await this.request(body, request.signal);
+		const response = await this.request(body, request);
 		const json = await parseJson<OpenAICompletionResponse>(response);
 		const choice = json.choices?.[0];
 		const rawMessage = choice?.message;
@@ -94,7 +99,7 @@ export class OpenAICompletionsProvider implements LLMProvider {
 		const body = this.buildBody(request, true);
 		return Stream.unwrap(
 			Effect.tryPromise({
-				try: () => this.request(body, request.signal),
+				try: () => this.request(body, request),
 				catch: toProviderError,
 			}).pipe(Effect.map((response) => Stream.fromAsyncIterable(parseOpenAIStream(response), toProviderError))),
 		);
@@ -143,12 +148,19 @@ export class OpenAICompletionsProvider implements LLMProvider {
 		}
 	}
 
-	private request(body: Record<string, unknown>, signal?: AbortSignal): Promise<Response> {
+	private request(body: Record<string, unknown>, request: CompletionRequest): Promise<Response> {
 		return postJson(`${this.baseURL}/chat/completions`, {
-			headers: { Authorization: `Bearer ${this.apiKey}` },
+			headers: requestHeaders(
+				{ Authorization: `Bearer ${this.apiKey}` },
+				{
+					headers: this.headers,
+					sessionHeader: this.sessionHeader,
+					sessionId: request.sessionId,
+				},
+			),
 			body,
 			model: String(body.model),
-			...(signal ? { signal } : {}),
+			...(request.signal ? { signal: request.signal } : {}),
 		});
 	}
 }
