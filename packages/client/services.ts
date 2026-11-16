@@ -15,6 +15,7 @@ import type {
 	FileListResponse,
 	HealthResponse,
 	MeResponse,
+	ModelsResponse,
 	OpenSessionResponse,
 	RegisterWorkspaceResponse,
 	SendMessageResponse,
@@ -22,6 +23,7 @@ import type {
 	SessionListResponse,
 	SettingsResponse,
 	StatusResponse,
+	UpdateSettingsRequest,
 	WorkspaceResponse,
 	WorkspacesResponse,
 	WorkspaceValidateResponse,
@@ -60,7 +62,8 @@ export interface ApiShape {
 	workspace(): Effect.Effect<WorkspaceResponse, RelayError>;
 	getConfig(): Effect.Effect<ConfigResponse, RelayError>;
 	getSettings(): Effect.Effect<SettingsResponse, RelayError>;
-	setApiKey(apiKey: string | null): Effect.Effect<StatusResponse, RelayError>;
+	updateSettings(settings: UpdateSettingsRequest): Effect.Effect<StatusResponse, RelayError>;
+	listModels(preset: string): Effect.Effect<ModelsResponse, RelayError>;
 	listSessions(cwd: string): Effect.Effect<SessionListResponse, RelayError>;
 	listWorkspaces(): Effect.Effect<WorkspacesResponse, RelayError>;
 	validateWorkspace(cwd: string): Effect.Effect<WorkspaceValidateResponse, RelayError>;
@@ -85,7 +88,8 @@ export const ApiLive = (client: RelayClient): Layer.Layer<Api> =>
 		workspace: () => tryRelay(() => client.workspace()),
 		getConfig: () => tryRelay(() => client.getConfig()),
 		getSettings: () => tryRelay(() => client.getSettings()),
-		setApiKey: (apiKey) => tryRelay(() => client.setApiKey(apiKey)),
+		updateSettings: (settings) => tryRelay(() => client.updateSettings(settings)),
+		listModels: (preset) => tryRelay(() => client.listModels(preset)),
 		listSessions: (cwd) => tryRelay(() => client.listSessions(cwd)),
 		listWorkspaces: () => tryRelay(() => client.listWorkspaces()),
 		validateWorkspace: (cwd) => tryRelay(() => client.validateWorkspace(cwd)),

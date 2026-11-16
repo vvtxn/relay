@@ -30,7 +30,9 @@ server/
 ├── sse.ts           # GET /api/sessions/:id/events (snapshot + live stream + heartbeat)
 ├── files.ts         # GET /api/sessions/:id/files (project file listing for @-mentions)
 ├── workspace.ts     # /api/workspace(s) routes
-└── settings.ts      # Per-user API key routes
+├── llm.ts           # selection resolution, provider construction, custom-URL validation
+├── models.ts        # GET /api/models (cached live catalog + curated fallback)
+└── settings.ts      # Per-user provider/model/key routes
 ```
 
 ## Key Concepts
@@ -148,15 +150,26 @@ Two transports:
 `RequestServices = ServerServices & { user }` to handlers. `/api/health` and `/api/auth/*` are public; every other
 `/api/*` route returns 401 when unauthenticated.
 
-### API key
+### LLM selection
 
-The LLM API key is per user, entered once in the web Settings page, and encrypted at rest under a master key
-(`RELAY_SECRET_KEY`/`RELAY_SECRET_KEY_FILE`, or a generated `RELAY_DATA_DIR/secret.key`). The default backend keeps it
-in local files (`RELAY_DATA_DIR/settings/<userId>.json`, mode `0600`, AES-GCM with owner-bound AAD); the database
-backend stores it encrypted in `user_settings` instead. `getApiKey` is the only plaintext path (used by `RunManager`
-to build the provider at run start, never handed to the model); `GET /api/settings` reads a status that never
-decrypts, exposing only `{ set, hint }`.
+`LLM_PROVIDER`/`LLM_BASE_URL`/`LLM_MODEL` are server-wide defaults ("Server default"). Each user stores a selection
+(`llm_preset`, `llm_model`, optional custom provider/base URL/context) plus an encrypted API key. Presets live in
+`@vvtxn/relay/core/llm-presets.ts` (browser-pure): OpenCode Go, OpenCode Console, OpenRouter, Anthropic, and `custom`.
+Adding a provider is a preset entry, not a new code path.
+
+`createRunLlm` (`llm.ts`) resolves the selection and builds the provider per run. A key is bound to the preset it was
+entered for (`llm_key_preset`); switching presets clears it in `setLlm`, so a Go key is never sent to OpenRouter.
+`getLlm` is the only plaintext path, used by `RunManager`; `GET /api/settings` reads a status that never decrypts,
+exposing only `{ set, hint }` for the selected preset.
+
+The key is encrypted at rest under a master key (`RELAY_SECRET_KEY`/`RELAY_SECRET_KEY_FILE`, or a generated
+`RELAY_DATA_DIR/secret.key`). The default backend keeps it in local files (`RELAY_DATA_DIR/settings/<userId>.json`,
+mode `0600`, AES-GCM with owner-bound AAD); the database backend stores it encrypted in `user_settings` instead.
 A missing key fails the run with a clear message, and `handleSendMessage` returns 400 before a doomed run begins.
+
+Go requires a stable `x-opencode-session` header. `resolveLlmSelection` sets `sessionHeader` for the Go preset (and for
+any Go base URL), the provider adapters forward the request's `sessionId`, and `RunManager` passes the session id into
+the main and subagent loops. Requests also carry `User-Agent: relay/<version>`.
 
 ### Background state
 
@@ -178,9 +191,10 @@ starting": it adopts a healthy winner, otherwise it reports the bind error. The 
 | `/api/auth/callback`         | GET    | GitHub OAuth callback                                 |
 | `/api/auth/logout`           | POST   | Revoke the session + clear the cookie                 |
 | `/api/me`                    | GET    | Authenticated user                                    |
-| `/api/config`                | GET    | Model + context window for status displays            |
-| `/api/settings`              | GET    | Per-user API-key presence (masked)                    |
-| `/api/settings/api-key`      | PUT    | Set or clear the caller's LLM API key                 |
+| `/api/config`                | GET    | Effective model + context window for the caller       |
+| `/api/settings`              | GET    | Per-user selection + key presence (masked)            |
+| `/api/settings`              | PUT    | Save the caller's provider presets/model/key          |
+| `/api/models?preset=`        | GET    | Model picker options (live catalog, curated fallback) |
 | `/api/workspace`             | GET    | Server default cwd                                    |
 | `/api/workspaces`            | GET    | Distinct workspaces (cwds) with session counts        |
 | `/api/workspaces`            | POST   | Validate + register a workspace                       |
@@ -211,7 +225,9 @@ summary when boxes are enabled.
 
 - `LLM_PROVIDER` (`openai` default, or `anthropic`), `LLM_BASE_URL`, `LLM_MODEL`, `LLM_TEMPERATURE`, `LLM_MAX_TOKENS`,
   `LLM_MAX_COMPLETION_TOKENS`. `LLM_MODEL` is required for Anthropic; the base URL defaults to
-  `https://api.anthropic.com/v1` (OpenAI keeps `https://openrouter.ai/api/v1`).
+  `https://api.anthropic.com/v1` (OpenAI keeps `https://openrouter.ai/api/v1`). These are the "Server default"
+  selection; users can override provider/model in Settings.
+- `RELAY_LLM_ALLOW_CUSTOM=1` enables user-supplied base URLs outside local mode (SSRF surface; local defaults to on).
 - Flavor: `RELAY_FLAVOR=cloud|local` (default cloud; set by the package scripts). Cloud implies Turso + GitHub;
   local implies SQLite + local auth.
 - Cloud required: `TURSO_DB_URL`, `TURSO_DB_TOKEN`, `GITHUB_APP_CLIENT_ID`, `GITHUB_APP_CLIENT_SECRET`. Local mode

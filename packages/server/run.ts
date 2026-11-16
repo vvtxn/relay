@@ -1,5 +1,4 @@
 import { Cause, Effect, Exit, Fiber, Queue, Ref, Stream } from "effect";
-import type { LLMProvider } from "@vvtxn/relay/api/types.ts";
 import type { BoxManager, BoxSettings } from "@vvtxn/box/types.ts";
 import type { WorkspaceManager } from "@vvtxn/box/workspaces.ts";
 import { DisabledBoxManager } from "@vvtxn/box/manager.ts";
@@ -17,6 +16,7 @@ import type { ServerConfig } from "./config.ts";
 import { createBoxBashTool, createBoxTool } from "./box-tools.ts";
 import { createBrowserTool } from "./browser-tool.ts";
 import { createSandboxProvider, type RunWorkspace, type SandboxProvider } from "./sandbox.ts";
+import type { RunLlm } from "./llm.ts";
 
 type Subscriber = (event: ServerEvent) => void;
 type RunFinishReason = Extract<ServerEvent, { type: "run_finished" }>["reason"];
@@ -70,7 +70,7 @@ interface SessionRecord {
  */
 export class RunManager {
 	private readonly config: ServerConfig;
-	private readonly providerFor: (ownerId: string) => Effect.Effect<LLMProvider | null, StoreError>;
+	private readonly llmFor: (ownerId: string) => Effect.Effect<RunLlm, StoreError>;
 	private readonly boxes: BoxManager;
 	private readonly workspaces: WorkspaceManager;
 
@@ -78,12 +78,12 @@ export class RunManager {
 
 	constructor(options: {
 		config: ServerConfig;
-		providerFor: (ownerId: string) => Effect.Effect<LLMProvider | null, StoreError>;
+		llmFor: (ownerId: string) => Effect.Effect<RunLlm, StoreError>;
 		boxes?: BoxManager;
 		workspaces: WorkspaceManager;
 	}) {
 		this.config = options.config;
-		this.providerFor = options.providerFor;
+		this.llmFor = options.llmFor;
 		this.boxes = options.boxes ?? new DisabledBoxManager();
 		this.workspaces = options.workspaces;
 	}
@@ -325,7 +325,7 @@ export class RunManager {
 		abort: AbortController,
 	): Effect.Effect<RunFinishReason, never> {
 		const config = this.config;
-		const providerFor = this.providerFor;
+		const llmFor = this.llmFor;
 		const boxes = this.boxes;
 		const workspaces = this.workspaces;
 		const getSession = () => this.sessions.get(sessionId);
@@ -342,11 +342,17 @@ export class RunManager {
 				return yield* Effect.fail(new Error(`No open session handle for ${sessionId}`));
 			}
 
-			// Build the provider from the owner's stored key. Per-user keys live in
-			// the database, so a run without one is a configuration error.
-			const provider = yield* providerFor(session.ownerId ?? "");
+			// Resolve the owner's LLM selection and build a provider from their
+			// stored key. Keys live in the database, so a run without one is a
+			// configuration error.
+			const llm = yield* llmFor(session.ownerId ?? "");
+			const provider = llm.provider;
 			if (!provider) {
-				return yield* Effect.fail(new Error("No API key configured. Add one in Settings."));
+				return yield* Effect.fail(
+					new Error(
+						`No API key configured for "${llm.label}". Add one in Settings, or select a different model.`,
+					),
+				);
 			}
 
 			// Re-validate the workspace before every run: the directory may have
@@ -424,15 +430,16 @@ export class RunManager {
 				// access to this conversation; their cost rolls into the session below.
 				const delegate = createDelegateTool({
 					provider,
-					model: config.model,
+					model: llm.model,
 					tools: createToolRegistry(workspaceTools.filter((tool) => tool.readonly)),
 					temperature: config.temperature,
 					contextLimit: {
-						maxTokens: config.maxTokens,
+						maxTokens: llm.contextTokens,
 						preserveRecentTurns: config.preserveRecentTurns,
 					},
 					maxTokens: config.maxCompletionTokens,
 					signal: abort.signal,
+					sessionId,
 				});
 				const baseTools = [...workspaceTools, delegate];
 				const sandboxTools =
@@ -466,15 +473,16 @@ export class RunManager {
 					run(messages, {
 						provider,
 						tools,
-						model: config.model,
+						model: llm.model,
 						systemPrompt,
 						temperature: config.temperature,
 						contextLimit: {
-							maxTokens: config.maxTokens,
+							maxTokens: llm.contextTokens,
 							preserveRecentTurns: config.preserveRecentTurns,
 						},
 						maxTokens: config.maxCompletionTokens,
 						signal: abort.signal,
+						sessionId,
 					}),
 					handleEvent,
 				);
