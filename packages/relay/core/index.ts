@@ -53,8 +53,25 @@ export { createDatabaseClient, normalizeDatabaseUrl } from "./database.ts";
 export type { DatabaseClient, DatabaseCredentials } from "./database.ts";
 
 export { DatabaseUserStore } from "./auth/db.ts";
-export { apiKeyHint, DatabaseUserSettingsStore } from "./auth/settings.ts";
+export {
+	apiKeyHint,
+	buildLlmStatus,
+	DEFAULT_USER_LLM_SETTINGS,
+	DatabaseUserSettingsStore,
+	effectiveKeyPreset,
+} from "./auth/settings.ts";
 export { FileUserSettingsStore } from "./auth/settings-file.ts";
+export {
+	DEFAULT_PRESET_ID,
+	CUSTOM_PRESET_ID,
+	availableLlmPresets,
+	defaultPreset,
+	getLlmPreset,
+	isOpenCodeGoBaseURL,
+	llmPresets,
+	resolveLlmSelection,
+	sessionHeaderFor,
+} from "./llm-presets.ts";
 export {
 	createSecretCipher,
 	isEncryptedSecret,
@@ -68,7 +85,14 @@ export { DatabaseAuthSessionStore } from "./auth/sessions.ts";
 export { clearStoredSession, readStoredSession, writeStoredSession } from "./auth/session-file.ts";
 export { authenticate } from "./auth/service.ts";
 export type { SecretCipher } from "./auth/secret.ts";
-export type { UserSettingsStatus, UserSettingsStore } from "./auth/settings.ts";
+export type {
+	UserLlmPatch,
+	UserLlmRecord,
+	UserLlmSettings,
+	UserLlmStatus,
+	UserSettingsStore,
+} from "./auth/settings.ts";
+export type { LlmAuthKind, LlmDefaults, LlmModelOption, LlmPreset, LlmSelection, ResolvedLlm } from "./llm-presets.ts";
 export type { GitHubProfile } from "./auth/github.ts";
 export type { AuthSession, AuthSessionStore } from "./auth/sessions.ts";
 export type { StoredSession } from "./auth/session-file.ts";
