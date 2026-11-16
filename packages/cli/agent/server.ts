@@ -427,8 +427,11 @@ export async function ensureAuthenticated(state: ServerState): Promise<void> {
 
 export type ApiKeyStatus =
 	| { status: "configured" }
-	/** Signed in, but no key has been saved yet. */
-	| { status: "missing" }
+	/**
+	 * Signed in, but no key has been saved for the selected provider yet. The
+	 * label names the selection that needs one (absent on malformed bodies).
+	 */
+	| { status: "missing"; label?: string }
 	/** The stored token was rejected (or none is stored). */
 	| { status: "unauthenticated" }
 	/** The server could not be reached or failed to answer. */
@@ -447,7 +450,9 @@ export async function apiKeyStatus(serverUrl: string): Promise<ApiKeyStatus> {
 		const body = (await response.json()) as Partial<SettingsResponse> | null;
 		// A malformed body counts as "missing": the TUI can only be entered once a
 		// key is confirmed, and the user can always re-save it.
-		return body?.apiKey?.set ? { status: "configured" } : { status: "missing" };
+		if (body?.apiKey?.set) return { status: "configured" };
+		const label = body?.effective?.label;
+		return { status: "missing", ...(label ? { label } : {}) };
 	} catch (error) {
 		return { status: "unreachable", detail: error instanceof Error ? error.message : String(error) };
 	}
@@ -472,7 +477,8 @@ export async function ensureApiKey(state: ServerState): Promise<void> {
 	}
 
 	const settingsUrl = new URL("/settings", state.webUrl || state.url).toString();
-	console.log(`No API key configured. Opening ${settingsUrl} — add one to continue.`);
+	const label = status.label ? ` for ${status.label}` : "";
+	console.log(`No API key configured${label}. Opening ${settingsUrl} — add one to continue.`);
 	openBrowser(settingsUrl);
 
 	const deadline = Date.now() + API_KEY_TIMEOUT_MS;

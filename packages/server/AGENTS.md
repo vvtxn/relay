@@ -157,6 +157,11 @@ Two transports:
 `@vvtxn/relay/core/llm-presets.ts` (browser-pure): OpenCode Go, OpenCode Console, OpenRouter, Anthropic, and `custom`.
 Adding a provider is a preset entry, not a new code path.
 
+Selections are validated on save (`PUT /api/settings`): model ids must be well-formed for every preset and, for
+plan-scoped presets (`allowAnyModel: false`, today OpenCode Go), must come from the preset's curated list. Custom
+endpoints additionally require provider, https base URL (http only for local loopback), and a model id; a stored custom
+selection stops resolving when `RELAY_LLM_ALLOW_CUSTOM` is off and falls back to the server default.
+
 `createRunLlm` (`llm.ts`) resolves the selection and builds the provider per run. A key is bound to the preset it was
 entered for (`llm_key_preset`); switching presets clears it in `setLlm`, so a Go key is never sent to OpenRouter.
 `getLlm` is the only plaintext path, used by `RunManager`; `GET /api/settings` reads a status that never decrypts,

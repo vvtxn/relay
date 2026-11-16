@@ -25,6 +25,13 @@ interface CatalogEntry {
 }
 
 const cache = new Map<string, CatalogEntry>();
+/** Catalog fetches in flight, so concurrent requests share one download. */
+const inflight = new Map<string, Promise<LlmModelOption[]>>();
+
+interface CatalogSpec {
+	url: string;
+	kind: "opencode" | "openrouter";
+}
 
 interface OpenCodeModel {
 	id?: unknown;
@@ -63,7 +70,7 @@ export function handleListModels(
 			return json({ preset: presetId, models: cached.models, source: cached.source } satisfies ModelsResponse);
 		}
 
-		const live = yield* Effect.tryPromise(() => fetchCatalog(catalog)).pipe(
+		const live = yield* Effect.tryPromise(() => fetchCatalogOnce(catalog)).pipe(
 			Effect.catchCause(() => Effect.succeed(null)),
 		);
 		const models = mergeCatalog(preset.id, preset.models, live);
@@ -73,7 +80,18 @@ export function handleListModels(
 	});
 }
 
-async function fetchCatalog(catalog: { url: string; kind: "opencode" | "openrouter" }): Promise<LlmModelOption[]> {
+/** Fetches a catalog once per URL even when requests race before the cache fills. */
+function fetchCatalogOnce(catalog: CatalogSpec): Promise<LlmModelOption[]> {
+	const pending = inflight.get(catalog.url);
+	if (pending) return pending;
+	const promise = fetchCatalog(catalog).finally(() => {
+		inflight.delete(catalog.url);
+	});
+	inflight.set(catalog.url, promise);
+	return promise;
+}
+
+async function fetchCatalog(catalog: CatalogSpec): Promise<LlmModelOption[]> {
 	const response = await fetch(catalog.url, {
 		headers: { "User-Agent": USER_AGENT, Accept: "application/json" },
 		signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),

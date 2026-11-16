@@ -229,7 +229,7 @@ export function mapAnthropicUsage(usage: AnthropicUsage): Usage {
 		inputTokens,
 		outputTokens,
 		totalTokens: inputTokens + outputTokens,
-		...(typeof usage.cost === "number" ? { cost: usage.cost } : {}),
+		...(typeof usage.cost === "number" && usage.cost > 0 ? { cost: usage.cost } : {}),
 	};
 }
 

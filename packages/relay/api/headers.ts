@@ -16,7 +16,8 @@ export function conversationId(sessionId: string): string {
 /**
  * Builds the final header set for one request: adapter auth first, then
  * preset-provided headers, then the user agent and optional session header.
- * Extra headers may intentionally override the adapter's defaults.
+ * Extra headers may intentionally override the adapter's defaults, except
+ * `User-Agent`, which is always Relay's own.
  */
 export function requestHeaders(
 	defaults: Record<string, string | undefined>,

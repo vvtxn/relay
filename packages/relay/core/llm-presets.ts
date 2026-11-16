@@ -58,6 +58,12 @@ export interface LlmPreset {
 	catalog?: { url: string; kind: "opencode" | "openrouter" };
 	/** Curated models: the fallback list, and the allowlist for plan-scoped presets. */
 	models: readonly LlmModelOption[];
+	/**
+	 * Whether model ids outside {@link LlmPreset.models} may be saved (the
+	 * "Other…" escape hatch in Settings). Plan-scoped presets — whose allowance
+	 * only covers the curated list — set this to `false`; defaults to `true`.
+	 */
+	allowAnyModel?: boolean;
 	/** Short explanation shown in Settings. */
 	hint?: string;
 }
@@ -179,6 +185,7 @@ export const llmPresets: readonly LlmPreset[] = [
 		sessionHeader: "x-opencode-session",
 		catalog: { url: OPENCODE_CATALOG_URL, kind: "opencode" },
 		models: OPENCODE_GO_MODELS,
+		allowAnyModel: false,
 		hint: "Uses your OpenCode Go subscription. Only the models listed in your plan draw from its allowance.",
 	},
 	{

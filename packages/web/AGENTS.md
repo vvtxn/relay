@@ -39,7 +39,7 @@ web/
     │   ├── OverviewPage.tsx # Root view: workspace cards + "continue last chat"; boot/auth gate
     │   ├── WorkspacePage.tsx# One workspace's threads; new chat; missing/unknown states
     │   ├── SessionPage.tsx# Hydrates session, starts stream, composes the shell
-    │   └── SettingsPage.tsx # Account + appearance + API key; overlay under `/s/:id` and standalone `/settings`
+    │   └── SettingsPage.tsx # Account + appearance + provider/model/API key; overlay under `/s/:id` and standalone `/settings`
     └── components/
         ├── AppShell.tsx        # Shared sidebar + main-pane frame for all pages
         ├── Sidebar.tsx         # Workspace switcher, session list, new chat
@@ -123,11 +123,14 @@ same font via `relay fonts install` — see `packages/relay/assets/fonts/README.
 ### Settings (`/s/:sessionId/settings` and `/settings`)
 
 `pages/SettingsPage.tsx` renders one auth-guarded `SettingsPanel` with grouped sections: **Account** (identity from
-`/api/me`, sign out), **Appearance** (dark/light switch, applied instantly and persisted locally), and **API key** (the
-heading follows the server's configured provider). The key is per-user, stored encrypted server-side (local files by
-default), and the only place a key is entered;
-`GET /api/settings` returns just
-`{ set, hint }` and the page never echoes the key back.
+`/api/me`, sign out), **Appearance** (dark/light switch, applied instantly and persisted locally), and **Model & API
+key** (provider preset, model, and the key). The `GET /api/settings` payload drives the form: the presets this server
+offers (including `default` and, in local mode or with `RELAY_LLM_ALLOW_CUSTOM=1`, `custom`), the stored selection, and
+the effective provider/model/context the next run will use; `/api/models?preset=` fills the picker (live catalog,
+curated fallback). Plan-scoped presets carry `allowAnyModel: false` and hide the "Other…" escape hatch. The key is
+per-user, stored encrypted server-side (local files by default), bound to the preset it was entered for, and never
+echoed back — switching presets clears a bound key, so the page asks for a new one. The form re-hydrates only when the
+saved payload actually changes, so background refetches never clobber unsaved edits.
 
 In-app entry point (the sidebar user chip) opens the **nested overlay** `/s/:sessionId/settings`: the chat stays
 mounted and its stream connected behind it, so opening/closing settings is instant and nothing is lost. The standalone

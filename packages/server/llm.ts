@@ -35,7 +35,14 @@ export function llmDefaults(config: ServerConfig): LlmDefaults {
 }
 
 export function resolveSelection(config: ServerConfig, selection: LlmSelection): ResolvedLlm {
-	return resolveLlmSelection(selection, llmDefaults(config));
+	// Custom selections are validated when they are saved. If custom endpoints
+	// are disabled later (or the selection moves to a server that never allowed
+	// them), fall back to the server default instead of running the stored URL.
+	const effective =
+		selection.preset === CUSTOM_PRESET_ID && !canUseCustomEndpoint(config)
+			? { ...selection, preset: DEFAULT_PRESET_ID, provider: null, baseURL: null }
+			: selection;
+	return resolveLlmSelection(effective, llmDefaults(config));
 }
 
 /** The provider plus the model/context a run should use. */
@@ -105,7 +112,11 @@ export interface CustomEndpoint {
 
 const MODEL_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:/@+-]*$/;
 
-/** Returns an error message, or null when the custom endpoint is usable. */
+/**
+ * Returns an error message, or null when the custom endpoint is usable. A
+ * model id is required — without one a run would silently substitute the
+ * server-default model, which a custom endpoint does not serve.
+ */
 export function validateCustomEndpoint(
 	config: ServerConfig,
 	provider: ProviderKind | null,
@@ -131,8 +142,7 @@ export function validateCustomEndpoint(
 	if (url.username || url.password) return "Base URL must not include credentials";
 	if (url.search || url.hash) return "Base URL must not include a query string or fragment";
 	if (url.pathname.length > 200) return "Base URL path is too long";
-	if (model !== null && !MODEL_PATTERN.test(model)) return "Model id contains unsupported characters";
-	return null;
+	return validateModelId(model);
 }
 
 /** Validates a model id from any preset. */
@@ -140,6 +150,22 @@ export function validateModelId(model: string | null): string | null {
 	if (model === null || model.length === 0) return "Model id is required";
 	if (model.length > 200) return "Model id is too long";
 	if (!MODEL_PATTERN.test(model)) return "Model id contains unsupported characters";
+	return null;
+}
+
+/**
+ * Validates a model id chosen for a preset. Presets without
+ * `allowAnyModel: false` accept any well-formed id; plan-scoped presets only
+ * accept ids from their curated list, so a Go key is never aimed at a model the
+ * plan does not cover.
+ */
+export function validatePresetModel(preset: LlmPreset, model: string | null): string | null {
+	if (model === null) return null;
+	const error = validateModelId(model);
+	if (error) return error;
+	if (preset.allowAnyModel === false && !preset.models.some((entry) => entry.id === model)) {
+		return `Model "${model}" is not part of the ${preset.label} plan. Pick one of the listed models.`;
+	}
 	return null;
 }
 

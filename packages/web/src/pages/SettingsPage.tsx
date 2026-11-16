@@ -1,7 +1,7 @@
 import { createEffect, createSignal, For, Show } from "solid-js";
 import { useNavigate, useParams } from "@tanstack/solid-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/solid-query";
-import type { UpdateSettingsRequest } from "@vvtxn/client/protocol.ts";
+import type { LlmPreset, SettingsResponse, UpdateSettingsRequest } from "@vvtxn/client/protocol.ts";
 import { configQuery, meQuery, modelsQuery, settingsQuery } from "#/api/queries.ts";
 import { updateSettings } from "#/api/mutations.ts";
 import { readStoredSessionId } from "#/api/storage.ts";
@@ -56,16 +56,17 @@ function SettingsPanel(props: { onBack: () => void }) {
 			? "Anthropic Messages"
 			: "OpenAI-compatible chat completions";
 
-	// Hydrate the form from the server whenever the saved settings change.
+	// Hydrate the form from the server whenever the saved settings change. A
+	// background refetch that returns identical data keeps the same object, so
+	// no-op refreshes never clobber in-progress edits.
+	let hydrated: SettingsResponse | undefined;
 	createEffect(() => {
 		const data = settings.data;
-		if (!data) return;
+		if (!data || data === hydrated) return;
+		hydrated = data;
 		const preset = data.presets.find((entry) => entry.id === data.llm.preset);
 		setPresetId(data.llm.preset);
-		const savedModel = data.llm.model ?? preset?.models[0]?.id ?? "";
-		const known = preset?.models.some((model) => model.id === savedModel) ?? false;
-		setModelId(known || !savedModel ? savedModel : OTHER_MODEL);
-		setOtherModelDraft(known || !savedModel ? "" : savedModel);
+		applyModelDraft(preset, data.llm.model ?? preset?.models[0]?.id ?? "");
 		setProviderDraft(data.llm.provider ?? data.defaults.provider);
 		setBaseUrlDraft(data.llm.baseURL ?? "");
 		setModelTextDraft(data.llm.model ?? "");
@@ -147,11 +148,13 @@ function SettingsPanel(props: { onBack: () => void }) {
 		setPresetId(id);
 		setMessage("");
 		setError("");
+		// A pasted key belongs to the preset it was entered for; carrying it
+		// into a different provider would bind it to the wrong host on save.
+		setDraftKey("");
 		const saved = data?.llm;
-		const savedModel = saved?.preset === id ? (saved.model ?? "") : (preset?.models[0]?.id ?? "");
-		const known = preset?.models.some((model) => model.id === savedModel) ?? false;
-		setModelId(known || !savedModel ? savedModel : OTHER_MODEL);
-		setOtherModelDraft(known || !savedModel ? "" : savedModel);
+		const presetModels = preset?.models ?? [];
+		const savedModel = saved?.preset === id && saved.model ? saved.model : (presetModels[0]?.id ?? "");
+		applyModelDraft(preset, savedModel);
 		if (id === CUSTOM_PRESET && data) {
 			const reuse = saved?.preset === CUSTOM_PRESET;
 			setProviderDraft((reuse ? saved.provider : null) ?? data.defaults.provider);
@@ -159,6 +162,27 @@ function SettingsPanel(props: { onBack: () => void }) {
 			setModelTextDraft(reuse ? (saved.model ?? "") : "");
 			setContextDraft(reuse && saved.contextTokens ? String(saved.contextTokens) : "");
 		}
+	}
+
+	/** Sets the model picker for a preset, honoring the "Other…" escape hatch. */
+	function applyModelDraft(preset: LlmPreset | undefined, savedModel: string): void {
+		const options = preset?.models ?? [];
+		const allowOther = preset?.allowAnyModel !== false;
+		if (options.some((model) => model.id === savedModel)) {
+			setModelId(savedModel);
+			setOtherModelDraft("");
+			return;
+		}
+		if (savedModel && allowOther) {
+			setModelId(OTHER_MODEL);
+			setOtherModelDraft(savedModel);
+			return;
+		}
+		// An unknown model on an allowlisted preset (e.g. a row saved before the
+		// allowlist was enforced) falls back to the curated default instead of
+		// leaving the picker blank.
+		setModelId(options[0]?.id ?? "");
+		setOtherModelDraft("");
 	}
 
 	/** Editing the key retires the previous save/error notice. */
@@ -338,7 +362,9 @@ function SettingsPanel(props: { onBack: () => void }) {
 											<For each={modelOptions()}>
 												{(model) => <option value={model.id}>{model.label}</option>}
 											</For>
-											<option value={OTHER_MODEL}>Other…</option>
+											<Show when={selectedPreset()?.allowAnyModel !== false}>
+												<option value={OTHER_MODEL}>Other…</option>
+											</Show>
 										</select>
 									</div>
 									<Show when={modelId() === OTHER_MODEL}>

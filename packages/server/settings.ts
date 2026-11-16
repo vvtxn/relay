@@ -13,7 +13,7 @@ import {
 	resolveSelection,
 	settingsPresets,
 	validateCustomEndpoint,
-	validateModelId,
+	validatePresetModel,
 } from "./llm.ts";
 
 /** Longest accepted API key; real keys are far shorter. */
@@ -69,7 +69,7 @@ export function handleUpdateSettings(
 			const error = validateCustomEndpoint(services.config, provider, baseURL, model);
 			if (error) return yield* Effect.fail(new BadRequestError(error));
 		} else if (!isDefault && model !== null) {
-			const error = validateModelId(model);
+			const error = validatePresetModel(preset, model);
 			if (error) return yield* Effect.fail(new BadRequestError(error));
 		}
 
