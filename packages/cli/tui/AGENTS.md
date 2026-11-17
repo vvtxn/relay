@@ -13,7 +13,6 @@ tui/
 │   ├── terminal.ts             # Terminal buffer, rendering, cursor control
 │   ├── terminal-palette.ts     # OSC 10/11/4 palette query, DA1 fence, reply parsing
 │   ├── input.ts                # Keyboard + SGR mouse input handling (drops OSC/private-CSI replies)
-│   ├── pointer.ts              # Pointer router installed by the mounted renderer
 │   └── primitives/             # Drawing primitives
 │       ├── color.ts            # Color parsing, ANSI conversion, bg inheritance
 │       ├── char-width.ts       # wcwidth (combining/wide) + ANSI-aware measurement
@@ -130,8 +129,9 @@ only primary-button presses dispatch clicks (wheel/motion/release never activate
 `scrollbar` also exposes its bar as a pointer target: a press on the thumb grabs it, a track click jumps and grabs, and
 motion while grabbed drags it (the renderer snapshots the bar geometry at press time and calls
 `onScrollOffsetChange`). `scrollbarMetrics()` in `elements/scroll-area.ts` is shared by the painter and hit test so the
-interactive cells are exactly the painted ones. `pointer.ts` is the leaf module that carries the active hit test —
-`input.ts` never imports the renderer.
+interactive cells are exactly the painted ones. The mounted renderer registers its hit test with
+`inputManager.setPointerHandler()`, and positioned overlays (`position="absolute"`) stop hit-testing from piercing
+through to background siblings.
 
 ### Core Classes
 

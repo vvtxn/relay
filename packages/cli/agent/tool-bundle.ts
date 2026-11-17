@@ -6,15 +6,13 @@ export type TranscriptBlock =
 	| { kind: "tools"; start: number; calls: UIToolCall[] };
 
 /**
- * Cached tool-call arrays for a run of tool activity. Keyed by the run's first
- * source message and guarded by element identity so a replaced draft turn
- * invalidates the entry instead of reusing stale calls.
+ * Merged tool-call arrays for multi-turn tool runs. Keyed by the run's first
+ * `toolCalls` array (not the `UIMessage` wrapper, which `viewMessages()`
+ * recreates on every render for the active draft) so in-flight runs keep array
+ * identity across text deltas and spinner ticks. Single-turn runs reuse
+ * `msg.toolCalls` directly with no allocation.
  */
-const runCache = new WeakMap<UIMessage, { sources: UIMessage[]; calls: UIToolCall[] }>();
-
-/** One-entry cache for the whole list: idle commits keep the same `messages` array. */
-let cachedMessages: UIMessage[] | null = null;
-let cachedBlocks: TranscriptBlock[] = [];
+const runCache = new WeakMap<UIToolCall[], { sources: UIToolCall[][]; calls: UIToolCall[] }>();
 
 /**
  * Fold the transcript into render rows. Every message's prose becomes a
@@ -24,30 +22,32 @@ let cachedBlocks: TranscriptBlock[] = [];
  * User turns and prose-bearing turns end a run (their own calls start a new
  * one), and empty agent turns are skipped without splitting it.
  *
- * Call arrays keep identity across commits while a run is unchanged (see
- * `runCache`), which lets memoized rows skip streamed deltas.
+ * Call arrays keep identity across commits while a run is unchanged, which
+ * lets memoized rows skip streamed deltas.
  */
 export function bundleTranscript(messages: UIMessage[]): TranscriptBlock[] {
-	if (messages === cachedMessages) return cachedBlocks;
-
 	const blocks: TranscriptBlock[] = [];
-	let runSources: UIMessage[] = [];
+	let runSources: UIToolCall[][] = [];
 	let runStart = -1;
 
 	const flushRun = () => {
 		if (runSources.length === 0) return;
 		const first = runSources[0]!;
-		const cached = runCache.get(first);
 		let calls: UIToolCall[];
-		if (
-			cached &&
-			cached.sources.length === runSources.length &&
-			cached.sources.every((source, i) => source === runSources[i])
-		) {
-			calls = cached.calls;
+		if (runSources.length === 1) {
+			calls = first;
 		} else {
-			calls = runSources.flatMap((message) => message.toolCalls ?? []);
-			runCache.set(first, { sources: runSources, calls });
+			const cached = runCache.get(first);
+			if (
+				cached &&
+				cached.sources.length === runSources.length &&
+				cached.sources.every((source, i) => source === runSources[i])
+			) {
+				calls = cached.calls;
+			} else {
+				calls = runSources.flat();
+				runCache.set(first, { sources: runSources, calls });
+			}
 		}
 		blocks.push({ kind: "tools", start: runStart, calls });
 		runSources = [];
@@ -65,7 +65,7 @@ export function bundleTranscript(messages: UIMessage[]): TranscriptBlock[] {
 		}
 
 		const hasText = msg.content.trim() !== "";
-		const toolCalls = msg.toolCalls ?? [];
+		const toolCalls = msg.toolCalls;
 
 		if (hasText) {
 			flushRun();
@@ -73,14 +73,11 @@ export function bundleTranscript(messages: UIMessage[]): TranscriptBlock[] {
 		}
 		// No calls: prose-only already flushed the run above; an empty turn
 		// renders nothing and must not split one.
-		if (toolCalls.length === 0) continue;
+		if (!toolCalls || toolCalls.length === 0) continue;
 		if (runSources.length === 0) runStart = index;
-		runSources.push(msg);
+		runSources.push(toolCalls);
 	}
 
 	flushRun();
-
-	cachedMessages = messages;
-	cachedBlocks = blocks;
 	return blocks;
 }

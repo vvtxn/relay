@@ -1,5 +1,11 @@
 import { createSignal, For, type JSX, Show } from "solid-js";
-import { diffStats, getToolDisplayName, type UIToolCall } from "@vvtxn/relay/core/display.ts";
+import {
+	diffStats,
+	getToolDisplayName,
+	isPendingToolCall,
+	toolCallStat,
+	type UIToolCall,
+} from "@vvtxn/relay/core/display.ts";
 import { openDiffPreview } from "#/state/diff-preview.ts";
 import { DiffBlock } from "./DiffBlock.tsx";
 
@@ -22,18 +28,9 @@ export function ToolCalls(props: { toolCalls: UIToolCall[] }) {
 	);
 }
 
-/** A call without a result yet (its output/diff/error arrives later). */
-function isPending(tool: UIToolCall): boolean {
-	return tool.output.length === 0 && tool.diff === undefined && tool.isError !== true;
-}
-
-function countLabel(count: number, singular: string, plural: string): string {
-	return `${count} ${count === 1 ? singular : plural}`;
-}
-
 function ToolCall(props: { tool: UIToolCall }) {
 	const tool = () => props.tool;
-	const pending = () => isPending(tool());
+	const pending = () => isPendingToolCall(tool());
 	const hasDetails = () => tool().diff !== undefined || (!pending() && tool().output.length > 0);
 	const [expanded, setExpanded] = createSignal(false);
 
@@ -101,39 +98,21 @@ function ToolCall(props: { tool: UIToolCall }) {
 function ResultBadge(props: { tool: UIToolCall }): JSX.Element {
 	const badge = (): JSX.Element => {
 		const tool = props.tool;
-		if (isPending(tool)) return null;
+		if (isPendingToolCall(tool)) return null;
 		if (tool.isError) return <span class="tool-call-badge">error</span>;
 
-		switch (tool.name) {
-			case "grep": {
-				if (tool.output === "No matches found.") return <span class="tool-call-badge">no matches</span>;
-				const matches = tool.output.split("\n").filter((line) => GREP_MATCH.test(line));
-				const files = new Set(
-					matches.map((line) => GREP_MATCH.exec(line)?.[1]).filter((file) => file !== undefined),
-				);
-				return (
-					<span class="tool-call-badge">
-						{countLabel(matches.length, "match", "matches")} in {countLabel(files.size, "file", "files")}
-					</span>
-				);
-			}
-			case "read_file":
-				return (
-					<span class="tool-call-badge">{countLabel(tool.output.split("\n").length, "line", "lines")}</span>
-				);
-			case "write_file":
-			case "edit_file": {
-				if (!tool.diff) return null;
-				const stats = diffStats(tool.diff);
-				return (
-					<span class="tool-call-badge">
-						<span class="badge-add">+{stats.adds}</span> <span class="badge-del">−{stats.deletes}</span>
-					</span>
-				);
-			}
-			default:
-				return null;
+		if (tool.name === "write_file" || tool.name === "edit_file") {
+			if (!tool.diff) return null;
+			const stats = diffStats(tool.diff);
+			return (
+				<span class="tool-call-badge">
+					<span class="badge-add">+{stats.adds}</span> <span class="badge-del">−{stats.deletes}</span>
+				</span>
+			);
 		}
+
+		const stat = toolCallStat(tool);
+		return stat !== "" ? <span class="tool-call-badge">{stat}</span> : null;
 	};
 	return <Show when={badge()}>{(value) => value()}</Show>;
 }

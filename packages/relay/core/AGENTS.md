@@ -118,10 +118,8 @@ Shared across all clients (TUI, web). Deliberately dependency-free so browser bu
 - `createUIToolCall()` — Creates a UIToolCall from tool name and JSON args
 - `summarizeToolArgs()` — Converts JSON args to human-readable summary (path, pattern, command, etc.)
 - `getToolDisplayName()` — Maps internal tool names to display labels (e.g. `read_file` → "read")
-- `getToolDisplayOutput()` — Formats tool output as concise summaries for display
-- `groupToolCalls()` — Collapses a turn's tool calls into one row per tool (first-seen order): compact targets
-  (`app.tsx, chat.tsx +2 more`, capped by count and length), an aggregated stat (`12 matches in 3 files`, `+4 −2`,
-  `running…` while results are pending), an error count, and the underlying `calls` for per-call detail rendering
+- `isPendingToolCall()` / `toolCallStat()` — Pending check and concise per-call result stat (`12 matches in 3 files`,
+  `40 lines`, `+4 −2`, `running…`) shared by the CLI and web views
 - `abbreviateHome()` / `expandHome()` — Replace a home-directory prefix with `~` for display and back
 - `parseDiff()` — Parses unified diffs into files → hunks → lines with line numbers; handles git headers, multiple
   hunks/files, no-newline markers, and header-looking content lines

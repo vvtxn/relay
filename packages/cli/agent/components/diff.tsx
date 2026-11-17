@@ -44,8 +44,6 @@ function formatDiffRow(row: DiffRow, gutter: number): string {
 
 export type DiffPreviewProps = {
 	diff: string;
-	/** File header shown when a group touched more than one file. */
-	path?: string | undefined;
 	maxLines?: number | undefined;
 	key?: number;
 };
@@ -61,7 +59,6 @@ export const DiffPreview = memo(function DiffPreview(props: DiffPreviewProps) {
 
 	return (
 		<Box flexDirection="column">
-			{props.path !== undefined && <Text color={theme.textDim}>{props.path}</Text>}
 			{rows.map((row, index) => (
 				<Text key={index}>{formatDiffRow(row, gutter)}</Text>
 			))}

@@ -471,7 +471,7 @@ function App({ onQuit, initialSessionId, info }: AppProps) {
 			}
 			if (event.ctrl && event.key === "c") return false;
 
-			if (["up", "down", "pageup", "pagedown", "wheelup", "wheeldown"].includes(event.key)) return false;
+			if (["up", "down", "pageup", "pagedown", "wheelup", "wheeldown", "mouse"].includes(event.key)) return false;
 			return true;
 		});
 		setCleanup(diffViewerKey, cleanup);

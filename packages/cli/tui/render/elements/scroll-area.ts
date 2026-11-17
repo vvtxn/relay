@@ -119,16 +119,12 @@ export const ScrollAreaElement: ElementHandler<ScrollAreaInstance> = (instance, 
 		backgroundPositions.push(...fillPositions(x, y, w, h, bg));
 	}
 
-	const clipTop = y;
 	const clipBottom = y + h - 1;
-
 	const contentHeight = scrollContentHeight(instance);
-
-	const viewportHeight = clipBottom - clipTop + 1;
-	const maxScroll = Math.max(0, contentHeight - viewportHeight);
+	const maxScroll = Math.max(0, contentHeight - h);
 	const scrollOffset = Math.max(0, Math.min(instance.props.scrollOffset ?? 0, maxScroll));
 
-	instance.props.onMetrics?.({ viewportHeight, contentHeight, maxScroll });
+	instance.props.onMetrics?.({ viewportHeight: h, contentHeight, maxScroll });
 	if (scrollOffset !== (instance.props.scrollOffset ?? 0)) {
 		instance.props.onScrollOffsetChange?.(scrollOffset);
 	}
@@ -139,11 +135,11 @@ export const ScrollAreaElement: ElementHandler<ScrollAreaInstance> = (instance, 
 		const childHeight = Math.round(child.yogaNode.getComputedHeight());
 		const childBottom = childTop + childHeight - 1;
 
-		if (childBottom < 0 || childTop >= viewportHeight) continue;
+		if (childBottom < 0 || childTop >= h) continue;
 
 		const childPositions = context.renderInstance(child, x, y - scrollOffset, bg ?? context.inheritedBg);
 		for (const pos of childPositions) {
-			if (pos.y >= clipTop && pos.y <= clipBottom) {
+			if (pos.y >= y && pos.y <= clipBottom) {
 				clipped.push(pos);
 			}
 		}

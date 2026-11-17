@@ -73,14 +73,14 @@ export {
 	entriesToUIMessages,
 	expandHome,
 	getToolDisplayName,
-	getToolDisplayOutput,
-	groupToolCalls,
+	isPendingToolCall,
 	parseDiff,
 	parseDiffLines,
 	summarizeToolArgs,
 	TOOL_DISPLAY_NAMES,
+	toolCallStat,
 } from "./core/display.ts";
-export type { DiffFile, DiffHunk, DiffLine, ToolCallGroup, UIMessage, UIToolCall } from "./core/display.ts";
+export type { DiffFile, DiffHunk, DiffLine, UIMessage, UIToolCall } from "./core/display.ts";
 
 // Theme (shared design tokens for terminal and web clients)
 export { theme, themeToCssVariables } from "./core/theme.ts";

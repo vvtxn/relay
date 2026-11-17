@@ -1,7 +1,6 @@
 import process from "node:process";
 import { batch } from "@preact/signals-core";
 import { CSI } from "#/tui/core/ansi.ts";
-import { dispatchPointer } from "#/tui/core/pointer.ts";
 
 /** Decoded SGR mouse report. Coordinates are 0-based terminal cells. */
 export interface MouseInfo {
@@ -58,6 +57,8 @@ const MOUSE_CTRL = 16;
 const MOUSE_MOTION = 32;
 /** Wheel flag: the low two bits then select the wheel direction. */
 const MOUSE_WHEEL = 64;
+/** Extra-button flag (buttons 8–11, e.g. side thumb buttons). */
+const MOUSE_EXTRA = 128;
 
 const MOUSE_BUTTONS = ["left", "middle", "right"] as const;
 const WHEEL_KEYS = ["wheelup", "wheeldown", "wheelleft", "wheelright"] as const;
@@ -80,11 +81,10 @@ function parseMouse(seq: string): KeyEvent {
 	const ctrl = (code & MOUSE_CTRL) !== 0;
 	const action = final === "m" ? "release" : (code & MOUSE_MOTION) !== 0 ? "move" : "press";
 	const buttonIndex = code & 0b11;
-	const wheelKey = WHEEL_KEYS[buttonIndex] ?? "wheelup";
 
 	if ((code & MOUSE_WHEEL) !== 0) {
 		return {
-			key: wheelKey,
+			key: WHEEL_KEYS[buttonIndex] ?? "wheelup",
 			ctrl,
 			meta,
 			shift,
@@ -92,18 +92,20 @@ function parseMouse(seq: string): KeyEvent {
 		};
 	}
 
+	const button = (code & MOUSE_EXTRA) === 0 ? (MOUSE_BUTTONS[buttonIndex] ?? null) : null;
 	return {
 		key: "mouse",
 		ctrl,
 		meta,
 		shift,
-		mouse: { x, y, button: MOUSE_BUTTONS[buttonIndex] ?? null, action, ctrl, meta, shift },
+		mouse: { x, y, button, action, ctrl, meta, shift },
 	};
 }
 
 class InputManager {
 	private globalHandlers: Set<KeyHandler> = new Set();
 	private handlers: Set<KeyHandler> = new Set();
+	private pointerHandler: ((event: KeyEvent) => boolean) | null = null;
 	private isRawMode = false;
 	/** Incomplete escape sequence carried across stdin chunks. */
 	private pending = "";
@@ -152,10 +154,15 @@ class InputManager {
 		for (const handler of this.globalHandlers) {
 			if (handler(event) === true) return;
 		}
-		if (event.mouse && dispatchPointer(event)) return;
+		if (event.mouse && this.pointerHandler?.(event) === true) return;
 		for (const handler of this.handlers) {
 			if (handler(event) === true) return;
 		}
+	}
+
+	/** Install (or clear) the mounted renderer's pointer router. */
+	setPointerHandler(handler: ((event: KeyEvent) => boolean) | null): void {
+		this.pointerHandler = handler;
 	}
 
 	splitSequences(data: string): string[] {

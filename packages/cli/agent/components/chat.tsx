@@ -4,8 +4,13 @@ import { RESET_FG } from "#/tui/core/ansi.ts";
 import { toAnsi } from "#/tui/core/primitives/color.ts";
 import { splitMentions } from "#/tui/core/primitives/mentions.ts";
 import { theme } from "#/tui/theme.ts";
-import { getToolDisplayName, groupToolCalls, type UIToolCall } from "@vvtxn/relay/core/display.ts";
-import type { UIMessage } from "@vvtxn/relay/core/display.ts";
+import {
+	getToolDisplayName,
+	isPendingToolCall,
+	toolCallStat,
+	type UIMessage,
+	type UIToolCall,
+} from "@vvtxn/relay/core/display.ts";
 import { DiffPreview } from "./diff.tsx";
 import { TOOL_COLORS, TOOL_NAME_WIDTH } from "../tool-display.ts";
 
@@ -87,7 +92,7 @@ function ToolOutput({ call, indent = 0 }: { call: UIToolCall; indent?: number })
  * the capped output and (for edit/write) its compact diff preview.
  */
 function ToolCallDetail({ call }: { call: UIToolCall }) {
-	const stat = groupToolCalls([call])[0]?.stat ?? "";
+	const stat = toolCallStat(call);
 	const indent = TOOL_NAME_WIDTH + 1;
 	return (
 		<Box flexDirection="column">
@@ -104,11 +109,12 @@ function ToolCallDetail({ call }: { call: UIToolCall }) {
 				</Text>
 				{stat !== "" && <Text color={theme.textFaint}>{stat}</Text>}
 			</Box>
-			<ToolOutput call={call} indent={indent} />
-			{call.diff !== undefined && (
+			{call.diff !== undefined ? (
 				<Box paddingTop={1} paddingLeft={indent}>
-					<DiffPreview diff={call.diff} path={call.input} />
+					<DiffPreview diff={call.diff} />
 				</Box>
+			) : (
+				!isPendingToolCall(call) && <ToolOutput call={call} indent={indent} />
 			)}
 		</Box>
 	);
@@ -138,7 +144,7 @@ const ExpandedToolBundle = memo(function ExpandedToolBundle({ calls }: { calls: 
 export function ToolBundleView({ calls }: { calls: UIToolCall[] }) {
 	const expanded = useSignal(false);
 	const errors = calls.filter((call) => call.isError === true).length;
-	const running = calls.some((call) => call.output.length === 0 && call.diff === undefined && call.isError !== true);
+	const running = calls.some(isPendingToolCall);
 
 	return (
 		<Box flexDirection="column">

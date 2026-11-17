@@ -2,7 +2,6 @@ import { effect } from "@preact/signals-core";
 import process from "node:process";
 import Y from "yoga-layout";
 import { inputManager, type KeyEvent } from "../core/input.ts";
-import { setPointerHandler } from "../core/pointer.ts";
 import { Terminal, type TerminalOptions } from "../core/terminal.ts";
 import { ElementType, getElement } from "./elements/index.ts";
 import { scrollbarMetrics, type ScrollbarMetrics, scrollContentHeight } from "./elements/scroll-area.ts";
@@ -233,7 +232,11 @@ export class Renderer {
 		}
 
 		const inside = x >= left && x < left + width && y >= top && y < top + height;
-		return inside && instance.props.onClick !== undefined ? { instance } : null;
+		// Positioned overlays (DiffViewer, CommandPalette) cover earlier siblings,
+		// so a click inside an overlay that missed its inner targets must stop here
+		// instead of piercing through to the background tree.
+		const isOverlay = instance.type === ElementType.BOX && instance.props.position === "absolute";
+		return inside && (instance.props.onClick !== undefined || isOverlay) ? { instance } : null;
 	}
 
 	freeYogaNodes(instance: Instance) {
@@ -703,7 +706,7 @@ export class Renderer {
 	}
 
 	render(createVNode: () => VNode) {
-		setPointerHandler((event) => this.hitTest(event));
+		inputManager.setPointerHandler((event) => this.hitTest(event));
 		this.disposeEffect = effect(() => {
 			// Track terminal size so a resize triggers a fresh layout + repaint.
 			// oxlint-disable-next-line no-unused-expressions -- signal read for tracking
@@ -713,7 +716,7 @@ export class Renderer {
 	}
 
 	unmount() {
-		setPointerHandler(null);
+		inputManager.setPointerHandler(null);
 		this.scrollbarDrag = null;
 		if (this.disposeEffect) {
 			this.disposeEffect();
