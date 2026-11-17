@@ -19,6 +19,7 @@ agent/
 ├── config.ts             # RelayConfig: serverUrl + theme mode (env RELAY_SERVER_URL / RELAY_THEME or ~/.relay/config.json)
 ├── theme.ts              # Palette preference → terminal query → derived theme, applied before app.tsx loads
 ├── diffs.ts              # Session diff collection + preview/viewer row building (pure)
+├── tool-bundle.ts        # Folds tool calls from consecutive agent turns into collapsible transcript bundles (pure)
 ├── tool-display.ts       # Shared tool-call colors and label column width
 ├── components/
 │   ├── boot-screen.tsx   # BootScreen (loading) and BootError shown while the server is resolved
@@ -79,9 +80,9 @@ The agent runtime is NOT in this package. `runAgentLoop`, tools, providers, and 
 Edit/write tool results arrive with a unified diff on `UIToolCall.diff` (live from `tool_result` and from persisted
 `tool_result` entries), so the terminal needs no server or protocol changes to render changes.
 
-- Each grouped edit/write row shows a compact preview underneath: changed lines only, hunk separators, line numbers,
-  tabs expanded to four spaces, and `+`/`−` in the shared success/error tokens. Previews cap at 3 files per group and
-  8 changed lines per file; the remainder is summarized as `… N more changed lines · ctrl+o`.
+- Expanding a tool bundle shows each edit/write call's compact preview: changed lines only, hunk separators, line
+  numbers, tabs expanded to four spaces, and `+`/`−` in the shared success/error tokens. Previews cap at 8 changed
+  lines per file; the remainder is summarized as `… N more changed lines · ctrl+o`.
 - `ctrl+o` opens `DiffViewer` for the most recent diff; `n`/`p` cycle every diff in the session, arrows/PgUp/PgDn/wheel
   scroll, and Esc/`q` close it. `/` → **Review Changes** opens the same overlay. The overlay keeps full context and
   `@@` headers, unlike the transcript preview.
@@ -169,15 +170,20 @@ saved, so the TUI cannot start without one.
   running agent status (spinner + `Thinking…`/`Writing…`/`Running <tool>…`, plus the Esc-to-cancel hint), falling back
   to the input hints when idle
 - `StatusBar` — Branch and accumulated session cost
-- `DiffPreview` / `DiffViewer` (components/diff.tsx) — Compact changed-lines-only preview under edit/write groups, and
-  the full-context scrollable review overlay. Both render ANSI-styled rows from the pure helpers in `diffs.ts`; the
-  preview is memoized so streamed deltas skip unchanged diffs
+- `DiffPreview` / `DiffViewer` (components/diff.tsx) — Compact changed-lines-only preview inside an expanded tool
+  bundle (edit/write calls), and the full-context scrollable review overlay. Both render ANSI-styled rows from the pure
+  helpers in `diffs.ts`; the preview is memoized so streamed deltas skip unchanged diffs
 - `MessageView` (components/chat.tsx) — Shared display contract from `@vvtxn/relay/core/display.ts`; `UIMessage` is
-  re-exported from there (single definition). User turns sit on a full-width `surfaceElevated` band, agent turns are
-  marked with a `●` (brand), and turns are separated by the scroll gap. Tool calls
-  are grouped per tool by `groupToolCalls()` into compact rows — per-tool accent on the name, the targets it touched,
-  and a right-aligned result stat — instead of a row per call, with inline diff previews under edit/write groups.
+  re-exported from there (single definition). Renders prose only: user turns sit on a full-width `surfaceElevated`
+  band, agent turns are marked with a `●` (brand), and turns are separated by the scroll gap. Tool calls are not drawn
+  here — `bundleTranscript()` pulls them into `ToolBundleView` blocks after the prose.
   Wrapped in `memo()` (pure function of props) so idle frames and streamed deltas skip re-rendering unchanged messages
+- `ToolBundleView` (components/chat.tsx) — `bundleTranscript()` (`tool-bundle.ts`) turns every agent turn's tool calls
+  into a tool block after its prose and merges adjacent blocks, so `read` → `read` → `write` renders as one collapsed
+  `2 reads · 1 write` row. Expanding lists every call chronologically with its target, per-call stat, capped output,
+  and edit/write diff preview. User turns and prose-bearing turns end a run (their calls start a new bundle); empty
+  agent turns are skipped without splitting it. The bundle's call array is cached per run, so memoized expanded bodies
+  skip streamed commits.
 
 ### Fonts (`fonts.ts`)
 
@@ -242,6 +248,9 @@ After concluding that a task is complete, always run these commands from the rep
 - `entriesToUIMessages` renders persisted sessions — do not duplicate the conversion locally
 - Keep chat views pure and `memo()`-wrapped; message objects keep identity across streamed deltas, which is what makes
   idle frames and deltas skip unchanged messages
+- Render the transcript through `bundleTranscript()` so tool calls from consecutive turns collapse into one bundle row;
+  its per-run call-array cache is what keeps memoized bundle bodies on the fast path, so preserve identity when
+  touching the fold
 - Diff presentation is pure and testable (`diffs.ts`); render it through `DiffPreview`/`DiffViewer` instead of stuffing
   raw patches into `Markdown` (which would show every context line and bypass the preview cap)
 - A global key handler that should win over run cancellation must be registered before the double-Esc handler; one that
