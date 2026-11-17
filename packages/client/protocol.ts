@@ -16,8 +16,10 @@ import type {
 import type { WorkspaceRejection } from "@vvtxn/relay/core/workspace.ts";
 import type { ToolResult } from "@vvtxn/relay/core/tools/index.ts";
 import type { ProviderKind, Usage } from "@vvtxn/relay/api/types.ts";
+import type { LlmDefaults, LlmModelOption, LlmPreset, LlmSelection } from "@vvtxn/relay/core/llm-presets.ts";
 
 export type { RunPhase, SessionSummary };
+export type { LlmDefaults, LlmModelOption, LlmPreset, LlmSelection };
 
 // ---------------------------------------------------------------------------
 // REST payloads
@@ -43,12 +45,13 @@ export interface WorkspaceResponse {
 	cwd: string;
 }
 
-/** Model + context info for status displays. */
+/** Model + context info for status displays. Reflects the caller's selection. */
 export interface ConfigResponse {
-	/** LLM API flavor the server is configured for. */
+	/** LLM API flavor the caller's selection resolves to. */
 	provider: ProviderKind;
+	/** Model the caller's next run will use. */
 	model: string;
-	/** Context window budget used for the token bar. */
+	/** Context window budget for that model. */
 	contextTokens: number;
 	/** Maximum sessions (threads) kept per workspace; `0` means unlimited. */
 	maxSessionsPerWorkspace: number;
@@ -58,9 +61,18 @@ export interface ConfigResponse {
 	webUrl: string;
 }
 
+/** What the caller's stored selection resolves to right now. */
+export interface EffectiveLlm {
+	preset: string;
+	label: string;
+	provider: ProviderKind;
+	model: string;
+	contextTokens: number;
+}
+
 /**
  * Per-user settings. The API key itself is never returned — clients learn only
- * whether one is set and a short masked hint so they can display it.
+ * whether one is set for the selected preset and a short masked hint.
  */
 export interface SettingsResponse {
 	apiKey: {
@@ -68,11 +80,36 @@ export interface SettingsResponse {
 		/** Last few characters of the stored key, or null when unset. */
 		hint: string | null;
 	};
+	/** The stored selection. */
+	llm: LlmSelection;
+	/** Server-wide fallbacks used by the `default` preset. */
+	defaults: LlmDefaults;
+	/** The concrete provider/model/context the next run will use. */
+	effective: EffectiveLlm;
+	/** Presets this server offers, including `default` and optionally `custom`. */
+	presets: LlmPreset[];
+	/** Whether a custom base URL may be configured. */
+	canCustom: boolean;
 }
 
-/** Set the caller's LLM API key, or clear it by sending null/empty. */
-export interface SetApiKeyRequest {
-	apiKey: string | null;
+/**
+ * Update the caller's LLM selection. Omitted fields are preserved; `apiKey`
+ * missing keeps the key, `null` clears it.
+ */
+export interface UpdateSettingsRequest {
+	apiKey?: string | null;
+	preset?: string;
+	provider?: ProviderKind | null;
+	baseURL?: string | null;
+	model?: string | null;
+	contextTokens?: number | null;
+}
+
+/** Model picker options for one preset. */
+export interface ModelsResponse {
+	preset: string;
+	models: LlmModelOption[];
+	source: "live" | "curated";
 }
 
 export interface SessionListResponse {

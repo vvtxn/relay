@@ -16,11 +16,11 @@ import {
 	loadOrCreateLocalMasterKey,
 	type UserSettingsStore,
 } from "@vvtxn/relay/core/index.ts";
-import { createProvider } from "@vvtxn/relay/api/providers/index.ts";
 import { createDatabaseClient, type DatabaseClient } from "@vvtxn/relay/core/database.ts";
 import { storeEffect, type StoreError } from "@vvtxn/relay/core/effect.ts";
 import { DatabaseSessionStore } from "@vvtxn/relay/core/sessions/index.ts";
 import type { ServerConfig } from "./config.ts";
+import { createRunLlm } from "./llm.ts";
 import { RunManager } from "./run.ts";
 
 /**
@@ -165,9 +165,9 @@ const workspacesLayer = Layer.effect(
 );
 
 /**
- * The per-process RunManager. Each run builds a provider from the owning
- * user's stored key: the key is per-user, decrypted on demand, and never
- * enters the model's context.
+ * The per-process RunManager. Each run resolves the owner's LLM selection,
+ * builds a provider from their stored key, and keeps the key out of the
+ * model's context.
  */
 const runsLayer = Layer.effect(
 	Runs,
@@ -176,12 +176,12 @@ const runsLayer = Layer.effect(
 		const userSettings = yield* UserSettings;
 		const boxes = yield* Boxes;
 		const workspaces = yield* Workspaces;
-		const providerFor = (ownerId: string) =>
+		const llmFor = (ownerId: string) =>
 			Effect.gen(function* () {
-				const apiKey = yield* userSettings.getApiKey(ownerId);
-				return apiKey ? createProvider({ provider: config.provider, apiKey, baseURL: config.baseURL }) : null;
+				const record = yield* userSettings.getLlm(ownerId);
+				return createRunLlm(config, record);
 			});
-		return new RunManager({ config, providerFor, boxes, workspaces });
+		return new RunManager({ config, llmFor, boxes, workspaces });
 	}),
 );
 

@@ -31,6 +31,8 @@ export interface DelegateToolOptions {
 	contextLimit?: TrimOptions;
 	/** Parent run's abort signal, so cancelling the run cancels its subagents. */
 	signal?: AbortSignal;
+	/** Parent conversation id, shared so gateways keep one cache/routing key. */
+	sessionId?: string;
 }
 
 /**
@@ -97,6 +99,7 @@ function runSubagent(prompt: string, options: DelegateToolOptions): Effect.Effec
 		...(options.maxTokens !== undefined ? { maxTokens: options.maxTokens } : {}),
 		...(options.contextLimit !== undefined ? { contextLimit: options.contextLimit } : {}),
 		...(options.signal !== undefined ? { signal: options.signal } : {}),
+		...(options.sessionId !== undefined ? { sessionId: options.sessionId } : {}),
 	};
 
 	return Effect.gen(function* () {

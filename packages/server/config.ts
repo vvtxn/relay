@@ -44,6 +44,8 @@ export interface ServerConfig {
 	preserveRecentTurns: number;
 	/** Max completion tokens per LLM message. */
 	maxCompletionTokens: number;
+	/** Allow users to point Relay at a custom LLM base URL. Local-only by default. */
+	allowCustomLlm: boolean;
 	/** Database backend and its connection details. */
 	database: DatabaseBackend;
 	/** Authentication transport. */
@@ -433,6 +435,9 @@ export function serverConfigFromEnv(env: Record<string, string | undefined> = { 
 		maxTokens: Number(env.LLM_MAX_TOKENS ?? 350_000),
 		preserveRecentTurns: Number(env.LLM_PRESERVE_RECENT_TURNS ?? 6),
 		maxCompletionTokens: Number(env.LLM_MAX_COMPLETION_TOKENS ?? 16_384),
+		// Custom endpoints let a user pick any URL the server can reach, which is
+		// an SSRF surface for shared deployments. Enable explicitly in cloud mode.
+		allowCustomLlm: booleanEnv(env.RELAY_LLM_ALLOW_CUSTOM, flavor === "local", "RELAY_LLM_ALLOW_CUSTOM"),
 		database,
 		authMode,
 		githubClientId,

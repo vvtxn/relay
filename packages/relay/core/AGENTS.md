@@ -15,6 +15,7 @@ core/
 ├── assets/fonts/         # Bundled font files + license (see its README for the swap procedure)
 ├── paths.ts              # relayDir(), homeDir() helpers
 ├── context.ts            # Context trimming (token estimation, turn-based truncation)
+├── llm-presets.ts        # Browser-pure provider presets, model lists, and selection resolution
 ├── effect.ts             # Shared Effect helpers: attempt, causeMessage, StoreError, storeEffect
 ├── env.ts                # scrubbedAgentEnv(): credential-free environment for tool subprocesses
 ├── database.ts           # Shared libSQL client factory (local file or Turso) used by every store

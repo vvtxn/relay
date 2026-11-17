@@ -1476,6 +1476,21 @@ body {
 	line-height: 1.5;
 }
 
+.settings-select {
+	width: 100%;
+	max-width: 320px;
+}
+
+.settings-stack {
+	flex-direction: column;
+	align-items: stretch;
+	gap: 0.35rem;
+}
+
+.settings-context {
+	color: var(--relay-text-dim, #808080);
+}
+
 .settings-form {
 	display: flex;
 	flex-direction: column;

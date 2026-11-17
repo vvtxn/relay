@@ -21,6 +21,7 @@ import type {
 import { boxSummary } from "./box-summary.ts";
 import type { RequestServices } from "./services.ts";
 import { BadRequestError, error, ForbiddenError, json, NotFoundError, readJsonBody, requestUrl } from "./http.ts";
+import { resolveSelection } from "./llm.ts";
 import { RunConflictError } from "./run.ts";
 
 /**
@@ -85,19 +86,23 @@ export function handleMe(services: RequestServices): Effect.Effect<HttpServerRes
 	);
 }
 
-/** Model + context info for client status displays. */
-export function handleConfig(services: RequestServices): Effect.Effect<HttpServerResponse.HttpServerResponse> {
-	const { config } = services;
-	return Effect.succeed(
-		json({
-			provider: config.provider,
-			model: config.model,
-			contextTokens: config.maxTokens,
+/** Model + context info for status displays, reflecting the caller's selection. */
+export function handleConfig(
+	services: RequestServices,
+): Effect.Effect<HttpServerResponse.HttpServerResponse, StoreError> {
+	return Effect.gen(function* () {
+		const { config } = services;
+		const stored = yield* services.userSettings.getLlmStatus(services.user.id);
+		const resolved = resolveSelection(config, stored.settings);
+		return json({
+			provider: resolved.provider,
+			model: resolved.model,
+			contextTokens: resolved.contextTokens,
 			maxSessionsPerWorkspace: config.maxSessionsPerWorkspace,
 			home: homeDir() ?? "",
 			webUrl: config.publicUrl,
-		} satisfies ConfigResponse),
-	);
+		} satisfies ConfigResponse);
+	});
 }
 
 export function handleListSessions(
@@ -239,16 +244,18 @@ export function handleSendMessage(
 		}
 
 		// Fail fast with a clear message rather than starting a run that can only
-		// error out: a provider cannot be built without the user's API key.
-		const apiKey = yield* services.userSettings
-			.getApiKey(services.user.id)
+		// error out: a provider cannot be built without a key for the selected
+		// provider.
+		const stored = yield* services.userSettings
+			.getLlmStatus(services.user.id)
 			.pipe(
 				Effect.catchTag("StoreError", (storeError) =>
-					Effect.fail(new BadRequestError(`Stored API key could not be read: ${storeError.message}`)),
+					Effect.fail(new BadRequestError(`Stored settings could not be read: ${storeError.message}`)),
 				),
 			);
-		if (!apiKey) {
-			return error(400, "No API key configured. Add one in Settings.");
+		const resolved = resolveSelection(services.config, stored.settings);
+		if (!stored.keySet) {
+			return error(400, `No API key configured for ${resolved.label}. Add one in Settings.`);
 		}
 
 		try {

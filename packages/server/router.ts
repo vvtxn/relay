@@ -56,7 +56,8 @@ import {
 	handleValidateWorkspace,
 	handleWorkspace,
 } from "./workspace.ts";
-import { handleGetSettings, handleSetApiKey } from "./settings.ts";
+import { handleGetSettings, handleUpdateSettings } from "./settings.ts";
+import { handleListModels } from "./models.ts";
 import { isLoopbackHost } from "./config.ts";
 
 /** Route handlers may read the request service (and matched route context). */
@@ -286,8 +287,13 @@ export function createAppLayer(services: ServerServices) {
 			yield* router.add("GET", "/api/settings", respond(authenticated(services, (rs) => handleGetSettings(rs))));
 			yield* router.add(
 				"PUT",
-				"/api/settings/api-key",
-				respond(authenticated(services, (rs) => withRequest((request) => handleSetApiKey(rs, request)))),
+				"/api/settings",
+				respond(authenticated(services, (rs) => withRequest((request) => handleUpdateSettings(rs, request)))),
+			);
+			yield* router.add(
+				"GET",
+				"/api/models",
+				respond(authenticated(services, (rs) => withRequest((request) => handleListModels(rs, request)))),
 			);
 
 			// Workspaces

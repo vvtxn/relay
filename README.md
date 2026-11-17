@@ -26,6 +26,8 @@ over the same wire protocol. Tooling (format, lint, type-check, builds) runs thr
 - **Streaming chat** — Real-time message rendering with live drafts and tool call cards
 - **Provider-neutral LLM API layer** — OpenAI-compatible `/chat/completions` endpoints (OpenRouter, OpenAI, local
   models, etc.) or the Anthropic Messages API, selected with `LLM_PROVIDER`
+- **Per-user provider & model selection** — OpenCode Go, OpenCode Console, OpenRouter, Anthropic, or a custom endpoint,
+  chosen in the web Settings page. Each API key is bound to its provider, and the server resolves the rest per run
 - **Streaming agent loop** — Async generator that yields events for real-time UI updates as the LLM thinks and uses
   tools
 - **Built-in tools** — Bash, file read/write/edit, and grep for filesystem interaction
@@ -471,8 +473,10 @@ Tag-based releases via GitHub Actions (`.github/workflows/release.yml`):
 
 Relay reads its configuration from the runtime environment (loaded from the single `.env`). Cloud mode requires
 `TURSO_DB_URL`/`TURSO_DB_TOKEN` and `GITHUB_APP_CLIENT_ID`/`GITHUB_APP_CLIENT_SECRET`; local mode needs no cloud
-variables. The LLM API key is per user, encrypted at rest, and kept in local files by default (set via the web Settings
-page); `RELAY_SETTINGS_STORE=database` keeps it in the database instead.
+variables. The server-wide `LLM_PROVIDER`/`LLM_BASE_URL`/`LLM_MODEL` are the fallback ("Server default"). Each user picks
+a provider preset and model in the web Settings page; the LLM API key is per user, encrypted at rest, kept in local files
+by default, and bound to the selected preset. `RELAY_SETTINGS_STORE=database` keeps it in the database instead, while
+`RELAY_LLM_ALLOW_CUSTOM=1` enables custom base URLs outside local mode.
 
 ## License
 

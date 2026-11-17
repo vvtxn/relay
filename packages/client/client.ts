@@ -11,6 +11,7 @@ import type {
 	FileListResponse,
 	HealthResponse,
 	MeResponse,
+	ModelsResponse,
 	OpenSessionResponse,
 	RegisterWorkspaceRequest,
 	RegisterWorkspaceResponse,
@@ -19,9 +20,9 @@ import type {
 	SendMessageResponse,
 	ServerEvent,
 	SessionListResponse,
-	SetApiKeyRequest,
 	SettingsResponse,
 	StatusResponse,
+	UpdateSettingsRequest,
 	WorkspaceResponse,
 	WorkspacesResponse,
 	WorkspaceValidateResponse,
@@ -90,7 +91,17 @@ export class RelayClient {
 
 	/** Set or (with null) clear the caller's LLM API key. */
 	async setApiKey(apiKey: string | null): Promise<StatusResponse> {
-		return await this.put("/api/settings/api-key", { apiKey } satisfies SetApiKeyRequest);
+		return await this.updateSettings({ apiKey });
+	}
+
+	/** Save the caller's LLM selection and/or API key. Omitted fields are kept. */
+	async updateSettings(settings: UpdateSettingsRequest): Promise<StatusResponse> {
+		return await this.put("/api/settings", settings);
+	}
+
+	/** Models offered by one preset; the server fills the list from the catalog. */
+	async listModels(preset: string): Promise<ModelsResponse> {
+		return await this.get(`/api/models?preset=${encodeURIComponent(preset)}`);
 	}
 
 	async listSessions(cwd: string): Promise<SessionListResponse> {

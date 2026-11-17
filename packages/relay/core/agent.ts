@@ -35,6 +35,8 @@ export interface AgentConfig {
 	contextLimit?: TrimOptions;
 	signal?: AbortSignal;
 	maxTokens?: number;
+	/** Stable conversation id passed to providers that route/cache per session. */
+	sessionId?: string;
 }
 
 const CONVERGENCE_INTERVAL = 8;
@@ -138,6 +140,7 @@ function runLoop(
 							...(useTools ? { tools: toolDefs } : {}),
 							...(config.temperature !== undefined ? { temperature: config.temperature } : {}),
 							...(config.maxTokens !== undefined ? { maxTokens: config.maxTokens } : {}),
+							...(config.sessionId !== undefined ? { sessionId: config.sessionId } : {}),
 							...(config.signal !== undefined ? { signal: config.signal } : {}),
 						})
 						.pipe(
