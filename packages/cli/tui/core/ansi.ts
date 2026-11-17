@@ -9,10 +9,13 @@ export const CLEAR_SCREEN = "\x1b[2J\x1b[H";
 
 // ── Mouse Tracking (SGR extended mode) ──────────────────────────────────────
 
-/** Enable button + wheel reporting with SGR coordinates (`\x1b[<b;x;yM`) */
-export const MOUSE_ENABLE = "\x1b[?1000h\x1b[?1006h";
-/** Disable mouse reporting (SGR + button mode) */
-export const MOUSE_DISABLE = "\x1b[?1006l\x1b[?1000l";
+/**
+ * Enable button-event reporting with SGR coordinates (`\x1b[<b;x;yM`):
+ * presses/releases plus motion while a button is held (scrollbar dragging).
+ */
+export const MOUSE_ENABLE = "\x1b[?1002h\x1b[?1006h";
+/** Disable mouse reporting (SGR + button-event mode) */
+export const MOUSE_DISABLE = "\x1b[?1006l\x1b[?1002l";
 
 // ── OSC Terminal Colors (OSC 11) ────────────────────────────────────────────
 

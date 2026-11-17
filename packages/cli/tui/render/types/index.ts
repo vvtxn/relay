@@ -1,4 +1,5 @@
 import type { Node as YogaNode } from "yoga-layout";
+import type { KeyEvent } from "../../core/input.ts";
 import type { HookStore } from "../hooks/signals.ts";
 import type { VNode } from "../jsx-runtime.ts";
 
@@ -50,6 +51,12 @@ export interface BaseProps {
 	children?: Children;
 	/** Unique key for reconciliation */
 	key?: string | number;
+	/**
+	 * Pointer click handler. Clicks are hit-tested against the element's painted
+	 * rectangle; the deepest matching element wins, so row-level boxes receive
+	 * clicks that land on their text.
+	 */
+	onClick?: (event: KeyEvent) => void;
 }
 
 export interface BoxProps extends BaseProps {

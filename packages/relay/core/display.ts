@@ -154,100 +154,20 @@ export function entriesToUIMessages(entries: Entry[]): UIMessage[] {
 }
 
 // ---------------------------------------------------------------------------
-// Tool output formatting
-// ---------------------------------------------------------------------------
-
-export function getToolDisplayOutput(tool: UIToolCall): string | null {
-	if (!tool.output) return null;
-	switch (tool.name) {
-		case "read_file":
-			return null;
-		case "write_file":
-		case "edit_file":
-			return tool.output;
-		case "grep": {
-			const lines = tool.output.split("\n").filter(Boolean);
-			const fileSet = new Set(lines.map((l) => l.split(":")[0]));
-			return `${lines.length} match${lines.length !== 1 ? "es" : ""} in ${fileSet.size} file${
-				fileSet.size !== 1 ? "s" : ""
-			}`;
-		}
-		case "bash": {
-			const firstLine = tool.output.split("\n")[0] ?? "";
-			return firstLine.length > 120 ? firstLine.slice(0, 120) + "..." : firstLine;
-		}
-		default:
-			return tool.output.length > 120 ? tool.output.slice(0, 120) + "..." : tool.output;
-	}
-}
-
-// ---------------------------------------------------------------------------
-// Tool call summarization
+// Tool call stats
 // ---------------------------------------------------------------------------
 
 function formatCount(count: number, singular: string, plural: string): string {
 	return `${count} ${count === 1 ? singular : plural}`;
 }
 
-// ---------------------------------------------------------------------------
-// Tool call grouping
-// ---------------------------------------------------------------------------
-
-/** One tool's calls within a turn, collapsed for compact display. */
-export interface ToolCallGroup {
-	/** Raw tool name (e.g. `read_file`), for per-tool accents. */
-	name: string;
-	/** Display label (e.g. `read`). */
-	label: string;
-	/** Compact target list, e.g. `app.tsx, chat.tsx +2 more`; may be empty. */
-	args: string;
-	/** Aggregated result stat, e.g. `12 matches in 3 files`, `+4 −2`, `running…`; may be empty. */
-	stat: string;
-	/** Calls in the group that returned an error. */
-	errorCount: number;
-	/** Underlying calls in their original order, for per-call detail rendering. */
-	calls: UIToolCall[];
-}
-
 /** A call without a result yet (its output/diff/error arrives later). */
-function isPendingToolCall(tool: UIToolCall): boolean {
+export function isPendingToolCall(tool: UIToolCall): boolean {
 	return tool.output.length === 0 && tool.diff === undefined && tool.isError !== true;
 }
 
 const GREP_MATCH_LINE = /^(.*?):(\d+):(.*)$/;
 const GREP_NO_MATCHES = "No matches found.";
-const ARG_LIST_MAX_ITEMS = 3;
-const ARG_LIST_MAX_LENGTH = 44;
-
-function truncateText(text: string, maxLength: number): string {
-	if (text.length <= maxLength) return text;
-	return `${text.slice(0, Math.max(1, maxLength - 1))}…`;
-}
-
-/** First-seen unique targets, capped by count and length (`a.ts, b.ts +2 more`). */
-function compactToolArgs(name: string, calls: UIToolCall[]): string {
-	const targets = [...new Set(calls.map((tool) => (name === "grep" ? `"${tool.input}"` : tool.input)))].filter(
-		(target) => target.length > 0,
-	);
-	if (targets.length === 0) return "";
-
-	const shown: string[] = [];
-	for (const target of targets) {
-		if (shown.length === ARG_LIST_MAX_ITEMS) break;
-		const candidate = [...shown, target].join(", ");
-		const remaining = targets.length - shown.length - 1;
-		const suffix = remaining > 0 ? ` +${remaining} more` : "";
-		if (shown.length > 0 && candidate.length + suffix.length > ARG_LIST_MAX_LENGTH) break;
-		shown.push(target);
-	}
-
-	const hidden = targets.length - shown.length;
-	const suffix = hidden > 0 ? ` +${hidden} more` : "";
-	const joined = shown.join(", ");
-	return joined.length + suffix.length <= ARG_LIST_MAX_LENGTH
-		? `${joined}${suffix}`
-		: `${truncateText(joined, ARG_LIST_MAX_LENGTH - suffix.length)}${suffix}`;
-}
 
 /**
  * Added/removed line counts from a unified diff. Only hunk bodies count, so
@@ -293,82 +213,35 @@ export function diffStats(raw: string): { adds: number; deletes: number } {
 	return { adds, deletes };
 }
 
-/** Aggregate the group's completed results into one short stat. */
-function groupStat(name: string, calls: UIToolCall[]): string {
-	if (calls.some(isPendingToolCall)) return "running…";
-	const done = calls.filter((tool) => !isPendingToolCall(tool) && tool.isError !== true);
-	if (done.length === 0) return "";
+/** Short result stat for one tool call (`12 matches in 3 files`, `40 lines`, `+4 −2`, `running…`). */
+export function toolCallStat(tool: UIToolCall): string {
+	if (isPendingToolCall(tool)) return "running…";
+	if (tool.isError === true) return "";
 
-	switch (name) {
-		case "read_file": {
-			const lines = done.reduce((total, tool) => total + tool.output.split("\n").length, 0);
-			return formatCount(lines, "line", "lines");
-		}
+	switch (tool.name) {
+		case "read_file":
+			return formatCount(tool.output.split("\n").length, "line", "lines");
 		case "grep": {
-			if (done.every((tool) => tool.output === GREP_NO_MATCHES)) return "no matches";
+			if (tool.output === GREP_NO_MATCHES) return "no matches";
 			let matches = 0;
 			const files = new Set<string>();
-			for (const tool of done) {
-				for (const line of tool.output.split("\n")) {
-					const match = GREP_MATCH_LINE.exec(line);
-					if (!match) continue;
-					matches++;
-					if (match[1]) files.add(match[1]);
-				}
+			for (const line of tool.output.split("\n")) {
+				const match = GREP_MATCH_LINE.exec(line);
+				if (!match) continue;
+				matches++;
+				if (match[1]) files.add(match[1]);
 			}
 			return `${formatCount(matches, "match", "matches")} in ${formatCount(files.size, "file", "files")}`;
 		}
 		case "write_file":
 		case "edit_file": {
-			let adds = 0;
-			let deletes = 0;
-			let hasDiff = false;
-			for (const tool of done) {
-				if (!tool.diff) continue;
-				hasDiff = true;
-				const stats = diffStats(tool.diff);
-				adds += stats.adds;
-				deletes += stats.deletes;
-			}
-			return hasDiff ? `+${adds} −${deletes}` : formatCount(done.length, "file", "files");
+			if (!tool.diff) return "";
+			const stats = diffStats(tool.diff);
+			return `+${stats.adds} −${stats.deletes}`;
 		}
-		case "bash":
-			return done.length > 1 ? formatCount(done.length, "command", "commands") : "";
-		case "delegate":
-			return done.length > 1 ? formatCount(done.length, "task", "tasks") : "";
 		default:
 			return "";
 	}
-}
-
-/**
- * Collapse a turn's tool calls into one row per tool (first-seen order) for
- * compact display: the unique targets it touched plus an aggregated result
- * stat. A long burst stays one row per tool instead of a row per call.
- */
-export function groupToolCalls(toolCalls: UIToolCall[]): ToolCallGroup[] {
-	const names: string[] = [];
-	const grouped = new Map<string, UIToolCall[]>();
-	for (const tool of toolCalls) {
-		const existing = grouped.get(tool.name);
-		if (existing) existing.push(tool);
-		else {
-			names.push(tool.name);
-			grouped.set(tool.name, [tool]);
-		}
-	}
-
-	return names.map((name) => {
-		const calls = grouped.get(name) ?? [];
-		return {
-			name,
-			label: getToolDisplayName(name),
-			args: compactToolArgs(name, calls),
-			stat: groupStat(name, calls),
-			errorCount: calls.filter((tool) => tool.isError === true).length,
-			calls,
-		};
-	});
 }
 
 // ---------------------------------------------------------------------------

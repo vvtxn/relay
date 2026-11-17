@@ -23,9 +23,10 @@ import { theme } from "#/tui/theme.ts";
 import { VERSION } from "../version.ts";
 import { StatusBar } from "./components/status-bar.tsx";
 import { BootError, BootScreen } from "./components/boot-screen.tsx";
-import { MessageView } from "./components/chat.tsx";
+import { MessageView, ToolBundleView } from "./components/chat.tsx";
 import { DiffViewer } from "./components/diff.tsx";
 import { buildDiffRows, collectSessionDiffs, type DiffRows, type SessionDiff } from "./diffs.ts";
+import { bundleTranscript } from "./tool-bundle.ts";
 
 // ---------------------------------------------------------------------------
 // Commands
@@ -445,7 +446,7 @@ function App({ onQuit, initialSessionId, info }: AppProps) {
 	// consumes them) and before cancel (so Escape closes the overlay instead of
 	// priming run cancellation). Navigation keys fall through to the overlay's
 	// ScrollArea; every other key is swallowed so the composer can't type behind it.
-	const diffViewerKey = getHookKey("diff-viewer-");
+	const diffViewerKey = getHookKey();
 	if (!hasCleanup(diffViewerKey)) {
 		const cleanup = inputManager.onKeyGlobal((event) => {
 			if (event.ctrl && event.key === "o") {
@@ -470,7 +471,7 @@ function App({ onQuit, initialSessionId, info }: AppProps) {
 			}
 			if (event.ctrl && event.key === "c") return false;
 
-			if (["up", "down", "pageup", "pagedown", "wheelup", "wheeldown"].includes(event.key)) return false;
+			if (["up", "down", "pageup", "pagedown", "wheelup", "wheeldown", "mouse"].includes(event.key)) return false;
 			return true;
 		});
 		setCleanup(diffViewerKey, cleanup);
@@ -478,7 +479,7 @@ function App({ onQuit, initialSessionId, info }: AppProps) {
 
 	// Double-Esc to cancel the running turn (only when loading, so it doesn't
 	// conflict with vim mode toggle)
-	const cancelKey = getHookKey("cancel-");
+	const cancelKey = getHookKey();
 	if (!hasCleanup(cancelKey)) {
 		let lastEsc = 0;
 		let escTimer: ReturnType<typeof setTimeout> | null = null;
@@ -512,6 +513,7 @@ function App({ onQuit, initialSessionId, info }: AppProps) {
 	}
 
 	const messages = viewMessages(stream.value);
+	const blocks = bundleTranscript(messages);
 	const hasDiffs = messages.some((message) => message.toolCalls?.some((call) => call.diff !== undefined));
 	const viewer = diffViewer.value;
 	const viewerDiff = viewer?.diffs[viewer.index];
@@ -541,9 +543,13 @@ function App({ onQuit, initialSessionId, info }: AppProps) {
 					focused={viewer === null}
 					autoScroll
 				>
-					{messages.map((msg, i) => (
-						<MessageView key={i} msg={msg} />
-					))}
+					{blocks.map((block) =>
+						block.kind === "message" ? (
+							<MessageView key={`${sessionId.value}:m${block.start}`} msg={block.msg} />
+						) : (
+							<ToolBundleView key={`${sessionId.value}:b${block.start}`} calls={block.calls} />
+						),
+					)}
 				</ScrollArea>
 			)}
 

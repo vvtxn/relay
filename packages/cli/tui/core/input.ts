@@ -1,12 +1,26 @@
 import process from "node:process";
-import { batch, signal } from "@preact/signals-core";
+import { batch } from "@preact/signals-core";
 import { CSI } from "#/tui/core/ansi.ts";
 
+/** Decoded SGR mouse report. Coordinates are 0-based terminal cells. */
+export interface MouseInfo {
+	x: number;
+	y: number;
+	/** Pressed/released button; `null` for motion-free reports and wheel events. */
+	button: "left" | "middle" | "right" | null;
+	action: "press" | "release" | "move";
+	shift: boolean;
+	ctrl: boolean;
+	meta: boolean;
+}
+
 export interface KeyEvent {
+	/** Key name. Mouse reports use `mouse` (or `wheelup`/`wheeldown`/…) and carry `mouse`. */
 	key: string;
 	ctrl: boolean;
 	meta: boolean;
 	shift: boolean;
+	mouse?: MouseInfo;
 }
 
 export type KeyHandler = (event: KeyEvent) => boolean | void;
@@ -35,19 +49,63 @@ function isReplyPrefix(body: string): boolean {
 	);
 }
 
-/** Parse an SGR mouse report (`\x1b[<button;x;yM` / `m`) into a key event. */
+/** SGR modifier bits (`button` field). */
+const MOUSE_SHIFT = 4;
+const MOUSE_META = 8;
+const MOUSE_CTRL = 16;
+/** Motion-while-pressed flag; set by terminals with button-event tracking. */
+const MOUSE_MOTION = 32;
+/** Wheel flag: the low two bits then select the wheel direction. */
+const MOUSE_WHEEL = 64;
+/** Extra-button flag (buttons 8–11, e.g. side thumb buttons). */
+const MOUSE_EXTRA = 128;
+
+const MOUSE_BUTTONS = ["left", "middle", "right"] as const;
+const WHEEL_KEYS = ["wheelup", "wheeldown", "wheelleft", "wheelright"] as const;
+
+/**
+ * Parse an SGR mouse report (`\x1b[<button;x;yM` press/motion, `…m` release).
+ * Wheel reports keep their `wheelup`/`wheeldown` keys so the existing scroll
+ * handlers keep working, and every report carries coordinates for the
+ * renderer's pointer router.
+ */
 function parseMouse(seq: string): KeyEvent {
 	const final = seq[seq.length - 1];
-	const params = seq.slice(3, -1).split(";");
-	const button = Number.parseInt(params[0] ?? "", 10);
-	if (final === "M" && button === 64) return { key: "wheelup", ctrl: false, meta: false, shift: false };
-	if (final === "M" && button === 65) return { key: "wheeldown", ctrl: false, meta: false, shift: false };
-	return { key: "mouse", ctrl: false, meta: false, shift: false };
+	const [codePart = "", xPart = "", yPart = ""] = seq.slice(3, -1).split(";");
+	const code = Number.parseInt(codePart, 10);
+	// SGR coordinates are 1-based; the render grid is 0-based.
+	const x = Math.max(0, (Number.parseInt(xPart, 10) || 1) - 1);
+	const y = Math.max(0, (Number.parseInt(yPart, 10) || 1) - 1);
+	const shift = (code & MOUSE_SHIFT) !== 0;
+	const meta = (code & MOUSE_META) !== 0;
+	const ctrl = (code & MOUSE_CTRL) !== 0;
+	const action = final === "m" ? "release" : (code & MOUSE_MOTION) !== 0 ? "move" : "press";
+	const buttonIndex = code & 0b11;
+
+	if ((code & MOUSE_WHEEL) !== 0) {
+		return {
+			key: WHEEL_KEYS[buttonIndex] ?? "wheelup",
+			ctrl,
+			meta,
+			shift,
+			mouse: { x, y, button: null, action: "press", ctrl, meta, shift },
+		};
+	}
+
+	const button = (code & MOUSE_EXTRA) === 0 ? (MOUSE_BUTTONS[buttonIndex] ?? null) : null;
+	return {
+		key: "mouse",
+		ctrl,
+		meta,
+		shift,
+		mouse: { x, y, button, action, ctrl, meta, shift },
+	};
 }
 
 class InputManager {
 	private globalHandlers: Set<KeyHandler> = new Set();
 	private handlers: Set<KeyHandler> = new Set();
+	private pointerHandler: ((event: KeyEvent) => boolean) | null = null;
 	private isRawMode = false;
 	/** Incomplete escape sequence carried across stdin chunks. */
 	private pending = "";
@@ -83,21 +141,29 @@ class InputManager {
 		// signal write.
 		batch(() => {
 			for (const seq of sequences) {
-				const event = this.parseKey(seq);
-				let consumed = false;
-				for (const handler of this.globalHandlers) {
-					if (handler(event) === true) {
-						consumed = true;
-						break;
-					}
-				}
-				if (consumed) continue;
-				for (const handler of this.handlers) {
-					if (handler(event) === true) break;
-				}
+				this.dispatch(this.parseKey(seq));
 			}
 		});
 	};
+
+	/**
+	 * Global handlers first (an open palette/overlay is modal), then the
+	 * renderer's click targets, then the focus-registered key handlers.
+	 */
+	private dispatch(event: KeyEvent) {
+		for (const handler of this.globalHandlers) {
+			if (handler(event) === true) return;
+		}
+		if (event.mouse && this.pointerHandler?.(event) === true) return;
+		for (const handler of this.handlers) {
+			if (handler(event) === true) return;
+		}
+	}
+
+	/** Install (or clear) the mounted renderer's pointer router. */
+	setPointerHandler(handler: ((event: KeyEvent) => boolean) | null): void {
+		this.pointerHandler = handler;
+	}
 
 	splitSequences(data: string): string[] {
 		const input = this.pending + data;
@@ -248,5 +314,3 @@ export const inputManager = new InputManager();
 export function useInput(handler: KeyHandler) {
 	return inputManager.onKey(handler);
 }
-
-export const cursorPosition = signal<{ x: number; y: number } | null>(null);

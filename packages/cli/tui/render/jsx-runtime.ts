@@ -21,6 +21,14 @@ export function Fragment({ children }: { children?: VNode | VNode[] }): VNode {
 
 declare global {
 	namespace JSX {
+		/**
+		 * Attributes accepted by every element/component. The custom runtime
+		 * passes `key` through in props (it is not stripped like React's), and
+		 * reconciliation reads it from there.
+		 */
+		interface IntrinsicAttributes {
+			key?: string | number;
+		}
 		interface IntrinsicElements {
 			box: BoxProps;
 			text: TextProps;

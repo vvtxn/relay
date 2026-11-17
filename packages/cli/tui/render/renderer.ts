@@ -1,9 +1,10 @@
 import { effect } from "@preact/signals-core";
 import process from "node:process";
 import Y from "yoga-layout";
-import { inputManager } from "../core/input.ts";
+import { inputManager, type KeyEvent } from "../core/input.ts";
 import { Terminal, type TerminalOptions } from "../core/terminal.ts";
 import { ElementType, getElement } from "./elements/index.ts";
+import { scrollbarMetrics, type ScrollbarMetrics, scrollContentHeight } from "./elements/scroll-area.ts";
 import { clearPendingCursor, getPendingCursor } from "./elements/text-input.ts";
 import {
 	clearCurrentStore,
@@ -23,18 +24,57 @@ interface ReconcileCtx {
 	consumed: Set<number>;
 }
 
+/** Inclusive terminal-cell rectangle used to clip pointer hits inside scroll areas. */
+interface ClipRect {
+	left: number;
+	top: number;
+	right: number;
+	bottom: number;
+}
+
+/** A hit on a scroll area's bar: painted geometry plus the controlled setter. */
+interface ScrollbarTarget {
+	metrics: ScrollbarMetrics;
+	onChange: (offset: number) => void;
+}
+
+/** Result of a hit walk: a clickable instance, or a scrollbar grab. */
+interface PointerTarget {
+	instance: Instance;
+	scrollbar?: ScrollbarTarget;
+}
+
+/** Active scrollbar drag; geometry is snapshotted at press time. */
+interface ScrollbarDrag {
+	onChange: (offset: number) => void;
+	trackTop: number;
+	trackHeight: number;
+	thumbHeight: number;
+	maxScroll: number;
+	/** Row within the thumb where the pointer grabbed it (centered for track clicks). */
+	grabOffset: number;
+}
+
 /**
- * Shallow prop compare ignoring `children` and `key`: children are matched
- * separately by reconciliation and never affect an element's own Yoga style.
- * Gates redundant re-application of Yoga layout setters — the dominant cost
- * when large trees re-commit with unchanged props.
+ * True when a prop takes part in layout. `children`/`key` are matched
+ * separately by reconciliation, and callbacks are render-only (no layout
+ * handler reads them), so a fresh closure must not force Yoga FFI churn.
+ */
+function isLayoutProp(key: string, value: unknown): boolean {
+	return key !== "children" && key !== "key" && typeof value !== "function";
+}
+
+/**
+ * Shallow prop compare for layout purposes. Gates redundant re-application of
+ * Yoga layout setters — the dominant cost when large trees re-commit with
+ * unchanged props.
  */
 function layoutPropsEqual(a: object, b: object): boolean {
 	if (a === b) return true;
 	const aProps = a as Record<string, unknown>;
 	const bProps = b as Record<string, unknown>;
-	const aKeys = Object.keys(aProps).filter((k) => k !== "children" && k !== "key");
-	const bKeys = Object.keys(bProps).filter((k) => k !== "children" && k !== "key");
+	const aKeys = Object.keys(aProps).filter((k) => isLayoutProp(k, aProps[k]));
+	const bKeys = Object.keys(bProps).filter((k) => isLayoutProp(k, bProps[k]));
 	if (aKeys.length !== bKeys.length) return false;
 	for (const k of aKeys) {
 		if (aProps[k] !== bProps[k]) return false;
@@ -62,6 +102,8 @@ export class Renderer {
 	terminal: Terminal;
 	rootInstance: Instance | null = null;
 	disposeEffect: (() => void) | null = null;
+	/** Scrollbar currently being dragged by the pointer, if any. */
+	private scrollbarDrag: ScrollbarDrag | null = null;
 
 	constructor(terminal: Terminal) {
 		this.terminal = terminal;
@@ -77,6 +119,124 @@ export class Renderer {
 
 		const { render } = getElement(instance.type);
 		return render(instance, context);
+	}
+
+	/**
+	 * Route a pointer report: presses toggle click targets or grab a scrollbar,
+	 * motion while grabbed drags it, releases end the drag. Rectangles come from
+	 * the same computed Yoga geometry the element handlers paint with;
+	 * `scrollArea` descendants are shifted by the scroll offset and clipped to
+	 * the viewport. Later-painted children win, and the deepest match beats its
+	 * ancestors, so a click on row text bubbles to the row's `onClick`.
+	 */
+	hitTest(event: KeyEvent): boolean {
+		const mouse = event.mouse;
+		if (!mouse || !this.rootInstance) return false;
+
+		if (mouse.action === "release") {
+			const wasDragging = this.scrollbarDrag !== null;
+			this.scrollbarDrag = null;
+			return wasDragging;
+		}
+
+		if (mouse.action === "move") {
+			if (!this.scrollbarDrag) return false;
+			this.dragScrollbar(mouse.y);
+			return true;
+		}
+
+		// Only primary-button presses are clicks: wheel reports also use
+		// `action: "press"`, and scroll motion must never activate targets.
+		if (mouse.button !== "left") return false;
+
+		// A fresh press ends any stale drag (e.g. the release was lost).
+		this.scrollbarDrag = null;
+		const target = this.findPointerTarget(this.rootInstance, 0, 0, mouse.x, mouse.y, null);
+		if (!target) return false;
+
+		if (target.scrollbar) {
+			this.startScrollbarDrag(target.scrollbar, mouse.y);
+			return true;
+		}
+
+		target.instance.props.onClick?.(event);
+		return true;
+	}
+
+	private startScrollbarDrag(bar: ScrollbarTarget, y: number) {
+		const { metrics, onChange } = bar;
+		const onThumb = y >= metrics.thumbTop && y < metrics.thumbTop + metrics.thumbHeight;
+		this.scrollbarDrag = {
+			onChange,
+			trackTop: metrics.top,
+			trackHeight: metrics.trackHeight,
+			thumbHeight: metrics.thumbHeight,
+			maxScroll: metrics.maxScroll,
+			// Grab the thumb where it was pressed; a track click centers it.
+			grabOffset: onThumb ? y - metrics.thumbTop : Math.floor(metrics.thumbHeight / 2),
+		};
+		this.dragScrollbar(y);
+	}
+
+	private dragScrollbar(y: number) {
+		const drag = this.scrollbarDrag;
+		if (!drag) return;
+		const travel = drag.trackHeight - drag.thumbHeight;
+		if (travel <= 0) return;
+		const thumbTop = Math.max(0, Math.min(travel, y - drag.trackTop - drag.grabOffset));
+		const offset = Math.round((thumbTop / travel) * drag.maxScroll);
+		drag.onChange(Math.max(0, Math.min(drag.maxScroll, offset)));
+	}
+
+	private findPointerTarget(
+		instance: Instance,
+		parentX: number,
+		parentY: number,
+		x: number,
+		y: number,
+		clip: ClipRect | null,
+	): PointerTarget | null {
+		if (clip && (x < clip.left || x > clip.right || y < clip.top || y > clip.bottom)) return null;
+
+		const left = parentX + Math.round(instance.yogaNode.getComputedLeft());
+		const top = parentY + Math.round(instance.yogaNode.getComputedTop());
+		const width = Math.round(instance.yogaNode.getComputedWidth());
+		const height = Math.round(instance.yogaNode.getComputedHeight());
+
+		const isScrollArea = instance.type === ElementType.SCROLL_AREA;
+		if (isScrollArea && instance.props.scrollbar) {
+			const onChange = instance.props.onScrollOffsetChange;
+			if (onChange) {
+				const metrics = scrollbarMetrics({
+					x: left,
+					y: top,
+					width,
+					height,
+					contentHeight: scrollContentHeight(instance),
+					scrollOffset: instance.props.scrollOffset ?? 0,
+				});
+				if (metrics && x === metrics.x && y >= metrics.top && y < metrics.top + metrics.trackHeight) {
+					return { instance, scrollbar: { metrics, onChange } };
+				}
+			}
+		}
+
+		const childY = isScrollArea ? top - Math.max(0, instance.props.scrollOffset ?? 0) : top;
+		const childClip = isScrollArea ? { left, top, right: left + width - 1, bottom: top + height - 1 } : clip;
+
+		for (let i = instance.children.length - 1; i >= 0; i--) {
+			const child = instance.children[i];
+			if (!child) continue;
+			const found = this.findPointerTarget(child, left, childY, x, y, childClip);
+			if (found) return found;
+		}
+
+		const inside = x >= left && x < left + width && y >= top && y < top + height;
+		// Positioned overlays (DiffViewer, CommandPalette) cover earlier siblings,
+		// so a click inside an overlay that missed its inner targets must stop here
+		// instead of piercing through to the background tree.
+		const isOverlay = instance.type === ElementType.BOX && instance.props.position === "absolute";
+		return inside && (instance.props.onClick !== undefined || isOverlay) ? { instance } : null;
 	}
 
 	freeYogaNodes(instance: Instance) {
@@ -546,6 +706,7 @@ export class Renderer {
 	}
 
 	render(createVNode: () => VNode) {
+		inputManager.setPointerHandler((event) => this.hitTest(event));
 		this.disposeEffect = effect(() => {
 			// Track terminal size so a resize triggers a fresh layout + repaint.
 			// oxlint-disable-next-line no-unused-expressions -- signal read for tracking
@@ -555,6 +716,8 @@ export class Renderer {
 	}
 
 	unmount() {
+		inputManager.setPointerHandler(null);
+		this.scrollbarDrag = null;
 		if (this.disposeEffect) {
 			this.disposeEffect();
 			this.disposeEffect = null;
@@ -571,7 +734,6 @@ export function render(createVNode: () => VNode, terminal: Terminal) {
 	const renderer = new Renderer(terminal);
 	renderer.render(createVNode);
 	return {
-		rerender: () => renderer.render(createVNode),
 		unmount: () => renderer.unmount(),
 	};
 }

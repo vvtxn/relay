@@ -9,14 +9,14 @@ export {
 	diffStats,
 	entriesToUIMessages,
 	getToolDisplayName,
-	getToolDisplayOutput,
-	groupToolCalls,
+	isPendingToolCall,
 	parseDiff,
 	parseDiffLines,
 	summarizeToolArgs,
 	TOOL_DISPLAY_NAMES,
+	toolCallStat,
 } from "./display.ts";
-export type { DiffFile, DiffHunk, DiffLine, ToolCallGroup, UIMessage, UIToolCall } from "./display.ts";
+export type { DiffFile, DiffHunk, DiffLine, UIMessage, UIToolCall } from "./display.ts";
 
 export { estimateMessageTokens, estimateTokens, trimContext } from "./context.ts";
 export type { TrimOptions } from "./context.ts";

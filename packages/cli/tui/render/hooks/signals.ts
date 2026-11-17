@@ -36,7 +36,11 @@ function getCurrentStore(): HookStore {
 	return currentStore;
 }
 
-export function getHookKey(_prefix = ""): number {
+/**
+ * Reserve the next hook slot in the current component and return its index.
+ * Slots are positional, so callers must invoke hooks in a stable order.
+ */
+export function getHookKey(): number {
 	const store = getCurrentStore();
 	return store.hookIndex++;
 }
