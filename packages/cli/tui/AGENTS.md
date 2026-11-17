@@ -12,7 +12,8 @@ tui/
 │   ├── ansi.ts                 # ANSI escape code constants (cursor, screen, mouse)
 │   ├── terminal.ts             # Terminal buffer, rendering, cursor control
 │   ├── terminal-palette.ts     # OSC 10/11/4 palette query, DA1 fence, reply parsing
-│   ├── input.ts                # Keyboard input handling (drops OSC/private-CSI replies)
+│   ├── input.ts                # Keyboard + SGR mouse input handling (drops OSC/private-CSI replies)
+│   ├── pointer.ts              # Pointer router installed by the mounted renderer
 │   └── primitives/             # Drawing primitives
 │       ├── color.ts            # Color parsing, ANSI conversion, bg inheritance
 │       ├── char-width.ts       # wcwidth (combining/wide) + ANSI-aware measurement
@@ -114,6 +115,24 @@ accents, falling back to ANSI slot names when only fg/bg answered. `terminal-pal
 OSC 10/11/4 queries fenced by DA1, raw-mode stdin, BEL/ST reply parsing, and a bounded timeout. `input.ts` discards
 late OSC replies and private CSI device reports so they can never become keystrokes.
 
+### Pointer Input
+
+Mouse reporting is always on (`?1002h` button-event + SGR `?1006h`, emitted by `Terminal`) so presses, releases, and
+motion-while-dragging all arrive. `input.ts` decodes each report into `KeyEvent.mouse` (0-based cell coordinates,
+button, `press`/`release`/`move`, modifiers) and keeps wheel reports on the existing `wheelup`/`wheeldown` keys so the
+scroll handlers are unchanged. Dispatch order is: global key handlers (an open palette/overlay is modal) → the
+renderer's pointer router → focus-registered key handlers.
+
+`Renderer.hitTest()` walks the instance tree using the same computed Yoga rectangles the element handlers paint with,
+shifts `scrollArea` descendants by their scroll offset, clips them to the viewport, and picks the deepest match from
+the last-painted child. Any element accepts `onClick` (`BaseProps`), so a click on row text bubbles to the row's box;
+only primary-button presses dispatch clicks (wheel/motion/release never activate `onClick`). A scroll area with
+`scrollbar` also exposes its bar as a pointer target: a press on the thumb grabs it, a track click jumps and grabs, and
+motion while grabbed drags it (the renderer snapshots the bar geometry at press time and calls
+`onScrollOffsetChange`). `scrollbarMetrics()` in `elements/scroll-area.ts` is shared by the painter and hit test so the
+interactive cells are exactly the painted ones. `pointer.ts` is the leaf module that carries the active hit test —
+`input.ts` never imports the renderer.
+
 ### Core Classes
 
 #### `Terminal` (core/terminal.ts)
@@ -123,7 +142,8 @@ late OSC replies and private CSI device reports so they can never become keystro
 - Tracks cursor state to avoid redundant escape sequences
 - Exposes a reactive `size` signal so renderers re-layout + repaint on resize
 - Batches contiguous changed cells into runs when flushing (few cursor moves, styles only on change)
-- Enables SGR mouse reporting (wheel events) and OSC 11 background theming; both restored on dispose
+- Enables SGR mouse reporting (wheel, button clicks, and drag motion) and OSC 11 background theming; both restored on
+  dispose
 - Methods: `render(positions)`, `dispose()`, `drain()`, `showCursor()`, `hideCursor()`
 
 #### `Renderer` (render/renderer.ts)
@@ -141,7 +161,8 @@ The framework uses `@preact/signals-core` for reactivity:
 - `useSignal(initialValue)` - Creates a persistent signal (cached by component/hook index)
 - `useSignalEffect(fn)` - Runs effect when signals change, with cleanup support
 - Signals trigger automatic re-renders when `.value` changes
-- Hook lifecycle managed via `resetHooks()`, `nextComponent()`, `cleanupEffects()`
+- Each function component owns a `HookStore` (`createHookStore`/`setCurrentStore` during invocation, disposed with its
+  instance), and slots are positional indexes into that store
 
 ### Layout System (Yoga)
 
@@ -171,15 +192,16 @@ Text styling via `<Text>` props:
 
 All exported from `render/components.tsx`:
 
-- **`Box`** - Flexbox container with background, border (optional rounded corners and a top-edge label), padding, and
-  positioning support
+- **`Box`** - Flexbox container with background, border (optional rounded corners and a top-edge label), padding,
+  positioning support, and pointer handling via `onClick`
 - **`Text`** - Styled text with color, bold, italic, underline, strikethrough
 - **`TextInput`** - Text input field with cursor, placeholder, and vim mode support. Soft-wraps at word boundaries
   (spaces kept at line ends, cursor mapped by source offsets), auto-grows up to `maxLines` and scrolls internally past
   that; `height` pins a fixed viewport instead
 - **`Spinner`** - Animated spinner (default 80ms interval, 10 frames)
 - **`ScrollArea`** - Scrollable container (extends BoxProps; shares Box's per-edge padding resolution and the scrollbar
-  gutter) with `autoScroll`, `scrollbar`, and `scrollStep`
+  gutter) with `autoScroll`, `scrollbar`, and `scrollStep`. The bar is interactive: clicking the track jumps, and
+  dragging the thumb (or the grabbed track) scrolls; wheel/keys keep scrolling the focused area.
 - **`Markdown`** - Renders markdown content as styled Text lines via `parseMarkdown()` (memoized: parse + format are
   cached per content string)
 - **`memo(component)`** - Marks a pure presentational component so the renderer skips re-invocation while its props are
@@ -229,7 +251,8 @@ All exported from `render/hooks/index.ts`:
 - Element handlers are pure functions: `(instance, context) => Position[]`
 - Layout handlers are pure functions: `(instance) => void` (mutates Yoga node)
 - Elements are registered via `registerElement(type, { render, layout, hasChildren })` in `render/elements/index.ts`
-- Hooks use global index tracking (reset per render cycle via `resetHooks()`)
+- Hooks are positional slots in the component's `HookStore` (`getHookKey()` / `useSignal()`); hook order must stay
+  stable across renders of the same component instance
 - Use `toAnsi(colorName)` from `#/tui/core/primitives/color.ts` for color conversion
 - All coordinates are integer character positions
 - Text editing logic is centralized in `hooks/text-utils.ts` (exports `TextState` and operations like `insertChar`,

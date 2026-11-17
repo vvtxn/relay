@@ -54,6 +54,58 @@ export const ScrollAreaLayout: LayoutHandler<ScrollAreaInstance> = (instance) =>
 	}
 };
 
+/** Natural height of a scroll area's content (unclipped, before the scroll offset). */
+export function scrollContentHeight(instance: ScrollAreaInstance): number {
+	let contentHeight = 0;
+	for (const child of instance.children) {
+		const childBottom =
+			Math.round(child.yogaNode.getComputedTop()) + Math.round(child.yogaNode.getComputedHeight());
+		if (childBottom > contentHeight) contentHeight = childBottom;
+	}
+	return contentHeight;
+}
+
+/** Painted scrollbar geometry, in absolute terminal cells. */
+export interface ScrollbarMetrics {
+	/** Absolute column of the bar. */
+	x: number;
+	/** Absolute row of the track's first cell. */
+	top: number;
+	trackHeight: number;
+	/** Absolute row of the thumb's first cell. */
+	thumbTop: number;
+	thumbHeight: number;
+	maxScroll: number;
+	/** Clamped scroll offset the geometry was computed from. */
+	offset: number;
+}
+
+/**
+ * Resolve the scrollbar's screen geometry from a box rect and content metrics.
+ * Shared by the painter and the renderer's pointer hit test so clicks map to
+ * exactly the cells that were drawn. Returns null when there is nothing to
+ * scroll or the viewport has no rows.
+ */
+export function scrollbarMetrics(args: {
+	x: number;
+	y: number;
+	width: number;
+	height: number;
+	contentHeight: number;
+	scrollOffset: number;
+}): ScrollbarMetrics | null {
+	const trackHeight = args.height;
+	const maxScroll = Math.max(0, args.contentHeight - trackHeight);
+	if (maxScroll <= 0 || trackHeight <= 0) return null;
+
+	const offset = Math.max(0, Math.min(args.scrollOffset, maxScroll));
+	const thumbHeight = Math.max(1, Math.floor((trackHeight / args.contentHeight) * trackHeight));
+	const thumbTravel = Math.max(0, trackHeight - thumbHeight);
+	const thumbTop = args.y + (thumbTravel > 0 ? Math.floor((offset / maxScroll) * thumbTravel) : 0);
+
+	return { x: args.x + args.width - 1, top: args.y, trackHeight, thumbTop, thumbHeight, maxScroll, offset };
+}
+
 export const ScrollAreaElement: ElementHandler<ScrollAreaInstance> = (instance, context): Position[] => {
 	const x = context.parentX + Math.round(instance.yogaNode.getComputedLeft());
 	const y = context.parentY + Math.round(instance.yogaNode.getComputedTop());
@@ -70,12 +122,7 @@ export const ScrollAreaElement: ElementHandler<ScrollAreaInstance> = (instance, 
 	const clipTop = y;
 	const clipBottom = y + h - 1;
 
-	let contentHeight = 0;
-	for (const child of instance.children) {
-		const childBottom =
-			Math.round(child.yogaNode.getComputedTop()) + Math.round(child.yogaNode.getComputedHeight());
-		if (childBottom > contentHeight) contentHeight = childBottom;
-	}
+	const contentHeight = scrollContentHeight(instance);
 
 	const viewportHeight = clipBottom - clipTop + 1;
 	const maxScroll = Math.max(0, contentHeight - viewportHeight);
@@ -103,17 +150,21 @@ export const ScrollAreaElement: ElementHandler<ScrollAreaInstance> = (instance, 
 	}
 
 	const scrollbarPositions: Position[] = [];
-	if (instance.props.scrollbar && contentHeight > viewportHeight) {
-		const barX = x + w - 1;
-		const trackHeight = viewportHeight;
-		const thumbHeight = Math.max(1, Math.floor((viewportHeight / contentHeight) * trackHeight));
-		const thumbTop =
-			maxScroll > 0 ? clipTop + Math.floor((scrollOffset / maxScroll) * (trackHeight - thumbHeight)) : clipTop;
-
-		for (let row = clipTop; row <= clipBottom; row++) {
-			const isThumb = row >= thumbTop && row < thumbTop + thumbHeight;
+	const bar = instance.props.scrollbar
+		? scrollbarMetrics({
+				x,
+				y,
+				width: w,
+				height: h,
+				contentHeight,
+				scrollOffset,
+			})
+		: null;
+	if (bar) {
+		for (let row = bar.top; row < bar.top + bar.trackHeight; row++) {
+			const isThumb = row >= bar.thumbTop && row < bar.thumbTop + bar.thumbHeight;
 			scrollbarPositions.push({
-				x: barX,
+				x: bar.x,
 				y: row,
 				text: isThumb ? applyAnsi("█", { fg: theme.textDim }) : applyAnsi("░", { fg: theme.border }),
 			});

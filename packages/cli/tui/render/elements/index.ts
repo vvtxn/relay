@@ -35,9 +35,4 @@ export function getElement(type: string): ElementDefinition {
 	return element;
 }
 
-/** Check if element type is registered */
-export function hasElement(type: string): boolean {
-	return type in elements;
-}
-
 export { BoxElement, ScrollAreaElement, SpinnerElement, TextElement, TextInputElement };
