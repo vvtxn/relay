@@ -30,7 +30,7 @@ tui/
 │   ├── memo.ts                 # memo() — pure-component skip for the reconciler
 │   ├── hooks/                  # React-like hooks
 │   │   ├── index.ts            # Re-exports all hooks
-│   │   ├── signals.ts          # useSignal, useSignalEffect, hook lifecycle
+│   │   ├── signals.ts          # useSignal, useSignalEffect, useLatest, hook lifecycle
 │   │   ├── text-input.ts       # useTextInput hook (with vim mode support)
 │   │   ├── text-utils.ts       # Shared text editing utilities (TextState)
 │   │   ├── scroll-area.ts      # useScrollArea hook
@@ -159,10 +159,36 @@ through to background siblings.
 The framework uses `@preact/signals-core` for reactivity:
 
 - `useSignal(initialValue)` - Creates a persistent signal (cached by component/hook index)
-- `useSignalEffect(fn)` - Runs effect when signals change, with cleanup support
+- `useSignalEffect(fn)` - Runs the body immediately at mount and re-runs it when signals read inside it change; the
+  optional returned cleanup runs before each re-run and at unmount
+- `useLatest(value)` - A signal holding the latest-render value; the live-ref escape hatch for effects and
+  once-registered handlers
 - Signals trigger automatic re-renders when `.value` changes
 - Each function component owns a `HookStore` (`createHookStore`/`setCurrentStore` during invocation, disposed with its
   instance), and slots are positional indexes into that store
+
+#### Effect Timing and Closure Liveness
+
+- Effect bodies run **immediately at mount**, synchronously inside the render commit's flush — closer to a mid-commit
+  layout effect than a post-commit one. A signal write during mount re-enters the same flush and converges before
+  paint.
+- Effects re-run only when signals **read inside the callback** change. Every render stores its callback and re-runs
+  invoke the latest one, so effects never observe a stale first-render closure.
+- **Props are not reactive.** An effect cannot see a prop change unless it reads the value through `useLatest` (a
+  changed primitive re-runs the effect; an unchanged one is an `Object.is` no-op) or through a signal. `<Spinner>` is
+  the reference example.
+- Writes during render are allowed only when they converge: render writes a `useLatest` ref before paint reads it, so
+  a paint-time read subscribes the root effect at the post-write version. Idempotent (`Object.is`-equal) writes end
+  the cycle; never write a fresh identity that a mounted effect reads on every run.
+
+#### Registering Input Handlers
+
+Two idioms, pick by lifecycle:
+
+- Signal-driven lifecycles (SSE subscribe/reconnect, timers) use `useSignalEffect`, whose cleanup owns teardown.
+- Once-only input registrations use the explicit `getHookKey()` + `if (!hasCleanup(key))` + `setCleanup(key, cleanup)`
+  block. The handler closure is intentionally frozen at registration; it must reach changing state through signals or
+  a `useLatest` ref, and registration-time locals (e.g. the double-Esc timer state) persist by design.
 
 ### Layout System (Yoga)
 
@@ -215,6 +241,7 @@ All exported from `render/hooks/index.ts`:
 
 - **`useSignal(initialValue)`** - Persistent signal, cached per component/hook index
 - **`useSignalEffect(fn)`** - Reactive effect with cleanup support
+- **`useLatest(value)`** - Signal holding the latest-render value (live ref for effects and once-registered handlers)
 - **`useTextInput(options)`** - Text input state management with optional vim mode (`VimMode: "NORMAL" | "INSERT"`)
 - **`useScrollArea(options)`** - Scroll state management with keyboard input and auto-scroll. The input handler is
   registered once but reads options through a live ref, so `focused`/`scrollStep` changes (e.g. focus moving to a
@@ -253,6 +280,8 @@ All exported from `render/hooks/index.ts`:
 - Elements are registered via `registerElement(type, { render, layout, hasChildren })` in `render/elements/index.ts`
 - Hooks are positional slots in the component's `HookStore` (`getHookKey()` / `useSignal()`); hook order must stay
   stable across renders of the same component instance
+- Effects and once-registered input handlers reach changing values through signals or `useLatest(value)` (a live ref
+  written every render); a captured first-render closure is invisible until the value actually changes
 - Use `toAnsi(colorName)` from `#/tui/core/primitives/color.ts` for color conversion
 - All coordinates are integer character positions
 - Text editing logic is centralized in `hooks/text-utils.ts` (exports `TextState` and operations like `insertChar`,

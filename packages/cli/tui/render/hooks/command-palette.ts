@@ -1,6 +1,6 @@
 import type { Signal } from "@preact/signals-core";
 import { inputManager, type KeyEvent } from "../../core/input.ts";
-import { getHookKey, hasCleanup, setCleanup, useSignal } from "./signals.ts";
+import { getHookKey, hasCleanup, setCleanup, useLatest, useSignal } from "./signals.ts";
 
 export interface CommandPaletteItem {
 	id: string;
@@ -41,8 +41,7 @@ export function useCommandPalette(options: UseCommandPaletteOptions) {
 	const query = useSignal("");
 	const cursor = useSignal(0);
 	const selectedIndex = useSignal(0);
-	const optionsRef = useSignal(options);
-	optionsRef.value = options;
+	const optionsRef = useLatest(options);
 
 	const maxResults = options.maxResults ?? 10;
 	const matches = filterItems(options.items, query.value, maxResults);

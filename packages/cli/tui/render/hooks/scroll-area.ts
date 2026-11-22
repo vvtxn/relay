@@ -1,7 +1,7 @@
 import type { Signal } from "@preact/signals-core";
 import { useInput } from "#/tui/core/input.ts";
 import type { ScrollMetrics } from "../types/index.ts";
-import { useSignal, useSignalEffect } from "./signals.ts";
+import { useLatest, useSignal, useSignalEffect } from "./signals.ts";
 
 export interface ScrollAreaState {
 	scrollOffset: Signal<number>;
@@ -21,8 +21,7 @@ export function useScrollArea(options?: {
 	// The input handler is registered once, so route it through a signal that
 	// always holds the latest options: focus can move to a modal while this
 	// ScrollArea stays mounted (e.g. the diff review overlay).
-	const optionsRef = useSignal(options);
-	optionsRef.value = options;
+	const optionsRef = useLatest(options);
 
 	useSignalEffect(() => {
 		return useInput((event) => {

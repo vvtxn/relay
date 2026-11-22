@@ -1,4 +1,4 @@
-export { useSignal, useSignalEffect } from "./signals.ts";
+export { useLatest, useSignal, useSignalEffect } from "./signals.ts";
 export type { HookStore } from "./signals.ts";
 export { type ScrollAreaState, useScrollArea } from "./scroll-area.ts";
 export { useTextInput, type VimMode } from "./text-input.ts";

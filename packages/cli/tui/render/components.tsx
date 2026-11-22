@@ -12,7 +12,7 @@ import {
 import { toAnsi } from "#/tui/core/primitives/color.ts";
 import { type MarkdownSegment, parseMarkdown } from "#/tui/core/primitives/parse-markdown.ts";
 import { useScrollArea } from "./hooks/scroll-area.ts";
-import { useSignal, useSignalEffect } from "./hooks/signals.ts";
+import { useLatest, useSignal, useSignalEffect } from "./hooks/signals.ts";
 import { memo } from "./memo.ts";
 import type {
 	BoxProps,
@@ -41,12 +41,14 @@ export function TextInput(props: TextInputProps) {
 
 export function Spinner(props: SpinnerProps) {
 	const frame = useSignal(0);
-	const interval = props.interval ?? 80;
+	// Read through a live ref: a changed interval re-runs the effect (restarting
+	// the timer), while unchanged primitive writes stay `Object.is` no-ops.
+	const interval = useLatest(props.interval ?? 80);
 
 	useSignalEffect(() => {
 		const timer = setInterval(() => {
 			frame.value = (frame.value + 1) % SPINNER_FRAME_COUNT;
-		}, interval);
+		}, interval.value);
 		return () => clearInterval(timer);
 	});
 
