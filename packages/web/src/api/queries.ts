@@ -34,6 +34,13 @@ export function modelsQuery(preset: string) {
 	});
 }
 
+/** Models from every connected subscription, for the in-thread selector. */
+export const modelCatalogQuery = queryOptions({
+	queryKey: queryKeys.modelCatalog,
+	queryFn: () => runApi((api) => api.listModelCatalog()),
+	staleTime: 10 * 60_000,
+});
+
 export const workspaceQuery = queryOptions({
 	queryKey: queryKeys.workspace,
 	queryFn: () => runApi((api) => api.workspace()),
@@ -62,6 +69,11 @@ export function sessionQuery(id: string) {
 		queryKey: queryKeys.session(id),
 		queryFn: () => runApi((api) => api.openSession(id)),
 		enabled: id.length > 0,
+		// The live stream owns this session while it is attached, and leaving a
+		// session invalidates the snapshot explicitly. Treat cached data as
+		// fresh so opening a child route (the settings overlay) never triggers a
+		// blocking refetch of the parent route's loader.
+		staleTime: Infinity,
 	});
 }
 
