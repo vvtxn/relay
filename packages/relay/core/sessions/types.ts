@@ -1,5 +1,6 @@
 import type { Effect } from "effect";
 import type { ToolCall } from "#/api/types.ts";
+import type { LlmModelSelection } from "../llm-presets.ts";
 import type { StoreError } from "../effect.ts";
 
 // ---------------------------------------------------------------------------
@@ -12,6 +13,8 @@ export interface SessionHeader {
 	id: string;
 	timestamp: string;
 	cwd: string;
+	/** Sticky model override for this thread, when it differs from the account default. */
+	model?: LlmModelSelection;
 	tokens?: number;
 	cost?: number;
 }
@@ -43,10 +46,22 @@ export interface ToolResultEntry extends EntryBase {
 	diff?: string;
 }
 
-export type Entry = MessageEntry | ToolResultEntry;
+/** Transcript record of a per-thread model switch. */
+export interface ModelChangeEntry extends EntryBase {
+	type: "model_change";
+	preset: string;
+	model: string;
+	label: string;
+	contextTokens?: number;
+}
+
+export type Entry = MessageEntry | ToolResultEntry | ModelChangeEntry;
 
 /** Entry input before the store assigns its id and timestamp. */
-export type NewEntry = Omit<MessageEntry, "id" | "timestamp"> | Omit<ToolResultEntry, "id" | "timestamp">;
+export type NewEntry =
+	| Omit<MessageEntry, "id" | "timestamp">
+	| Omit<ToolResultEntry, "id" | "timestamp">
+	| Omit<ModelChangeEntry, "id" | "timestamp">;
 
 // ---------------------------------------------------------------------------
 // In-memory session
@@ -98,6 +113,10 @@ export interface SessionHandle {
 	setTokens(tokens: number): void;
 	getCost(): number;
 	setCost(cost: number): void;
+	/** Sticky model override for this thread, when set. */
+	getModel(): LlmModelSelection | null;
+	/** Set (or with null, clear) the thread's model override; persisted on flush. */
+	setModel(model: LlmModelSelection | null): void;
 	flush(): Effect.Effect<void, StoreError>;
 }
 

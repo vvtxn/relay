@@ -15,7 +15,7 @@ core/
 ├── assets/fonts/         # Bundled font files + license (see its README for the swap procedure)
 ├── paths.ts              # relayDir(), homeDir() helpers
 ├── context.ts            # Context trimming (token estimation, turn-based truncation)
-├── llm-presets.ts        # Browser-pure provider presets, model lists, and selection resolution
+├── llm-presets.ts        # Browser-pure provider presets, model lists, auth styles, and selection resolution
 ├── effect.ts             # Shared Effect helpers: attempt, causeMessage, StoreError, storeEffect
 ├── env.ts                # scrubbedAgentEnv(): credential-free environment for tool subprocesses
 ├── database.ts           # Shared libSQL client factory (local file or Turso) used by every store
@@ -194,12 +194,16 @@ the prompt per run with its box/host context.
   Each owner/workspace is capped at `maxSessionsPerWorkspace` (`0` = unlimited; local default). With a finite limit,
   persisting a user message atomically deletes older sessions and their entries, and `pruneAll()` trims pre-existing
   overflow at startup.
-- `FileSessionStore` preserves the JSONL implementation for fallback tooling (also Effect-facing)
-- Session ownership and workspace are explicit in `SessionScope`
+- `FileSessionStore` preserves the JSONL implementation for fallback tooling (also Effect-facing).
+- Session headers carry an optional sticky `model` (`{ preset, model, contextTokens? }`) next to tokens/cost, so a
+  thread's model switch survives a server restart. A `model_change` transcript entry records each switch; it is skipped
+  when converting entries to provider messages and rendered as a system notice by clients.
+- Session ownership and workspace are explicit in `SessionScope`.
 - `authenticate()` and the auth store interfaces (`UserStore`, `UserDirectory`, `AuthSessionStore`, `UserSettingsStore`)
-  follow the same contract; `ready` is an Effect on every store
-- `UserSettingsStore` (auth/settings*.ts) is the one place the LLM API key lives: encrypted at rest (AES-256-GCM under a
-  master key, owner-bound AAD), local files by default, database optional, with `getApiKey` the only plaintext path
+  follow the same contract; `ready` is an Effect on every store.
+- `UserSettingsStore` (auth/settings*.ts) owns the default selection plus **per-preset credentials**: API keys or
+  OAuth tokens, encrypted at rest (AES-256-GCM under a master key, owner-bound AAD), local files by default, database
+  optional. `getCredential(userId, preset)` is the plaintext path; status reads expose only masked hints/expiry.
 
 ### Workspace Helpers (`workspace.ts`)
 

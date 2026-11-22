@@ -4,12 +4,10 @@
  * This module is browser-pure: the web settings page imports it directly, and
  * the server imports the same definitions for validation and resolution.
  *
- * Adding a provider (ChatGPT subscription, Copilot, ...) is a new entry in
- * {@link llmPresets}: the adapter (`provider` + `baseURL`), how it
- * authenticates (`auth`), any static request headers, an optional session
- * header, and an optional live catalog. The settings storage, API, and UI do
- * not need to change. Only `auth: "api-key"` is offered today; OAuth-style
- * presets can be added later without reshaping the stored selection.
+ * A preset describes how to reach a service (`provider`, optional `api` wire
+ * format, `baseURL`), how it authenticates (`auth`, plus `oauth` metadata for
+ * subscription sign-in), and the models it offers. Adding a service is a data
+ * change; credentials live in the per-user settings store, one per preset.
  */
 
 import type { ProviderKind } from "#/api/types.ts";
@@ -21,10 +19,13 @@ export const CUSTOM_PRESET_ID = "custom";
 
 /** OpenCode Go gateway (subscription usage; requires a session header). */
 export const OPENCODE_GO_BASE_URL = "https://opencode.ai/inference/go/openai/v1";
-/** OpenCode Console pay-as-you-go gateway. */
-export const OPENCODE_CONSOLE_BASE_URL = "https://opencode.ai/inference/openai/v1";
 /** OpenCode's public model catalog (also lists each model's context size). */
 export const OPENCODE_CATALOG_URL = "https://opencode.ai/inference/v1/models";
+
+/** Claude subscription API (Claude Code OAuth tokens). */
+export const CLAUDE_BASE_URL = "https://api.anthropic.com/v1";
+/** ChatGPT subscription backend used by Codex clients (Responses API). */
+export const CHATGPT_BASE_URL = "https://chatgpt.com/backend-api/codex";
 
 /** One selectable model in a preset's picker. */
 export interface LlmModelOption {
@@ -34,8 +35,24 @@ export interface LlmModelOption {
 	contextTokens?: number;
 }
 
-/** How a preset authenticates. Only `api-key` is implemented; `oauth` is reserved. */
+/** A model choice that can override the account default for one thread. */
+export interface LlmModelSelection {
+	preset: string;
+	model: string;
+	/** Context window of the chosen model, learned from the catalog. */
+	contextTokens?: number;
+}
+
+/** How a preset authenticates. */
 export type LlmAuthKind = "api-key" | "oauth";
+
+/** Wire format spoken by an OpenAI-backed endpoint. */
+export type LlmApi = "chat-completions" | "responses";
+
+/** Subscription sign-in metadata for OAuth presets. */
+export interface LlmOAuthConfig {
+	provider: "anthropic" | "openai";
+}
 
 /**
  * A provider preset. `provider` selects the wire adapter; everything else is
@@ -46,10 +63,14 @@ export interface LlmPreset {
 	label: string;
 	/** Wire format spoken by the endpoint. */
 	provider: ProviderKind;
+	/** OpenAI wire format; defaults to `chat-completions`. */
+	api?: LlmApi;
 	/** Base URL passed to the provider adapter. */
 	baseURL: string;
-	/** Credential model. Unsupported kinds are filtered out of the settings UI. */
+	/** Credential model. */
 	auth: LlmAuthKind;
+	/** OAuth application used by the subscription sign-in flow. */
+	oauth?: LlmOAuthConfig;
 	/** Extra static headers sent with every request. */
 	headers?: Record<string, string>;
 	/** Header that receives a stable conversation id (e.g. `x-opencode-session`). */
@@ -88,17 +109,25 @@ export interface LlmDefaults {
 	contextTokens: number;
 }
 
+/** How a resolved preset authenticates its requests. */
+export type LlmAuthStyle = "x-api-key" | "bearer";
+
 /** A selection resolved against presets and server defaults. */
 export interface ResolvedLlm {
 	preset: string;
 	label: string;
 	provider: ProviderKind;
+	api: LlmApi;
 	baseURL: string;
 	model: string;
+	/** Display label for the chosen model. */
+	modelLabel: string;
 	/** Effective trim budget: the smaller of the server cap and the model window. */
 	contextTokens: number;
 	headers: Record<string, string>;
 	sessionHeader: string | null;
+	authStyle: LlmAuthStyle;
+	oauthProvider: LlmOAuthConfig["provider"] | null;
 }
 
 export const DEFAULT_LLM_SELECTION: LlmSelection = {
@@ -146,29 +175,27 @@ const OPENCODE_GO_MODELS: readonly LlmModelOption[] = [
 	{ id: "hy3", label: "Hy3" },
 ];
 
-/** Curated Console (pay-as-you-go) models; the live catalog refines this list. */
-const OPENCODE_CONSOLE_MODELS: readonly LlmModelOption[] = [
-	{ id: "deepseek-v4.1-flash", label: "DeepSeek V4.1 Flash" },
-	{ id: "glm-5.3", label: "GLM-5.3" },
-	{ id: "kimi-k3", label: "Kimi K3" },
-	{ id: "minimax-m3", label: "MiniMax M3" },
-	{ id: "qwen3.8-max", label: "Qwen3.8 Max" },
-	{ id: "claude-sonnet-5-5", label: "Claude Sonnet 5.5" },
-	{ id: "claude-opus-5-5", label: "Claude Opus 5.5" },
-	{ id: "claude-haiku-5-5", label: "Claude Haiku 5.5" },
-	{ id: "gpt-6.1-sol", label: "GPT 6.1 Sol" },
-	{ id: "gemini-4-argon", label: "Gemini 4 Argon" },
-	{ id: "grok-4.7", label: "Grok 4.7" },
+/** Claude models served by a Claude subscription (Claude Code OAuth). */
+const CLAUDE_MODELS: readonly LlmModelOption[] = [
+	{ id: "claude-opus-5-5", label: "Claude Opus 5.5", contextTokens: 200_000 },
+	{ id: "claude-sonnet-5-5", label: "Claude Sonnet 5.5", contextTokens: 200_000 },
+	{ id: "claude-haiku-5-5", label: "Claude Haiku 5.5", contextTokens: 200_000 },
+	{ id: "claude-opus-5", label: "Claude Opus 5", contextTokens: 200_000 },
+	{ id: "claude-sonnet-5", label: "Claude Sonnet 5", contextTokens: 200_000 },
+	{ id: "claude-haiku-4-5", label: "Claude Haiku 4.5", contextTokens: 200_000 },
 ];
 
-/** Direct Anthropic API models. */
-const ANTHROPIC_MODELS: readonly LlmModelOption[] = [
-	{ id: "claude-sonnet-5-5", label: "Claude Sonnet 5.5", contextTokens: 200_000 },
-	{ id: "claude-opus-5-5", label: "Claude Opus 5.5", contextTokens: 200_000 },
-	{ id: "claude-haiku-5-5", label: "Claude Haiku 5.5", contextTokens: 200_000 },
-	{ id: "claude-sonnet-5", label: "Claude Sonnet 5", contextTokens: 200_000 },
-	{ id: "claude-opus-5", label: "Claude Opus 5", contextTokens: 200_000 },
-	{ id: "claude-haiku-4-5", label: "Claude Haiku 4.5", contextTokens: 200_000 },
+/**
+ * Codex-capable ChatGPT models. The subscription backend evolves quickly, so
+ * other model ids are still allowed (the curated list is a fallback).
+ */
+const CHATGPT_MODELS: readonly LlmModelOption[] = [
+	{ id: "gpt-5.3-codex", label: "GPT-5.3 Codex", contextTokens: 400_000 },
+	{ id: "gpt-5.3-codex-mini", label: "GPT-5.3 Codex Mini", contextTokens: 400_000 },
+	{ id: "gpt-5.2-codex", label: "GPT-5.2 Codex", contextTokens: 400_000 },
+	{ id: "gpt-5.1-codex", label: "GPT-5.1 Codex", contextTokens: 400_000 },
+	{ id: "gpt-5.1-codex-mini", label: "GPT-5.1 Codex Mini", contextTokens: 400_000 },
+	{ id: "gpt-5.1-codex-max", label: "GPT-5.1 Codex Max", contextTokens: 400_000 },
 ];
 
 /**
@@ -189,34 +216,27 @@ export const llmPresets: readonly LlmPreset[] = [
 		hint: "Uses your OpenCode Go subscription. Only the models listed in your plan draw from its allowance.",
 	},
 	{
-		id: "opencode",
-		label: "OpenCode Console",
-		provider: "openai",
-		baseURL: OPENCODE_CONSOLE_BASE_URL,
-		auth: "api-key",
-		sessionHeader: "x-opencode-session",
-		catalog: { url: OPENCODE_CATALOG_URL, kind: "opencode" },
-		models: OPENCODE_CONSOLE_MODELS,
-		hint: "Pay-as-you-go Console balance. Free-tier models are not available outside OpenCode.",
-	},
-	{
-		id: "openrouter",
-		label: "OpenRouter",
-		provider: "openai",
-		baseURL: "https://openrouter.ai/api/v1",
-		auth: "api-key",
-		catalog: { url: "https://openrouter.ai/api/v1/models", kind: "openrouter" },
-		models: [{ id: "deepseek/deepseek-v4.1-flash", label: "DeepSeek V4.1 Flash" }],
-		hint: "Any OpenRouter model; the picker is filled from OpenRouter's public catalog.",
-	},
-	{
-		id: "anthropic",
-		label: "Anthropic",
+		id: "claude",
+		label: "Claude",
 		provider: "anthropic",
-		baseURL: "https://api.anthropic.com/v1",
-		auth: "api-key",
-		models: ANTHROPIC_MODELS,
-		hint: "Direct Anthropic API key.",
+		baseURL: CLAUDE_BASE_URL,
+		auth: "oauth",
+		oauth: { provider: "anthropic" },
+		headers: { "anthropic-beta": "oauth-2025-04-20" },
+		models: CLAUDE_MODELS,
+		hint: "Sign in with your Claude Pro or Max plan. Models bill to your Claude subscription.",
+	},
+	{
+		id: "chatgpt",
+		label: "ChatGPT",
+		provider: "openai",
+		api: "responses",
+		baseURL: CHATGPT_BASE_URL,
+		auth: "oauth",
+		oauth: { provider: "openai" },
+		headers: { "OpenAI-Beta": "responses=experimental", originator: "codex_cli_rs" },
+		models: CHATGPT_MODELS,
+		hint: "Sign in with your ChatGPT plan. Codex-capable models bill to your subscription.",
 	},
 ];
 
@@ -226,9 +246,15 @@ export function getLlmPreset(id: string): LlmPreset | undefined {
 	return PRESET_BY_ID.get(id);
 }
 
-/** Presets the settings UI may offer (only API-key auth is implemented). */
+/** Presets the settings UI offers. */
 export function availableLlmPresets(): readonly LlmPreset[] {
-	return llmPresets.filter((preset) => preset.auth === "api-key");
+	return llmPresets;
+}
+
+/** True when a preset needs a stored credential before it can run. */
+export function presetNeedsCredential(preset: LlmPreset | undefined): boolean {
+	if (!preset) return false;
+	return preset.auth === "api-key" || preset.auth === "oauth";
 }
 
 /** The pseudo-preset representing the server's configured default. */
@@ -265,6 +291,11 @@ function smallestContext(serverCap: number, modelContext: number | null | undefi
 	return Math.min(serverCap, modelContext);
 }
 
+/** Auth style a preset's adapter should use. */
+export function authStyleFor(preset: LlmPreset | undefined): LlmAuthStyle {
+	return preset?.auth === "oauth" ? "bearer" : "x-api-key";
+}
+
 /**
  * Resolves a persisted selection into the concrete provider request settings.
  * Unknown presets fall back to the server default, so a removed preset cannot
@@ -279,11 +310,15 @@ export function resolveLlmSelection(selection: LlmSelection, defaults: LlmDefaul
 			preset: CUSTOM_PRESET_ID,
 			label: "Custom endpoint",
 			provider: selection.provider ?? defaults.provider,
+			api: "chat-completions",
 			baseURL,
 			model: selection.model ?? defaults.model,
+			modelLabel: selection.model ?? defaults.model,
 			contextTokens: smallestContext(defaults.contextTokens, selection.contextTokens),
 			headers: {},
 			sessionHeader: sessionHeaderFor(undefined, baseURL),
+			authStyle: "x-api-key",
+			oauthProvider: null,
 		};
 	}
 
@@ -293,11 +328,15 @@ export function resolveLlmSelection(selection: LlmSelection, defaults: LlmDefaul
 			preset: DEFAULT_PRESET_ID,
 			label: "Server default",
 			provider: defaults.provider,
+			api: "chat-completions",
 			baseURL: defaults.baseURL,
 			model: defaults.model,
+			modelLabel: defaults.model,
 			contextTokens: defaults.contextTokens,
 			headers: {},
 			sessionHeader: sessionHeaderFor(undefined, defaults.baseURL),
+			authStyle: "x-api-key",
+			oauthProvider: null,
 		};
 	}
 
@@ -307,10 +346,28 @@ export function resolveLlmSelection(selection: LlmSelection, defaults: LlmDefaul
 		preset: preset.id,
 		label: preset.label,
 		provider: preset.provider,
+		api: preset.api ?? "chat-completions",
 		baseURL: preset.baseURL,
 		model,
+		modelLabel: curated?.label ?? model,
 		contextTokens: smallestContext(defaults.contextTokens, selection.contextTokens ?? curated?.contextTokens),
 		headers: preset.headers ?? {},
 		sessionHeader: sessionHeaderFor(preset, preset.baseURL),
+		authStyle: authStyleFor(preset),
+		oauthProvider: preset.oauth?.provider ?? null,
 	};
+}
+
+/** Resolves a preset + model override (used for per-thread model switches). */
+export function resolveModelSelection(selection: LlmModelSelection, defaults: LlmDefaults): ResolvedLlm {
+	return resolveLlmSelection(
+		{
+			preset: selection.preset,
+			provider: null,
+			baseURL: null,
+			model: selection.model,
+			contextTokens: selection.contextTokens ?? null,
+		},
+		defaults,
+	);
 }

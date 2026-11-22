@@ -10,7 +10,7 @@ import { Effect } from "effect";
 import type { HttpServerRequest, HttpServerResponse } from "effect/http";
 import { USER_AGENT } from "@vvtxn/relay/api/headers.ts";
 import type { LlmModelOption } from "@vvtxn/relay/core/llm-presets.ts";
-import type { ModelsResponse } from "@vvtxn/client/protocol.ts";
+import type { ModelCatalogResponse, ModelGroup, ModelsResponse } from "@vvtxn/client/protocol.ts";
 import { BadRequestError, json, requestUrl } from "./http.ts";
 import type { RequestServices } from "./services.ts";
 import { presetInfo } from "./llm.ts";
@@ -52,22 +52,43 @@ export function handleListModels(
 ): Effect.Effect<HttpServerResponse.HttpServerResponse, BadRequestError> {
 	return Effect.gen(function* () {
 		const presetId = requestUrl(request).searchParams.get("preset")?.trim() ?? "";
-		if (!presetId) return yield* Effect.fail(new BadRequestError("A preset id is required"));
+		if (!presetId) {
+			// No preset: every connected subscription, for the in-thread selector.
+			const connections = yield* services.userSettings.listCredentials(services.user.id);
+			const groups: ModelGroup[] = [];
+			for (const connection of connections) {
+				const preset = presetInfo(services.config, connection.preset);
+				if (!preset) continue;
+				const { models, source } = yield* catalogModels(preset).pipe(
+					Effect.catchCause(() => Effect.succeed({ models: [...preset.models], source: "curated" as const })),
+				);
+				groups.push({ preset: preset.id, label: preset.label, models, source });
+			}
+			return json({ groups } satisfies ModelCatalogResponse);
+		}
 
 		const preset = presetInfo(services.config, presetId);
 		if (!preset) return yield* Effect.fail(new BadRequestError(`Unknown preset "${presetId}"`));
+		const { models, source } = yield* catalogModels(preset).pipe(
+			Effect.catchCause(() => Effect.succeed({ models: [...preset.models], source: "curated" as const })),
+		);
+		return json({ preset: presetId, models, source } satisfies ModelsResponse);
+	});
+}
+
+/** Cached live catalog for one preset, with the curated list as fallback. */
+function catalogModels(
+	preset: NonNullable<ReturnType<typeof presetInfo>>,
+): Effect.Effect<{ models: LlmModelOption[]; source: ModelsResponse["source"] }, never> {
+	return Effect.gen(function* () {
 		const catalog = preset.catalog;
 		if (!catalog) {
-			return json({
-				preset: presetId,
-				models: [...preset.models],
-				source: "curated",
-			} satisfies ModelsResponse);
+			return { models: [...preset.models], source: "curated" as const };
 		}
 
 		const cached = cache.get(preset.id);
 		if (cached && Date.now() - cached.at < CACHE_TTL_MS) {
-			return json({ preset: presetId, models: cached.models, source: cached.source } satisfies ModelsResponse);
+			return { models: cached.models, source: cached.source };
 		}
 
 		const live = yield* Effect.tryPromise(() => fetchCatalogOnce(catalog)).pipe(
@@ -76,7 +97,7 @@ export function handleListModels(
 		const models = mergeCatalog(preset.id, preset.models, live);
 		const source: ModelsResponse["source"] = live ? "live" : "curated";
 		cache.set(preset.id, { at: Date.now(), models, source });
-		return json({ preset: presetId, models, source } satisfies ModelsResponse);
+		return { models, source };
 	});
 }
 

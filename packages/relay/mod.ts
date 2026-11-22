@@ -192,7 +192,12 @@ export type {
 
 // API providers
 export { isRetryableStatus, ProviderError, toProviderError } from "./api/errors.ts";
-export { AnthropicProvider, createProvider, OpenAICompletionsProvider } from "./api/providers/index.ts";
+export {
+	AnthropicProvider,
+	createProvider,
+	OpenAICompletionsProvider,
+	OpenAIResponsesProvider,
+} from "./api/providers/index.ts";
 
 // Provider presets + per-user LLM selection (browser-pure)
 export {
@@ -204,12 +209,16 @@ export {
 	isOpenCodeGoBaseURL,
 	llmPresets,
 	resolveLlmSelection,
+	resolveModelSelection,
 	sessionHeaderFor,
 } from "./core/llm-presets.ts";
 export type {
+	LlmApi,
 	LlmAuthKind,
+	LlmAuthStyle,
 	LlmDefaults,
 	LlmModelOption,
+	LlmModelSelection,
 	LlmPreset,
 	LlmSelection,
 	ResolvedLlm,

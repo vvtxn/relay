@@ -16,10 +16,16 @@ import type {
 import type { WorkspaceRejection } from "@vvtxn/relay/core/workspace.ts";
 import type { ToolResult } from "@vvtxn/relay/core/tools/index.ts";
 import type { ProviderKind, Usage } from "@vvtxn/relay/api/types.ts";
-import type { LlmDefaults, LlmModelOption, LlmPreset, LlmSelection } from "@vvtxn/relay/core/llm-presets.ts";
+import type {
+	LlmDefaults,
+	LlmModelOption,
+	LlmModelSelection,
+	LlmPreset,
+	LlmSelection,
+} from "@vvtxn/relay/core/llm-presets.ts";
 
 export type { RunPhase, SessionSummary };
-export type { LlmDefaults, LlmModelOption, LlmPreset, LlmSelection };
+export type { LlmDefaults, LlmModelOption, LlmModelSelection, LlmPreset, LlmSelection };
 
 // ---------------------------------------------------------------------------
 // REST payloads
@@ -71,25 +77,65 @@ export interface EffectiveLlm {
 }
 
 /**
- * Per-user settings. The API key itself is never returned — clients learn only
- * whether one is set for the selected preset and a short masked hint.
+ * Per-user settings. Credentials are never returned — clients learn only
+ * whether a connection is set, which kind it is, and a short masked hint.
  */
 export interface SettingsResponse {
-	apiKey: {
-		set: boolean;
-		/** Last few characters of the stored key, or null when unset. */
-		hint: string | null;
-	};
-	/** The stored selection. */
+	/** The stored default selection for new threads. */
 	llm: LlmSelection;
 	/** Server-wide fallbacks used by the `default` preset. */
 	defaults: LlmDefaults;
-	/** The concrete provider/model/context the next run will use. */
+	/** The concrete provider/model/context the next default run will use. */
 	effective: EffectiveLlm;
 	/** Presets this server offers, including `default` and optionally `custom`. */
 	presets: LlmPreset[];
+	/** Connected subscription/API-key credentials, one per preset. */
+	connections: ConnectionStatus[];
 	/** Whether a custom base URL may be configured. */
 	canCustom: boolean;
+}
+
+/** One stored credential, without the secret. */
+export interface ConnectionStatus {
+	preset: string;
+	kind: "api-key" | "oauth";
+	/** Short masked hint for keys; account/plan label for OAuth when known. */
+	hint: string | null;
+	/** Expiry (epoch ms) of an OAuth access token, when known. */
+	expiresAt: number | null;
+	/** ChatGPT account id attached to an OAuth credential, when known. */
+	accountId: string | null;
+}
+
+/** Begin a subscription sign-in. */
+export interface OAuthStartResponse {
+	/** Provider authorization URL to open in the browser. */
+	url: string;
+	/** "paste" asks the client to submit the displayed code; "redirect" completes automatically. */
+	flow: "paste" | "redirect";
+	/** Human instructions for the paste flow. */
+	instructions?: string;
+}
+
+/** Finish the paste flow: the code (optionally `code#state`) shown by the provider. */
+export interface OAuthCompleteRequest {
+	code: string;
+}
+
+/** Result of a completed subscription sign-in. */
+export interface OAuthCompleteResponse {
+	status: "connected";
+	preset: string;
+}
+
+/** Store an API key for one provider preset (does not change the default). */
+export interface SetConnectionRequest {
+	apiKey: string;
+}
+
+export interface SetConnectionResponse {
+	status: "connected";
+	preset: string;
 }
 
 /**
@@ -110,6 +156,18 @@ export interface ModelsResponse {
 	preset: string;
 	models: LlmModelOption[];
 	source: "live" | "curated";
+}
+
+/** Models offered by every connected preset, for the in-thread selector. */
+export interface ModelGroup {
+	preset: string;
+	label: string;
+	models: LlmModelOption[];
+	source: "live" | "curated";
+}
+
+export interface ModelCatalogResponse {
+	groups: ModelGroup[];
 }
 
 export interface SessionListResponse {
@@ -245,6 +303,11 @@ export interface FileListResponse {
 
 export interface SendMessageRequest {
 	content: string;
+	/**
+	 * Override the thread's model for this message. The selection sticks to the
+	 * session (and to its persisted header) until changed again.
+	 */
+	model?: LlmModelSelection;
 }
 
 export interface SendMessageResponse {
@@ -296,5 +359,12 @@ export type ServerEvent =
 	| { type: "tool_result"; id: string; result: ToolResult }
 	| { type: "message_complete"; usage?: Usage; tokens: number; cost: number }
 	| { type: "turn_complete" }
+	| {
+			type: "model_changed";
+			preset: string;
+			model: string;
+			label: string;
+			contextTokens?: number;
+	  }
 	| { type: "run_finished"; reason: "completed" | "cancelled" | "error" }
 	| { type: "error"; message: string };

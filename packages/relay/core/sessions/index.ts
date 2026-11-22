@@ -5,6 +5,7 @@ export { sessionDir, sessionsBaseDir } from "./paths.ts";
 export type {
 	Entry,
 	MessageEntry,
+	ModelChangeEntry,
 	NewEntry,
 	Session,
 	SessionHandle,

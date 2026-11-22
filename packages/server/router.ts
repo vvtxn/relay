@@ -57,6 +57,13 @@ import {
 	handleWorkspace,
 } from "./workspace.ts";
 import { handleGetSettings, handleUpdateSettings } from "./settings.ts";
+import {
+	handleOAuthComplete,
+	handleOAuthDisconnect,
+	handleOAuthStart,
+	handleRemoveConnection,
+	handleSetConnection,
+} from "./oauth-routes.ts";
 import { handleListModels } from "./models.ts";
 import { isLoopbackHost } from "./config.ts";
 
@@ -203,6 +210,34 @@ function withSessionId<E>(
 	});
 }
 
+/** Reads the current route's `:provider` path parameter. */
+function withProvider<E>(
+	build: (
+		provider: string,
+	) => Effect.Effect<HttpServerResponse.HttpServerResponse, E, HttpServerRequest.HttpServerRequest>,
+) {
+	return Effect.gen(function* () {
+		const params = yield* HttpRouter.params;
+		const provider = params.provider ?? "";
+		if (!provider) return error(404, "Not found");
+		return yield* build(provider);
+	});
+}
+
+/** Reads the current route's `:preset` path parameter. */
+function withPreset<E>(
+	build: (
+		preset: string,
+	) => Effect.Effect<HttpServerResponse.HttpServerResponse, E, HttpServerRequest.HttpServerRequest>,
+) {
+	return Effect.gen(function* () {
+		const params = yield* HttpRouter.params;
+		const preset = params.preset ?? "";
+		if (!preset) return error(404, "Not found");
+		return yield* build(preset);
+	});
+}
+
 /** The static root: an explicit override, or the built web app next to the source. */
 function staticRoot(services: ServerServices): string {
 	return services.config.staticDir ?? fileURLToPath(new URL("../web/dist/", import.meta.url));
@@ -294,6 +329,47 @@ export function createAppLayer(services: ServerServices) {
 				"GET",
 				"/api/models",
 				respond(authenticated(services, (rs) => withRequest((request) => handleListModels(rs, request)))),
+			);
+
+			// Subscription sign-in (Claude / ChatGPT OAuth)
+			yield* router.add(
+				"GET",
+				"/api/oauth/:provider/start",
+				respond(authenticated(services, (rs) => withProvider((provider) => handleOAuthStart(rs, provider)))),
+			);
+			yield* router.add(
+				"POST",
+				"/api/oauth/:provider/complete",
+				respond(
+					authenticated(services, (rs) =>
+						withProvider((provider) =>
+							withRequest((request) => handleOAuthComplete(rs, provider, request)),
+						),
+					),
+				),
+			);
+			yield* router.add(
+				"DELETE",
+				"/api/oauth/:provider",
+				respond(
+					authenticated(services, (rs) => withProvider((provider) => handleOAuthDisconnect(rs, provider))),
+				),
+			);
+
+			// Connections: per-preset API keys (OAuth credentials use the routes above)
+			yield* router.add(
+				"PUT",
+				"/api/connections/:preset",
+				respond(
+					authenticated(services, (rs) =>
+						withPreset((preset) => withRequest((request) => handleSetConnection(rs, preset, request))),
+					),
+				),
+			);
+			yield* router.add(
+				"DELETE",
+				"/api/connections/:preset",
+				respond(authenticated(services, (rs) => withPreset((preset) => handleRemoveConnection(rs, preset)))),
 			);
 
 			// Workspaces

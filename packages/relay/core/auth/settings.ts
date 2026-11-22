@@ -16,6 +16,7 @@ CREATE TABLE IF NOT EXISTS user_settings (
 	llm_model TEXT,
 	llm_context_tokens INTEGER,
 	llm_key_preset TEXT,
+	llm_credentials TEXT,
 	updated_at TEXT NOT NULL
 );
 `;
@@ -29,6 +30,7 @@ const ADDED_COLUMNS: ReadonlyArray<readonly [name: string, type: string]> = [
 	["llm_model", "TEXT"],
 	["llm_context_tokens", "INTEGER"],
 	["llm_key_preset", "TEXT"],
+	["llm_credentials", "TEXT"],
 ];
 
 /** The per-user LLM selection. Provider-independent: presets imply a provider
@@ -55,6 +57,67 @@ export interface UserLlmRecord {
 	/** Preset the stored key belongs to; `null` when no key is stored. */
 	keyPreset: string | null;
 	apiKey: string | null;
+}
+
+/** Credential kinds a preset can store. */
+export type LlmCredentialKind = "api-key" | "oauth";
+
+export interface ApiKeyCredential {
+	kind: "api-key";
+	apiKey: string;
+}
+
+/** Claude / ChatGPT subscription tokens. */
+export interface OAuthCredential {
+	kind: "oauth";
+	accessToken: string;
+	refreshToken: string | null;
+	/** Access-token expiry (epoch ms), when the provider reports one. */
+	expiresAt: number | null;
+	/** ChatGPT account id (from the id token), sent as `chatgpt-account-id`. */
+	accountId: string | null;
+}
+
+export type LlmCredential = ApiKeyCredential | OAuthCredential;
+
+/** Non-secret credential metadata for the settings UI. */
+export interface CredentialStatus {
+	preset: string;
+	kind: LlmCredentialKind;
+	hint: string | null;
+	expiresAt: number | null;
+	accountId: string | null;
+}
+
+/** Human-readable label for a connected account/key. */
+export function credentialLabel(credential: LlmCredential): string | null {
+	if (credential.kind === "api-key") return apiKeyHint(credential.apiKey);
+	return credential.accountId ?? "subscription";
+}
+
+/** Persisted credential metadata; `secret` holds the encrypted payload. */
+export interface StoredCredentialRecord {
+	kind: LlmCredentialKind;
+	secret: string;
+	hint: string | null;
+	expiresAt: number | null;
+	accountId: string | null;
+	updatedAt: string;
+}
+
+export function credentialStatusFrom(preset: string, record: StoredCredentialRecord): CredentialStatus {
+	return {
+		preset,
+		kind: record.kind,
+		hint: record.hint,
+		expiresAt: record.expiresAt,
+		accountId: record.accountId,
+	};
+}
+
+/** True when an OAuth access token is expired (or about to expire). */
+export function credentialExpired(credential: OAuthCredential, now = Date.now()): boolean {
+	return credential.expiresAt !== null && credential.expiresAt <= now + 60_000;
 }
 
 /** A stored selection plus key metadata (no decryption). */
@@ -95,6 +158,12 @@ export interface UserSettingsStore {
 	getLlmStatus(userId: string): Effect.Effect<UserLlmStatus, StoreError>;
 	/** Set the user's selection and, optionally, the key for that selection. */
 	setLlm(userId: string, patch: UserLlmPatch): Effect.Effect<void, StoreError>;
+	/** One preset's decrypted credential (API key or subscription tokens). */
+	getCredential(userId: string, preset: string): Effect.Effect<LlmCredential | null, StoreError>;
+	/** Store or (with null) remove a preset's credential. */
+	setCredential(userId: string, preset: string, credential: LlmCredential | null): Effect.Effect<void, StoreError>;
+	/** Non-secret metadata for every connected preset. */
+	listCredentials(userId: string): Effect.Effect<CredentialStatus[], StoreError>;
 }
 
 /** Last 4 characters only — enough to recognize a key without leaking it. */
@@ -155,11 +224,11 @@ export class DatabaseUserSettingsStore implements UserSettingsStore {
 			await this.schemaReady;
 			const row = await this.readRow(userId);
 			const settings = parseSettingsRow(row);
-			const stored = typeof row?.llm_api_key === "string" && row.llm_api_key.length > 0 ? row.llm_api_key : null;
+			const credential = await this.credentialFromRow(userId, row, settings.preset);
 			return {
 				settings,
-				keyPreset: stored ? effectiveKeyPreset(asString(row?.llm_key_preset)) : null,
-				apiKey: stored ? await this.cipher.decrypt(stored, userSettingsAad(userId)) : null,
+				keyPreset: credential ? settings.preset : null,
+				apiKey: credential?.kind === "api-key" ? credential.apiKey : null,
 			};
 		});
 	}
@@ -173,6 +242,50 @@ export class DatabaseUserSettingsStore implements UserSettingsStore {
 		});
 	}
 
+	getCredential(userId: string, preset: string): Effect.Effect<LlmCredential | null, StoreError> {
+		return storeEffect(async () => {
+			await this.schemaReady;
+			const row = await this.readRow(userId);
+			return await this.credentialFromRow(userId, row, preset);
+		});
+	}
+
+	setCredential(userId: string, preset: string, credential: LlmCredential | null): Effect.Effect<void, StoreError> {
+		return storeEffect(async () => {
+			await this.schemaReady;
+			const row = await this.readRow(userId);
+			const credentials = parseCredentialMap(row?.llm_credentials);
+			if (credential) credentials[preset] = await this.encryptCredential(userId, credential);
+			else delete credentials[preset];
+			await this.writeCredentials(userId, credentials, row);
+		});
+	}
+
+	listCredentials(userId: string): Effect.Effect<CredentialStatus[], StoreError> {
+		return storeEffect(async () => {
+			await this.schemaReady;
+			const row = await this.readRow(userId);
+			const credentials = parseCredentialMap(row?.llm_credentials);
+			const statuses = Object.entries(credentials).map(([preset, record]) =>
+				credentialStatusFrom(preset, record),
+			);
+			const legacy = asString(row?.llm_api_key);
+			if (legacy) {
+				const preset = effectiveKeyPreset(asString(row?.llm_key_preset));
+				if (!credentials[preset]) {
+					statuses.push({
+						preset,
+						kind: "api-key",
+						hint: asString(row?.llm_api_key_hint),
+						expiresAt: null,
+						accountId: null,
+					});
+				}
+			}
+			return statuses;
+		});
+	}
+
 	setLlm(userId: string, patch: UserLlmPatch): Effect.Effect<void, StoreError> {
 		return storeEffect(() => this.setLlmPromise(userId, patch));
 	}
@@ -181,27 +294,29 @@ export class DatabaseUserSettingsStore implements UserSettingsStore {
 		await this.schemaReady;
 		const row = await this.readRow(userId);
 		const current = parseSettingsRow(row);
+		const credentials = parseCredentialMap(row?.llm_credentials);
 
-		// Start from the stored key, then apply the patch/prest-change rules.
+		// Legacy single-key columns stay in sync for older clients, while the
+		// credentials map is the durable per-preset store.
 		let encrypted = asString(row?.llm_api_key);
 		let hint = asString(row?.llm_api_key_hint);
 		let keyPreset = encrypted ? effectiveKeyPreset(asString(row?.llm_key_preset)) : null;
 
 		if (patch.apiKey !== undefined) {
 			if (patch.apiKey === null) {
-				encrypted = null;
-				hint = null;
-				keyPreset = null;
+				delete credentials[patch.preset];
+				if (keyPreset === patch.preset) {
+					encrypted = null;
+					hint = null;
+					keyPreset = null;
+				}
 			} else {
-				encrypted = await this.cipher.encrypt(patch.apiKey, userSettingsAad(userId));
-				hint = apiKeyHint(patch.apiKey);
+				const record = await this.encryptCredential(userId, { kind: "api-key", apiKey: patch.apiKey });
+				credentials[patch.preset] = record;
+				encrypted = record.secret;
+				hint = record.hint;
 				keyPreset = patch.preset;
 			}
-		} else if (keyPreset !== null && keyPreset !== patch.preset) {
-			// Never reuse a credential against a different provider.
-			encrypted = null;
-			hint = null;
-			keyPreset = null;
 		}
 
 		const settings: UserLlmSettings = {
@@ -215,8 +330,8 @@ export class DatabaseUserSettingsStore implements UserSettingsStore {
 		await this.client.execute({
 			sql: `INSERT INTO user_settings (
 					user_id, llm_api_key, llm_api_key_hint, llm_preset, llm_provider, llm_base_url,
-					llm_model, llm_context_tokens, llm_key_preset, updated_at
-				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+					llm_model, llm_context_tokens, llm_key_preset, llm_credentials, updated_at
+				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 				ON CONFLICT(user_id) DO UPDATE SET
 					llm_api_key = excluded.llm_api_key,
 					llm_api_key_hint = excluded.llm_api_key_hint,
@@ -226,6 +341,7 @@ export class DatabaseUserSettingsStore implements UserSettingsStore {
 					llm_model = excluded.llm_model,
 					llm_context_tokens = excluded.llm_context_tokens,
 					llm_key_preset = excluded.llm_key_preset,
+					llm_credentials = excluded.llm_credentials,
 					updated_at = excluded.updated_at`,
 			args: [
 				userId,
@@ -237,6 +353,62 @@ export class DatabaseUserSettingsStore implements UserSettingsStore {
 				settings.model,
 				settings.contextTokens,
 				keyPreset,
+				Object.keys(credentials).length > 0 ? JSON.stringify(credentials) : null,
+				new Date().toISOString(),
+			],
+		});
+	}
+
+	/** Decrypts one preset's credential, falling back to a legacy single key. */
+	private async credentialFromRow(
+		userId: string,
+		row: Record<string, unknown> | undefined,
+		preset: string,
+	): Promise<LlmCredential | null> {
+		const record = parseCredentialMap(row?.llm_credentials)[preset];
+		if (record) return await this.decryptCredential(userId, record);
+		const legacy = asString(row?.llm_api_key);
+		if (!legacy) return null;
+		if (effectiveKeyPreset(asString(row?.llm_key_preset)) !== preset) return null;
+		return {
+			kind: "api-key",
+			apiKey: await this.cipher.decrypt(legacy, userSettingsAad(userId)),
+		};
+	}
+
+	private async encryptCredential(userId: string, credential: LlmCredential): Promise<StoredCredentialRecord> {
+		const hint = credentialKindHint(credential);
+		return {
+			kind: credential.kind,
+			secret: await this.cipher.encrypt(JSON.stringify(credential), userSettingsAad(userId)),
+			hint,
+			expiresAt: credential.kind === "oauth" ? credential.expiresAt : null,
+			accountId: credential.kind === "oauth" ? credential.accountId : null,
+			updatedAt: new Date().toISOString(),
+		};
+	}
+
+	private async decryptCredential(userId: string, record: StoredCredentialRecord): Promise<LlmCredential> {
+		const raw = await this.cipher.decrypt(record.secret, userSettingsAad(userId));
+		return parseCredentialPayload(raw, record.kind);
+	}
+
+	private async writeCredentials(
+		userId: string,
+		credentials: Record<string, StoredCredentialRecord>,
+		row: Record<string, unknown> | undefined,
+	): Promise<void> {
+		const current = parseSettingsRow(row);
+		await this.client.execute({
+			sql: `INSERT INTO user_settings (user_id, llm_preset, llm_credentials, updated_at)
+				VALUES (?, ?, ?, ?)
+				ON CONFLICT(user_id) DO UPDATE SET
+					llm_credentials = excluded.llm_credentials,
+					updated_at = excluded.updated_at`,
+			args: [
+				userId,
+				current.preset,
+				Object.keys(credentials).length > 0 ? JSON.stringify(credentials) : null,
 				new Date().toISOString(),
 			],
 		});
@@ -245,7 +417,7 @@ export class DatabaseUserSettingsStore implements UserSettingsStore {
 	private async readRow(userId: string): Promise<Record<string, unknown> | undefined> {
 		const result = (await this.client.execute({
 			sql: `SELECT llm_api_key, llm_api_key_hint, llm_preset, llm_provider, llm_base_url,
-					llm_model, llm_context_tokens, llm_key_preset
+					llm_model, llm_context_tokens, llm_key_preset, llm_credentials
 				FROM user_settings WHERE user_id = ?`,
 			args: [userId],
 		})) as unknown as { rows: Record<string, unknown>[] };
@@ -305,6 +477,15 @@ export function buildLlmStatus(options: {
 }
 
 export function statusFromRow(row: Record<string, unknown> | undefined, settings: UserLlmSettings): UserLlmStatus {
+	const record = parseCredentialMap(row?.llm_credentials)[settings.preset];
+	if (record) {
+		return {
+			settings,
+			keyPreset: settings.preset,
+			keySet: true,
+			hint: record.hint,
+		};
+	}
 	const hasKey = typeof row?.llm_api_key === "string" && row.llm_api_key.length > 0;
 	return buildLlmStatus({
 		hasKey,
@@ -312,4 +493,64 @@ export function statusFromRow(row: Record<string, unknown> | undefined, settings
 		hint: asString(row?.llm_api_key_hint),
 		settings,
 	});
+}
+
+/** Masked hint for a credential (never the secret itself). */
+function credentialKindHint(credential: LlmCredential): string | null {
+	if (credential.kind === "api-key") return apiKeyHint(credential.apiKey);
+	return credential.accountId ?? "subscription";
+}
+
+/** Parses the persisted JSON map of encrypted credentials. */
+export function parseCredentialMap(raw: unknown): Record<string, StoredCredentialRecord> {
+	if (typeof raw !== "string" || raw.length === 0) return {};
+	let parsed: unknown;
+	try {
+		parsed = JSON.parse(raw);
+	} catch {
+		return {};
+	}
+	return parseCredentialRecords(parsed);
+}
+
+/** Parses credential records from a decoded JSON object (file backend). */
+export function parseCredentialRecords(raw: unknown): Record<string, StoredCredentialRecord> {
+	if (typeof raw !== "object" || raw === null) return {};
+	const result: Record<string, StoredCredentialRecord> = {};
+	for (const [preset, value] of Object.entries(raw as Record<string, unknown>)) {
+		if (typeof value !== "object" || value === null) continue;
+		const record = value as Record<string, unknown>;
+		if (record.kind !== "api-key" && record.kind !== "oauth") continue;
+		if (typeof record.secret !== "string" || record.secret.length === 0) continue;
+		result[preset] = {
+			kind: record.kind,
+			secret: record.secret,
+			hint: typeof record.hint === "string" ? record.hint : null,
+			expiresAt: typeof record.expiresAt === "number" ? record.expiresAt : null,
+			accountId: typeof record.accountId === "string" ? record.accountId : null,
+			updatedAt: typeof record.updatedAt === "string" ? record.updatedAt : "",
+		};
+	}
+	return result;
+}
+
+/** Parses a decrypted credential payload. */
+export function parseCredentialPayload(raw: string, kind: LlmCredentialKind): LlmCredential {
+	const parsed = JSON.parse(raw) as Record<string, unknown>;
+	if (kind === "api-key") {
+		if (typeof parsed.apiKey !== "string" || parsed.apiKey.length === 0) {
+			throw new Error("Stored API key is malformed; re-enter it in Settings.");
+		}
+		return { kind: "api-key", apiKey: parsed.apiKey };
+	}
+	if (typeof parsed.accessToken !== "string" || parsed.accessToken.length === 0) {
+		throw new Error("Stored OAuth credential is malformed; reconnect the subscription in Settings.");
+	}
+	return {
+		kind: "oauth",
+		accessToken: parsed.accessToken,
+		refreshToken: typeof parsed.refreshToken === "string" ? parsed.refreshToken : null,
+		expiresAt: typeof parsed.expiresAt === "number" ? parsed.expiresAt : null,
+		accountId: typeof parsed.accountId === "string" ? parsed.accountId : null,
+	};
 }

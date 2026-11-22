@@ -5,7 +5,7 @@ import { CUSTOM_PRESET_ID, DEFAULT_PRESET_ID } from "@vvtxn/relay/core/llm-prese
 import type { StoreError } from "@vvtxn/relay/core/effect.ts";
 import type { UpdateSettingsRequest, SettingsResponse, StatusResponse } from "@vvtxn/client/protocol.ts";
 import type { RequestServices } from "./services.ts";
-import type { UserLlmStatus } from "@vvtxn/relay/core/auth/settings.ts";
+import type { CredentialStatus, UserLlmStatus } from "@vvtxn/relay/core/auth/settings.ts";
 import { BadRequestError, json, readJsonBody } from "./http.ts";
 import {
 	canUseCustomEndpoint,
@@ -22,13 +22,14 @@ const MAX_API_KEY_LENGTH = 512;
 const MIN_CONTEXT_TOKENS = 4_096;
 const MAX_CONTEXT_TOKENS = 5_000_000;
 
-/** Per-user settings: selection, key status, and the presets this server offers. */
+/** Per-user settings: selection, connections, and the presets this server offers. */
 export function handleGetSettings(
 	services: RequestServices,
 ): Effect.Effect<HttpServerResponse.HttpServerResponse, StoreError> {
 	return Effect.gen(function* () {
 		const status = yield* services.userSettings.getLlmStatus(services.user.id);
-		return json(settingsPayload(services, status));
+		const connections = yield* services.userSettings.listCredentials(services.user.id);
+		return json(settingsPayload(services, status, connections));
 	});
 }
 
@@ -96,6 +97,16 @@ export function handleUpdateSettings(
 			...(keyPatch !== undefined ? { apiKey: keyPatch } : {}),
 		});
 
+		// A custom key is bound to the host it was entered for. Changing the
+		// endpoint without supplying a new key retires the old credential
+		// instead of sending it somewhere new.
+		if (isCustom && keyPatch === undefined) {
+			const before = current.settings;
+			if (before.provider !== provider || before.baseURL !== baseURL) {
+				yield* services.userSettings.setCredential(services.user.id, CUSTOM_PRESET_ID, null);
+			}
+		}
+
 		return json({ status: "ok" } satisfies StatusResponse);
 	});
 }
@@ -114,14 +125,14 @@ function parseApiKey(value: UpdateSettingsRequest["apiKey"]): ParsedApiKey {
 	return { value: trimmed.length > 0 ? trimmed : null };
 }
 
-function settingsPayload(services: RequestServices, status: UserLlmStatus): SettingsResponse {
+function settingsPayload(
+	services: RequestServices,
+	status: UserLlmStatus,
+	connections: CredentialStatus[],
+): SettingsResponse {
 	const config = services.config;
 	const resolved = resolveSelection(config, status.settings);
 	return {
-		apiKey: {
-			set: status.keySet,
-			hint: status.keySet ? status.hint : null,
-		},
 		llm: status.settings,
 		defaults: llmDefaults(config),
 		// The resolved values make the "what will runs use" preview trivial.
@@ -136,6 +147,7 @@ function settingsPayload(services: RequestServices, status: UserLlmStatus): Sett
 			...preset,
 			models: [...preset.models],
 		})),
+		connections,
 		canCustom: canUseCustomEndpoint(config),
 	};
 }

@@ -32,7 +32,9 @@ server/
 ├── workspace.ts     # /api/workspace(s) routes
 ├── llm.ts           # selection resolution, provider construction, custom-URL validation
 ├── models.ts        # GET /api/models (cached live catalog + curated fallback)
-└── settings.ts      # Per-user provider/model/key routes
+├── oauth.ts         # Claude/ChatGPT PKCE flows, token exchange/refresh, Codex loopback
+├── oauth-routes.ts  # /api/oauth/* and /api/connections/* handlers
+└── settings.ts      # Per-user default selection, credential status, settings routes
 ```
 
 ## Key Concepts
@@ -96,6 +98,9 @@ Owns active runs, one per session:
   through the same generic sandbox provider, sharing the run's pinned lease; it must never spawn a second sandbox.
 - `subscribe`/`subscribeStream` register SSE consumers; `getRunState` serves the catch-up snapshot, and
   `listActive`/`GET /api/runs` expose owner-scoped run state to every client.
+- Each run resolves a model from the explicit per-message override, the session header's sticky `model`, or the
+  account default (in that order). A changed selection is written to the header, appended as a `model_change` entry,
+  and published as `model_changed` so every client's selector follows.
 
 ### Sessions
 
@@ -152,29 +157,39 @@ Two transports:
 
 ### LLM selection
 
-`LLM_PROVIDER`/`LLM_BASE_URL`/`LLM_MODEL` are server-wide defaults ("Server default"). Each user stores a selection
-(`llm_preset`, `llm_model`, optional custom provider/base URL/context) plus an encrypted API key. Presets live in
-`@vvtxn/relay/core/llm-presets.ts` (browser-pure): OpenCode Go, OpenCode Console, OpenRouter, Anthropic, and `custom`.
-Adding a provider is a preset entry, not a new code path.
+`LLM_PROVIDER`/`LLM_BASE_URL`/`LLM_MODEL` are server-wide defaults ("Server default"). Each user stores a default
+selection (`llm_preset`, `llm_model`, optional custom provider/base URL/context) plus per-preset credentials. Presets
+live in `@vvtxn/relay/core/llm-presets.ts` (browser-pure): **OpenCode Go** (API key), **Claude** (OAuth subscription),
+**ChatGPT** (OAuth subscription, Responses wire format), and `custom`. Adding a provider is a preset entry, not a new
+code path.
+
+Credentials are per preset, not a single global key: `UserSettingsStore.getCredential(userId, preset)` returns an API
+key or OAuth tokens (encrypted at rest, owner-bound AES-GCM). The settings store keeps them in local files by default
+or in the `llm_credentials` column of the database backend, with legacy single-key rows still read as a fallback. OAuth subscriptions are connected through `GET /api/oauth/:provider/start` (+
+`POST /api/oauth/:provider/complete` for Claude's paste flow; ChatGPT's Codex loopback callback on `localhost:1455`
+completes in the background). Expired access tokens refresh lazily before a run and the rotated tokens are written
+back. API-key presets connect through `/api/connections/:preset` without changing the default selection.
 
 Selections are validated on save (`PUT /api/settings`): model ids must be well-formed for every preset and, for
 plan-scoped presets (`allowAnyModel: false`, today OpenCode Go), must come from the preset's curated list. Custom
 endpoints additionally require provider, https base URL (http only for local loopback), and a model id; a stored custom
 selection stops resolving when `RELAY_LLM_ALLOW_CUSTOM` is off and falls back to the server default.
 
-`createRunLlm` (`llm.ts`) resolves the selection and builds the provider per run. A key is bound to the preset it was
-entered for (`llm_key_preset`); switching presets clears it in `setLlm`, so a Go key is never sent to OpenRouter.
-`getLlm` is the only plaintext path, used by `RunManager`; `GET /api/settings` reads a status that never decrypts,
-exposing only `{ set, hint }` for the selected preset.
+`createRunLlm` (`llm.ts`) resolves the selection and builds the provider per run (Anthropic `x-api-key` vs. OAuth
+`Authorization: Bearer`, OpenAI chat-completions vs. Responses). `RunManager` resolves the thread's sticky model from
+the session header (or the explicit per-message override), loads that preset's credential, and refreshes it when
+expired. A model change is persisted on the session header and recorded as a `model_change` transcript entry, and
+subscribers receive `model_changed`.
 
-The key is encrypted at rest under a master key (`RELAY_SECRET_KEY`/`RELAY_SECRET_KEY_FILE`, or a generated
-`RELAY_DATA_DIR/secret.key`). The default backend keeps it in local files (`RELAY_DATA_DIR/settings/<userId>.json`,
-mode `0600`, AES-GCM with owner-bound AAD); the database backend stores it encrypted in `user_settings` instead.
-A missing key fails the run with a clear message, and `handleSendMessage` returns 400 before a doomed run begins.
+The key/secrets are encrypted at rest under a master key (`RELAY_SECRET_KEY`/`RELAY_SECRET_KEY_FILE`, or a generated
+`RELAY_DATA_DIR/secret.key`). The default backend keeps them in local files
+(`RELAY_DATA_DIR/settings/<userId>.json`, mode `0600`, AES-GCM with owner-bound AAD); the database backend stores them
+encrypted in `user_settings` instead. A missing credential fails the run with a clear message, and
+`handleSendMessage` returns 400 before a doomed run begins.
 
-Go requires a stable `x-opencode-session` header. `resolveLlmSelection` sets `sessionHeader` for the Go preset (and for
-any Go base URL), the provider adapters forward the request's `sessionId`, and `RunManager` passes the session id into
-the main and subagent loops. Requests also carry `User-Agent: relay/<version>`.
+OpenCode Go requires a stable `x-opencode-session` header. `resolveLlmSelection` sets `sessionHeader` for the Go preset
+(and for any Go base URL), the provider adapters forward the request's `sessionId`, and `RunManager` passes the session
+id into the main and subagent loops. Requests also carry `User-Agent: relay/<version>`.
 
 ### Background state
 
@@ -197,9 +212,14 @@ starting": it adopts a healthy winner, otherwise it reports the bind error. The 
 | `/api/auth/logout`           | POST   | Revoke the session + clear the cookie                 |
 | `/api/me`                    | GET    | Authenticated user                                    |
 | `/api/config`                | GET    | Effective model + context window for the caller       |
-| `/api/settings`              | GET    | Per-user selection + key presence (masked)            |
-| `/api/settings`              | PUT    | Save the caller's provider presets/model/key          |
-| `/api/models?preset=`        | GET    | Model picker options (live catalog, curated fallback) |
+| `/api/settings`              | GET    | Per-user default selection + connection status        |
+| `/api/settings`              | PUT    | Save the caller's default provider/model/key          |
+| `/api/models`                | GET    | Model picker options (all connections, or `?preset=`) |
+| `/api/oauth/:provider/start` | GET    | Begin Claude/ChatGPT subscription sign-in             |
+| `/api/oauth/:provider/complete` | POST | Finish Claude's paste flow                          |
+| `/api/oauth/:provider`       | DELETE | Disconnect a subscription                             |
+| `/api/connections/:preset`   | PUT    | Store an API key for one preset (no default change)   |
+| `/api/connections/:preset`   | DELETE | Remove a preset's stored credential                   |
 | `/api/workspace`             | GET    | Server default cwd                                    |
 | `/api/workspaces`            | GET    | Distinct workspaces (cwds) with session counts        |
 | `/api/workspaces`            | POST   | Validate + register a workspace                       |

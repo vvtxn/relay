@@ -1,5 +1,5 @@
 import { entriesToUIMessages, getToolDisplayName } from "@vvtxn/relay/core/display.ts";
-import type { ConfigResponse, ServerEvent } from "@vvtxn/client/protocol.ts";
+import type { ConfigResponse, LlmModelSelection, ServerEvent } from "@vvtxn/client/protocol.ts";
 import {
 	applyServerEvent,
 	initialSessionStreamState,
@@ -39,6 +39,12 @@ const COMMANDS: CommandPaletteItem[] = [
 		title: "Threads",
 		description: "Switch to a previous session",
 		keywords: ["sessions", "history"],
+	},
+	{
+		id: "model",
+		title: "Model",
+		description: "Switch the model for this thread",
+		keywords: ["models", "llm", "switch", "provider"],
 	},
 	{
 		id: "web",
@@ -101,6 +107,7 @@ function App({ onQuit, initialSessionId, info }: AppProps) {
 	const branchName = useSignal<string | null>(null);
 	const boxLabel = useSignal<string>("");
 	const stream = useSignal<SessionStreamState>(initialSessionStreamState);
+	const modelSelection = useSignal<LlmModelSelection | null>(null);
 	const escPrimed = useSignal(false);
 
 	// The TUI re-invokes component functions on every render, so cross-render
@@ -179,6 +186,7 @@ function App({ onQuit, initialSessionId, info }: AppProps) {
 			};
 			syncStream(true);
 			branchName.value = response.branch;
+			modelSelection.value = response.header.model ?? null;
 			boxLabel.value = response.box
 				? `${response.box.image.replace(/^localhost\//, "")} · ${response.box.state}`
 				: "";
@@ -196,6 +204,13 @@ function App({ onQuit, initialSessionId, info }: AppProps) {
 	const foldEvent = (event: ServerEvent) => {
 		sync.value.pending = applyServerEvent(sync.value.pending, event);
 		syncStream(event.type !== "text_delta");
+		if (event.type === "model_changed") {
+			modelSelection.value = {
+				preset: event.preset,
+				model: event.model,
+				...(event.contextTokens ? { contextTokens: event.contextTokens } : {}),
+			};
+		}
 		if (event.type === "run_finished") void refreshSession();
 	};
 
@@ -288,7 +303,18 @@ function App({ onQuit, initialSessionId, info }: AppProps) {
 
 		void (async () => {
 			try {
-				await getClient().sendMessage(id, value);
+				const model = modelSelection.value;
+				await getClient().sendMessage(
+					id,
+					value,
+					model
+						? {
+								preset: model.preset,
+								model: model.model,
+								...(model.contextTokens ? { contextTokens: model.contextTokens } : {}),
+							}
+						: undefined,
+				);
 			} catch (error) {
 				sync.value.pending = {
 					...sync.value.pending,
@@ -310,6 +336,7 @@ function App({ onQuit, initialSessionId, info }: AppProps) {
 		closeDiffViewer();
 		sessionId.value = id;
 		sync.value.pending = resetSessionStreamState();
+		modelSelection.value = null;
 		syncStream(true);
 		branchName.value = null;
 		loadingSession.value = id;
@@ -322,6 +349,7 @@ function App({ onQuit, initialSessionId, info }: AppProps) {
 			const response = await getClient().createSession(workspaceCwd(), { forceNew: true });
 			sessionId.value = response.id;
 			sync.value.pending = resetSessionStreamState();
+			modelSelection.value = null;
 			syncStream(true);
 			branchName.value = null;
 			loadingSession.value = null;
@@ -338,6 +366,7 @@ function App({ onQuit, initialSessionId, info }: AppProps) {
 	const projectFiles = useProjectFiles(() => sessionId.value);
 
 	const threadItems = useSignal<CommandPaletteItem[]>([]);
+	const modelItems = useSignal<CommandPaletteItem[]>([]);
 
 	const threadsPalette = useCommandPalette({
 		items: threadItems.value,
@@ -386,6 +415,8 @@ function App({ onQuit, initialSessionId, info }: AppProps) {
 		onSelect: (item) => {
 			if (item.id === "new-chat") {
 				void startNewChat();
+			} else if (item.id === "model") {
+				void openModelPalette();
 			} else if (item.id === "threads") {
 				void Promise.all([getClient().listSessions(workspaceCwd()), getClient().listRuns()])
 					.then(([response, runs]) => {
@@ -427,6 +458,44 @@ function App({ onQuit, initialSessionId, info }: AppProps) {
 		},
 	});
 
+	const modelPalette = useCommandPalette({
+		items: modelItems.value,
+		openKey: null,
+		maxResults: 40,
+		onSelect: (item) => {
+			const [preset, model, context] = item.id.split("::");
+			if (!preset || !model) return;
+			const contextTokens = context ? Number(context) : undefined;
+			modelSelection.value = {
+				preset,
+				model,
+				...(contextTokens && Number.isFinite(contextTokens) ? { contextTokens } : {}),
+			};
+		},
+	});
+
+	async function openModelPalette(): Promise<void> {
+		try {
+			const catalog = await getClient().listModelCatalog();
+			const items = catalog.groups.flatMap((group) =>
+				group.models.map((model) => ({
+					id: `${group.preset}::${model.id}::${model.contextTokens ?? ""}`,
+					title: model.label,
+					description: `${group.label}${model.contextTokens ? ` · ${Math.round(model.contextTokens / 1000)}k context` : ""}`,
+					keywords: [group.preset, model.id],
+				})),
+			);
+			if (items.length === 0) {
+				showError("No subscriptions connected. Connect one in Settings.");
+				return;
+			}
+			modelItems.value = items;
+			modelPalette.openPalette();
+		} catch (error) {
+			showError(error instanceof Error ? error.message : String(error));
+		}
+	}
+
 	useTextInput({
 		value: input,
 		cursorPosition: cursor,
@@ -441,6 +510,19 @@ function App({ onQuit, initialSessionId, info }: AppProps) {
 			}
 		},
 	});
+
+	// Ctrl+S opens the thread model palette. Registered after the palettes so an
+	// open palette owns the keyboard, and before the diff/cancel handlers.
+	const modelKey = getHookKey();
+	if (!hasCleanup(modelKey)) {
+		const cleanup = inputManager.onKeyGlobal((event) => {
+			if (!event.ctrl || event.key !== "s") return false;
+			if (diffViewer.value) return true;
+			void openModelPalette();
+			return true;
+		});
+		setCleanup(modelKey, cleanup);
+	}
 
 	// Diff review keys are registered after the palettes (so an open palette
 	// consumes them) and before cancel (so Escape closes the overlay instead of
@@ -520,7 +602,12 @@ function App({ onQuit, initialSessionId, info }: AppProps) {
 
 	return (
 		<Box flex flexDirection="column" padding={1} bgColor={theme.background}>
-			<StatusBar totalCost={stream.value.cost} branchName={branchName.value ?? ""} boxLabel={boxLabel.value} />
+			<StatusBar
+				totalCost={stream.value.cost}
+				branchName={branchName.value ?? ""}
+				boxLabel={boxLabel.value}
+				modelLabel={modelSelection.value?.model ?? info.model}
+			/>
 
 			{messages.length === 0 ? (
 				loadingSession.value !== null ? (
@@ -593,8 +680,8 @@ function App({ onQuit, initialSessionId, info }: AppProps) {
 					) : (
 						<Text color={theme.textFaint} italic>
 							{hasDiffs
-								? "@ files • / commands • ctrl+o diffs • i/Esc mode"
-								: "@ files • / commands • i/Esc mode"}
+								? "@ files • / commands • ctrl+s model • ctrl+o diffs"
+								: "@ files • / commands • ctrl+s model"}
 						</Text>
 					)}
 				</Box>
@@ -606,6 +693,7 @@ function App({ onQuit, initialSessionId, info }: AppProps) {
 			)}
 
 			<CommandPalette palette={palette} />
+			<CommandPalette palette={modelPalette} placeholder="Switch model..." width={72} />
 			<CommandPalette palette={filePalette} placeholder="Search files..." />
 			<CommandPalette palette={threadsPalette} placeholder="Search threads..." width={80} />
 		</Box>

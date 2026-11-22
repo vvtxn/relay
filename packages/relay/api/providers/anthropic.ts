@@ -77,12 +77,14 @@ export class AnthropicProvider implements LLMProvider {
 	private readonly baseURL: string;
 	private readonly headers: Record<string, string> | undefined;
 	private readonly sessionHeader: string | undefined;
+	private readonly bearer: boolean;
 
 	constructor(config: ProviderConfig) {
 		this.apiKey = config.apiKey;
 		this.baseURL = normalizeBaseURL(config.baseURL);
 		this.headers = config.headers;
 		this.sessionHeader = config.sessionHeader;
+		this.bearer = config.authStyle === "bearer";
 	}
 
 	async complete(request: CompletionRequest): Promise<CompletionResult> {
@@ -151,10 +153,11 @@ export class AnthropicProvider implements LLMProvider {
 	}
 
 	private request(body: Record<string, unknown>, request: CompletionRequest): Promise<Response> {
+		const auth = this.bearer ? { Authorization: `Bearer ${this.apiKey}` } : { "x-api-key": this.apiKey };
 		return postJson(`${this.baseURL}/messages`, {
 			headers: requestHeaders(
 				{
-					"x-api-key": this.apiKey,
+					...auth,
 					"anthropic-version": ANTHROPIC_VERSION,
 				},
 				{

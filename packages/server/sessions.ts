@@ -10,6 +10,7 @@ import type {
 	ConfigResponse,
 	CreateSessionRequest,
 	CreateSessionResponse,
+	LlmModelSelection,
 	MeResponse,
 	OpenSessionResponse,
 	RunListResponse,
@@ -22,6 +23,7 @@ import { boxSummary } from "./box-summary.ts";
 import type { RequestServices } from "./services.ts";
 import { BadRequestError, error, ForbiddenError, json, NotFoundError, readJsonBody, requestUrl } from "./http.ts";
 import { resolveSelection } from "./llm.ts";
+import { presetInfo, validatePresetModel } from "./llm.ts";
 import { RunConflictError } from "./run.ts";
 
 /**
@@ -243,9 +245,18 @@ export function handleSendMessage(
 			services.runs.attachHandle(sessionId, yield* openSessionHandle(services, sessionId), services.user.id);
 		}
 
+		// A per-message model override is validated against the preset it names
+		// before any run starts, so an unknown preset/model fails fast.
+		const override = parseModelOverride(body.model);
+		if (override) {
+			const preset = presetInfo(services.config, override.preset);
+			if (!preset) return yield* Effect.fail(new BadRequestError(`Unknown preset "${override.preset}"`));
+			const modelError = validatePresetModel(preset, override.model);
+			if (modelError) return yield* Effect.fail(new BadRequestError(modelError));
+		}
+
 		// Fail fast with a clear message rather than starting a run that can only
-		// error out: a provider cannot be built without a key for the selected
-		// provider.
+		// error out: the chosen preset needs a stored credential.
 		const stored = yield* services.userSettings
 			.getLlmStatus(services.user.id)
 			.pipe(
@@ -253,17 +264,47 @@ export function handleSendMessage(
 					Effect.fail(new BadRequestError(`Stored settings could not be read: ${storeError.message}`)),
 				),
 			);
-		const resolved = resolveSelection(services.config, stored.settings);
-		if (!stored.keySet) {
-			return error(400, `No API key configured for ${resolved.label}. Add one in Settings.`);
+		// The thread may already carry a sticky model that differs from the
+		// account default; the credential check must follow the model the run
+		// will actually use.
+		const sticky = services.runs.getHandle(sessionId, services.user.id)?.getModel() ?? null;
+		const presetId = override?.preset ?? sticky?.preset ?? stored.settings.preset;
+		const credential = yield* services.userSettings
+			.getCredential(services.user.id, presetId)
+			.pipe(
+				Effect.catchTag("StoreError", (storeError) =>
+					Effect.fail(new BadRequestError(`Stored credentials could not be read: ${storeError.message}`)),
+				),
+			);
+		if (!credential) {
+			const effective = override ?? sticky;
+			const resolved = resolveSelection(services.config, {
+				...stored.settings,
+				...(effective
+					? { preset: effective.preset, model: effective.model, provider: null, baseURL: null }
+					: {}),
+			});
+			return error(400, `No credential configured for ${resolved.label}. Connect it in Settings.`);
 		}
 
 		try {
-			services.runs.startMessage(sessionId, body.content);
+			services.runs.startMessage(sessionId, body.content, override);
 		} catch (err) {
 			if (err instanceof RunConflictError) return error(409, err.message);
 			throw err;
 		}
 		return json({ status: "started", sessionId } satisfies SendMessageResponse, 202);
 	});
+}
+
+/** Normalizes a wire model override; null when absent/invalid. */
+function parseModelOverride(raw: LlmModelSelection | undefined): LlmModelSelection | null {
+	if (!raw || typeof raw !== "object") return null;
+	if (typeof raw.preset !== "string" || !raw.preset) return null;
+	if (typeof raw.model !== "string" || !raw.model) return null;
+	return {
+		preset: raw.preset,
+		model: raw.model,
+		...(typeof raw.contextTokens === "number" && raw.contextTokens > 0 ? { contextTokens: raw.contextTokens } : {}),
+	};
 }

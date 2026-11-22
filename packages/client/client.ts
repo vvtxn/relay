@@ -11,8 +11,12 @@ import type {
 	FileListResponse,
 	HealthResponse,
 	MeResponse,
+	ModelCatalogResponse,
 	ModelsResponse,
 	OpenSessionResponse,
+	OAuthCompleteRequest,
+	OAuthCompleteResponse,
+	OAuthStartResponse,
 	RegisterWorkspaceRequest,
 	RegisterWorkspaceResponse,
 	RunListResponse,
@@ -20,6 +24,8 @@ import type {
 	SendMessageResponse,
 	ServerEvent,
 	SessionListResponse,
+	SetConnectionRequest,
+	SetConnectionResponse,
 	SettingsResponse,
 	StatusResponse,
 	UpdateSettingsRequest,
@@ -104,6 +110,40 @@ export class RelayClient {
 		return await this.get(`/api/models?preset=${encodeURIComponent(preset)}`);
 	}
 
+	/** Models offered by every connected subscription, for the thread selector. */
+	async listModelCatalog(): Promise<ModelCatalogResponse> {
+		return await this.get("/api/models");
+	}
+
+	/** Starts a subscription sign-in and returns the provider URL. */
+	async startOAuth(provider: string): Promise<OAuthStartResponse> {
+		return await this.get(`/api/oauth/${encodeURIComponent(provider)}/start`);
+	}
+
+	/** Completes the paste flow (Claude) with the provider-displayed code. */
+	async completeOAuth(provider: string, code: string): Promise<OAuthCompleteResponse> {
+		return await this.post(`/api/oauth/${encodeURIComponent(provider)}/complete`, {
+			code,
+		} satisfies OAuthCompleteRequest);
+	}
+
+	/** Removes a subscription connection. */
+	async disconnectOAuth(provider: string): Promise<OAuthCompleteResponse> {
+		return await this.delete(`/api/oauth/${encodeURIComponent(provider)}`);
+	}
+
+	/** Stores an API key for a preset connection without touching the default. */
+	async setConnection(preset: string, apiKey: string): Promise<SetConnectionResponse> {
+		return await this.put(`/api/connections/${encodeURIComponent(preset)}`, {
+			apiKey,
+		} satisfies SetConnectionRequest);
+	}
+
+	/** Removes a preset's stored credential. */
+	async removeConnection(preset: string): Promise<SetConnectionResponse> {
+		return await this.delete(`/api/connections/${encodeURIComponent(preset)}`);
+	}
+
 	async listSessions(cwd: string): Promise<SessionListResponse> {
 		return await this.get(`/api/sessions?cwd=${encodeURIComponent(cwd)}`);
 	}
@@ -184,8 +224,15 @@ export class RelayClient {
 		return await this.delete(`/api/boxes/${encodeURIComponent(boxId)}`);
 	}
 
-	async sendMessage(sessionId: string, content: string): Promise<SendMessageResponse> {
-		return await this.post(`/api/sessions/${sessionId}/messages`, { content } satisfies SendMessageRequest);
+	async sendMessage(
+		sessionId: string,
+		content: string,
+		model?: SendMessageRequest["model"],
+	): Promise<SendMessageResponse> {
+		return await this.post(`/api/sessions/${sessionId}/messages`, {
+			content,
+			...(model ? { model } : {}),
+		} satisfies SendMessageRequest);
 	}
 
 	async cancel(sessionId: string): Promise<StatusResponse> {
