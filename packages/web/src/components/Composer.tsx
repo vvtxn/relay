@@ -1,13 +1,15 @@
 import { createMemo, createSignal, For, Show } from "solid-js";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/solid-query";
+import type { LlmModelSelection } from "@vvtxn/client/protocol.ts";
 import type { SessionStreamState } from "@vvtxn/client/session-state.ts";
 import { filesQuery } from "#/api/queries.ts";
 import { cancelRun, sendMessage } from "#/api/mutations.ts";
-import { appendError, appendUserMessage, setRunning, streamState } from "#/state/session.ts";
+import { appendError, appendUserMessage, setRunning, setThreadModel, streamState } from "#/state/session.ts";
+import { ModelSelector } from "#/components/ModelSelector.tsx";
 
 const MAX_FILE_HITS = 10;
 
-export function Composer(props: { sessionId: string }) {
+export function Composer(props: { sessionId: string; defaultModel: string }) {
 	const queryClient = useQueryClient();
 	const [value, setValue] = createSignal("");
 	const [mentionStart, setMentionStart] = createSignal(-1);
@@ -25,7 +27,8 @@ export function Composer(props: { sessionId: string }) {
 	const files = useQuery(() => ({ ...filesQuery(props.sessionId), enabled: mentionOpen() }));
 
 	const send = useMutation(() => ({
-		mutationFn: (content: string) => sendMessage(props.sessionId, content),
+		mutationFn: (input: { content: string; model: LlmModelSelection | null }) =>
+			sendMessage(props.sessionId, input.content, input.model),
 		onError: (error) => {
 			setRunning(false);
 			appendError(error instanceof Error ? error.message : String(error));
@@ -38,6 +41,10 @@ export function Composer(props: { sessionId: string }) {
 	}));
 
 	const filtered = createMemo(() => {
+		// `isLoading` covers the initial fetch (pending + fetching). Returning
+		// early avoids reading `.data` while the resource is pending — reading it
+		// would suspend the route's Suspense boundary and flash the boot screen.
+		if (files.isLoading) return [];
 		const list = files.data ?? [];
 		const query = mentionQuery().toLowerCase();
 		const matches = query ? list.filter((file) => file.toLowerCase().includes(query)) : list;
@@ -50,7 +57,19 @@ export function Composer(props: { sessionId: string }) {
 		setValue("");
 		closeMentions();
 		appendUserMessage(content);
-		send.mutate(content);
+		// Always send the thread selection: `null` clears the sticky override and
+		// keeps the thread following the account default.
+		const model = streamState().model;
+		send.mutate({
+			content,
+			model: model
+				? {
+						preset: model.preset,
+						model: model.model,
+						...(model.contextTokens ? { contextTokens: model.contextTokens } : {}),
+					}
+				: null,
+		});
 	}
 
 	function closeMentions(): void {
@@ -128,9 +147,7 @@ export function Composer(props: { sessionId: string }) {
 					<Show
 						when={filtered().length > 0}
 						fallback={
-							<div class="mention-empty">
-								{files.isFetching && !files.data ? "Loading files…" : "No matching files"}
-							</div>
+							<div class="mention-empty">{files.isLoading ? "Loading files…" : "No matching files"}</div>
 						}
 					>
 						<For each={filtered()}>
@@ -162,9 +179,29 @@ export function Composer(props: { sessionId: string }) {
 					onKeyDown={handleKeyDown}
 				/>
 				<div class="composer-actions">
-					<span class="composer-hint">
-						{streamState().running ? statusLabel(streamState()) : "Enter to send • @ for files"}
-					</span>
+					<div class="composer-actions-left">
+						<ModelSelector
+							current={streamState().model}
+							defaultModel={props.defaultModel}
+							onSelect={(selection, label) => {
+								setThreadModel(
+									selection
+										? {
+												preset: selection.preset,
+												model: selection.model,
+												label,
+												...(selection.contextTokens
+													? { contextTokens: selection.contextTokens }
+													: {}),
+											}
+										: null,
+								);
+							}}
+						/>
+						<span class="composer-hint">
+							{streamState().running ? statusLabel(streamState()) : "Enter to send • @ for files"}
+						</span>
+					</div>
 					<Show
 						when={running()}
 						fallback={

@@ -1,6 +1,7 @@
 import type { Effect } from "effect";
 import type { DatabaseClient } from "../database.ts";
 import { storeEffect, type StoreError } from "../effect.ts";
+import type { LlmModelSelection } from "../llm-presets.ts";
 import { normalizeEntry } from "./normalize.ts";
 import type {
 	Entry,
@@ -22,6 +23,7 @@ CREATE TABLE IF NOT EXISTS sessions (
 	updated_at TEXT NOT NULL,
 	version INTEGER NOT NULL,
 	first_user_message TEXT,
+	model TEXT,
 	tokens INTEGER,
 	cost REAL
 );
@@ -83,6 +85,22 @@ function optionalNumber(row: Record<string, unknown>, key: string): number | und
 
 function rowToEntry(row: Record<string, unknown>): Entry {
 	return normalizeEntry(JSON.parse(stringValue(row, "data")) as Entry);
+}
+
+/** Parses the persisted per-thread model override. */
+function parseModel(raw: unknown): LlmModelSelection | undefined {
+	if (typeof raw !== "string" || raw.length === 0) return undefined;
+	try {
+		const parsed = JSON.parse(raw) as Partial<LlmModelSelection>;
+		if (typeof parsed.preset !== "string" || typeof parsed.model !== "string") return undefined;
+		return {
+			preset: parsed.preset,
+			model: parsed.model,
+			...(typeof parsed.contextTokens === "number" ? { contextTokens: parsed.contextTokens } : {}),
+		};
+	} catch {
+		return undefined;
+	}
 }
 
 export class DatabaseSessionStore implements SessionStore {
@@ -158,12 +176,14 @@ export class DatabaseSessionStore implements SessionStore {
 		});
 		const tokens = optionalNumber(row, "tokens");
 		const cost = optionalNumber(row, "cost");
+		const model = parseModel(row.model);
 		const header = {
 			type: "session" as const,
 			version: optionalNumber(row, "version") ?? CURRENT_VERSION,
 			id: stringValue(row, "id"),
 			timestamp: stringValue(row, "created_at"),
 			cwd: stringValue(row, "cwd"),
+			...(model ? { model } : {}),
 			...(tokens !== undefined ? { tokens } : {}),
 			...(cost !== undefined ? { cost } : {}),
 		};
@@ -401,8 +421,8 @@ export class DatabaseSessionStore implements SessionStore {
 		if (isNew) {
 			statements.push({
 				sql: `INSERT INTO sessions
-					(id, owner_id, cwd, created_at, updated_at, version, first_user_message, tokens, cost)
-					VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+					(id, owner_id, cwd, created_at, updated_at, version, first_user_message, model, tokens, cost)
+					VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 				args: [
 					header.id,
 					scope.ownerId,
@@ -411,14 +431,22 @@ export class DatabaseSessionStore implements SessionStore {
 					full.timestamp,
 					header.version,
 					full.type === "message" && full.role === "user" ? full.content : null,
+					header.model ? JSON.stringify(header.model) : null,
 					header.tokens ?? null,
 					header.cost ?? null,
 				],
 			});
 		} else {
 			statements.push({
-				sql: "UPDATE sessions SET updated_at = ?, tokens = ?, cost = ? WHERE id = ? AND owner_id = ?",
-				args: [full.timestamp, header.tokens ?? null, header.cost ?? null, header.id, scope.ownerId],
+				sql: "UPDATE sessions SET updated_at = ?, model = ?, tokens = ?, cost = ? WHERE id = ? AND owner_id = ?",
+				args: [
+					full.timestamp,
+					header.model ? JSON.stringify(header.model) : null,
+					header.tokens ?? null,
+					header.cost ?? null,
+					header.id,
+					scope.ownerId,
+				],
 			});
 			if (full.type === "message" && full.role === "user") {
 				statements.push({
@@ -449,8 +477,14 @@ export class DatabaseSessionStore implements SessionStore {
 	async updateHeader(scope: SessionScope, header: DatabaseSessionHeader): Promise<void> {
 		await this.schemaReady;
 		await this.execute({
-			sql: "UPDATE sessions SET tokens = ?, cost = ? WHERE id = ? AND owner_id = ?",
-			args: [header.tokens ?? null, header.cost ?? null, header.id, scope.ownerId],
+			sql: "UPDATE sessions SET model = ?, tokens = ?, cost = ? WHERE id = ? AND owner_id = ?",
+			args: [
+				header.model ? JSON.stringify(header.model) : null,
+				header.tokens ?? null,
+				header.cost ?? null,
+				header.id,
+				scope.ownerId,
+			],
 		});
 	}
 
@@ -459,6 +493,13 @@ export class DatabaseSessionStore implements SessionStore {
 			.map((part) => part.trim())
 			.filter(Boolean)) {
 			await this.client.execute(sql);
+		}
+		// Additive columns for databases created before per-thread models.
+		try {
+			await this.client.execute("ALTER TABLE sessions ADD COLUMN model TEXT");
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error);
+			if (!/duplicate column/i.test(message)) throw error;
 		}
 	}
 
@@ -474,6 +515,7 @@ type DatabaseSessionHeader = {
 	id: string;
 	timestamp: string;
 	cwd: string;
+	model?: LlmModelSelection;
 	tokens?: number;
 	cost?: number;
 };
@@ -542,6 +584,16 @@ class DatabaseSessionHandle implements SessionHandle {
 
 	setCost(cost: number): void {
 		this.header.cost = cost;
+		this.headerDirty = true;
+	}
+
+	getModel(): LlmModelSelection | null {
+		return this.header.model ?? null;
+	}
+
+	setModel(model: LlmModelSelection | null): void {
+		if (model) this.header.model = model;
+		else delete this.header.model;
 		this.headerDirty = true;
 	}
 

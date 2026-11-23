@@ -14,6 +14,10 @@ export function MessageView(props: { msg: UIMessage }) {
 	const hasText = () => props.msg.content.trim().length > 0;
 	const toolCalls = () => props.msg.toolCalls ?? [];
 
+	if (props.msg.role === "system") {
+		return <div class="message system">{props.msg.content}</div>;
+	}
+
 	if (props.msg.role === "user") {
 		return (
 			<article class="message user">

@@ -5,10 +5,12 @@ export function StatusBar({
 	totalCost,
 	branchName,
 	boxLabel,
+	modelLabel,
 }: {
 	totalCost: number;
 	branchName: string;
 	boxLabel: string;
+	modelLabel: string;
 }) {
 	return (
 		<Box
@@ -30,6 +32,12 @@ export function StatusBar({
 					<>
 						<Text color={theme.textDim}>box:</Text>
 						<Text color={theme.textFaint}>{boxLabel}</Text>
+					</>
+				)}
+				{modelLabel && (
+					<>
+						<Text color={theme.textDim}>model:</Text>
+						<Text color={theme.textFaint}>{modelLabel}</Text>
 					</>
 				)}
 				<Text color={theme.textDim}>cost:</Text>

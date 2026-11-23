@@ -40,10 +40,11 @@ export function SessionPage() {
 	});
 
 	// A session can vanish or belong to another identity (e.g. after switching
-	// the server auth subject). The route loader catches this first; this stays
-	// as a backstop for errors raised after mount.
+	// the server auth subject). The route loader surfaces that as an error and
+	// the page renders it in place — never redirect away from an open settings
+	// overlay or a transient refetch failure.
 	createEffect(() => {
-		if (session.isError) {
+		if (session.isError && session.error instanceof RelayError && session.error.status === 401) {
 			void navigate({ to: "/", replace: true });
 		}
 	});
@@ -76,33 +77,45 @@ export function SessionPage() {
 	};
 
 	return (
-		<Show
-			when={!me.isError && !config.isError}
-			fallback={<BootError message={errorMessage(me.error ?? config.error)} />}
-		>
-			<Show when={me.data && config.data && session.data} fallback={<BootScreen />}>
-				<AppShell
-					userName={me.data!.name}
-					avatarUrl={me.data!.avatarUrl}
-					activeSessionId={sessionId()}
-					activeWorkspace={session.data!.header.cwd}
-					inert={settingsOpen()}
-					onOpenSettings={goToSettings}
+		<>
+			<Show
+				when={!me.isError && !config.isError}
+				fallback={<BootError message={errorMessage(me.error ?? config.error)} />}
+			>
+				<Show
+					when={me.data && config.data && session.data}
+					fallback={
+						<Show when={session.isError} fallback={<BootScreen />}>
+							<BootError message={errorMessage(session.error)} onRetry={() => void session.refetch()} />
+						</Show>
+					}
 				>
-					<StatusBar
-						branch={session.data!.branch}
-						box={session.data!.box}
+					<AppShell
 						userName={me.data!.name}
 						avatarUrl={me.data!.avatarUrl}
-						canSignOut={me.data!.provider !== "local"}
-						onSignOut={() => void signOut()}
-					/>
-					<ChatView model={config.data!.model} version={VERSION} />
-					<Composer sessionId={sessionId()} />
-					<DiffModal />
-				</AppShell>
-				<Outlet />
+						activeSessionId={sessionId()}
+						activeWorkspace={session.data!.header.cwd}
+						inert={settingsOpen()}
+						onOpenSettings={goToSettings}
+					>
+						<StatusBar
+							branch={session.data!.branch}
+							box={session.data!.box}
+							userName={me.data!.name}
+							avatarUrl={me.data!.avatarUrl}
+							canSignOut={me.data!.provider !== "local"}
+							onSignOut={() => void signOut()}
+						/>
+						<ChatView model={config.data!.model} version={VERSION} />
+						<Composer sessionId={sessionId()} defaultModel={config.data!.model} />
+						<DiffModal />
+					</AppShell>
+				</Show>
 			</Show>
-		</Show>
+			{/* Render the settings overlay outside the data gates: a transient
+			    session/config refetch behind it must never unmount the page the
+			    user is interacting with. */}
+			<Outlet />
+		</>
 	);
 }

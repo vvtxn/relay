@@ -20,9 +20,9 @@ export interface UIToolCall {
 	isError?: boolean;
 }
 
-/** A chat message as rendered by clients: user text or agent text + tool calls. */
+/** A chat message as rendered by clients: user text, agent text + tool calls, or a system notice. */
 export interface UIMessage {
-	role: "user" | "agent";
+	role: "user" | "agent" | "system";
 	content: string;
 	toolCalls?: UIToolCall[];
 }
@@ -141,6 +141,8 @@ export function entriesToUIMessages(entries: Entry[]): UIMessage[] {
 				content: typeof entry.content === "string" ? entry.content : "",
 				toolCalls,
 			});
+		} else if (entry.type === "model_change") {
+			messages.push({ role: "system", content: `Switched to ${entry.label}` });
 		} else if (entry.type === "tool_result") {
 			const tc = toolCallIdMap.get(entry.toolCallId);
 			if (tc) {

@@ -12,6 +12,7 @@ import { type AgentEvent, run } from "@vvtxn/relay/core/agent.ts";
 import { attempt, causeMessage, type StoreError } from "@vvtxn/relay/core/effect.ts";
 import { buildSystemPrompt } from "@vvtxn/relay/core/prompts.ts";
 import type { RunPhase, RunStateEvent, RunSummary, ServerEvent } from "@vvtxn/client/protocol.ts";
+import type { LlmModelSelection } from "@vvtxn/relay/core/llm-presets.ts";
 import type { ServerConfig } from "./config.ts";
 import { createBoxBashTool, createBoxTool } from "./box-tools.ts";
 import { createBrowserTool } from "./browser-tool.ts";
@@ -70,7 +71,7 @@ interface SessionRecord {
  */
 export class RunManager {
 	private readonly config: ServerConfig;
-	private readonly llmFor: (ownerId: string) => Effect.Effect<RunLlm, StoreError>;
+	private readonly llmFor: (ownerId: string, override: LlmModelSelection | null) => Effect.Effect<RunLlm, StoreError>;
 	private readonly boxes: BoxManager;
 	private readonly workspaces: WorkspaceManager;
 
@@ -78,7 +79,7 @@ export class RunManager {
 
 	constructor(options: {
 		config: ServerConfig;
-		llmFor: (ownerId: string) => Effect.Effect<RunLlm, StoreError>;
+		llmFor: (ownerId: string, override: LlmModelSelection | null) => Effect.Effect<RunLlm, StoreError>;
 		boxes?: BoxManager;
 		workspaces: WorkspaceManager;
 	}) {
@@ -294,7 +295,12 @@ export class RunManager {
 	}
 
 	/** Returns 202-style start; throws RunConflictError when a run is active. */
-	startMessage(sessionId: string, content: string): void {
+	startMessage(
+		sessionId: string,
+		content: string,
+		model: LlmModelSelection | null = null,
+		options: { clearModel?: boolean } = {},
+	): void {
 		const session = this.ensureSession(sessionId);
 		if (session.run) throw new RunConflictError(sessionId);
 
@@ -312,7 +318,9 @@ export class RunManager {
 		const startedAt = new Date().toISOString();
 		// The slot is claimed synchronously (above); the run itself executes on
 		// its own fiber.
-		const fiber = Effect.runFork(this.runProgram(sessionId, content, runId, ref, abort));
+		const fiber = Effect.runFork(
+			this.runProgram(sessionId, content, model, options.clearModel === true, runId, ref, abort),
+		);
 		session.run = { runId, startedAt, ref, fiber, abort };
 		this.publish(sessionId, { type: "run_status", runId, phase: "preparing-workspace" });
 	}
@@ -320,6 +328,8 @@ export class RunManager {
 	private runProgram(
 		sessionId: string,
 		content: string,
+		modelOverride: LlmModelSelection | null,
+		clearModel: boolean,
 		runId: string,
 		runRef: Ref.Ref<RunState>,
 		abort: AbortController,
@@ -342,18 +352,40 @@ export class RunManager {
 				return yield* Effect.fail(new Error(`No open session handle for ${sessionId}`));
 			}
 
-			// Resolve the owner's LLM selection and build a provider from their
-			// stored key. Keys live in the database, so a run without one is a
-			// configuration error.
-			const llm = yield* llmFor(session.ownerId ?? "");
+			// Resolve the thread's model: an explicit per-message override, else the
+			// sticky selection persisted on the session header, else the account
+			// default. "Account default" in the picker sends `clearModel`, which
+			// drops the sticky override. Credentials are per preset, so the resolved
+			// provider always bills the connection that serves the chosen model.
+			const previousModel = handle.getModel();
+			const effectiveModel = clearModel ? null : (modelOverride ?? previousModel);
+			const llm = yield* llmFor(session.ownerId ?? "", effectiveModel);
 			const provider = llm.provider;
 			if (!provider) {
 				return yield* Effect.fail(
 					new Error(
-						`No API key configured for "${llm.label}". Add one in Settings, or select a different model.`,
+						`No credential configured for "${llm.label}". Connect it in Settings, or select a different model.`,
 					),
 				);
 			}
+
+			// A model switch is recorded once, and only when the thread's selection
+			// actually changes. The transcript note is written *after* the user's
+			// message (see `execute`), so a live optimistic render and the persisted
+			// transcript agree on the order: user turn, then the switch notice.
+			const changed = clearModel
+				? previousModel !== null
+				: modelOverride !== null &&
+					(previousModel === null ||
+						previousModel.preset !== llm.preset ||
+						previousModel.model !== llm.model);
+			const selection: LlmModelSelection | null = changed
+				? {
+						preset: llm.preset,
+						model: llm.model,
+						...(llm.contextTokens > 0 ? { contextTokens: llm.contextTokens } : {}),
+					}
+				: null;
 
 			// Re-validate the workspace before every run: the directory may have
 			// been deleted or replaced by a symlink since the session was created.
@@ -414,6 +446,25 @@ export class RunManager {
 				// Expand @mentions against the session workspace, persist the stripped version
 				const expanded = yield* attempt(() => expandMentions(content, cwd));
 				yield* handle.append({ type: "message", role: "user", content: stripAttachedContext(expanded) });
+				// The switch notice follows the user's message in the transcript (the
+				// client renders it optimistically before the run exists).
+				if (selection) {
+					handle.setModel(clearModel ? null : selection);
+					yield* handle.append({
+						type: "model_change",
+						preset: selection.preset,
+						model: selection.model,
+						label: llm.modelLabel,
+						...(selection.contextTokens !== undefined ? { contextTokens: selection.contextTokens } : {}),
+					});
+					publish({
+						type: "model_changed",
+						preset: selection.preset,
+						model: selection.model,
+						label: llm.modelLabel,
+						...(selection.contextTokens !== undefined ? { contextTokens: selection.contextTokens } : {}),
+					});
+				}
 				const messages = entriesToMessages(handle.getEntries());
 
 				// The LLM sees the expanded content for the latest user message

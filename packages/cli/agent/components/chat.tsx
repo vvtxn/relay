@@ -176,6 +176,14 @@ export function ToolBundleView({ calls }: { calls: UIToolCall[] }) {
  * Memoized: unchanged messages skip re-rendering across commits.
  */
 export const MessageView = memo(function MessageView({ msg }: { msg: UIMessage }) {
+	if (msg.role === "system") {
+		return (
+			<Box paddingX={1}>
+				<Text color={theme.textDim}>{msg.content}</Text>
+			</Box>
+		);
+	}
+
 	if (msg.role === "user") {
 		return (
 			<Box bgColor={theme.surface} paddingX={1} paddingY={1}>

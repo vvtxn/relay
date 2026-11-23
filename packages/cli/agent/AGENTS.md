@@ -106,9 +106,10 @@ checks `/api/me` (using the token handed over by the browser session in `~/.rela
 the local identity without a token, so this passes immediately; GitHub mode opens the web client and waits for the
 sign-in to complete (`ensureAuthenticated`).
 `--workspace` is validated and registered server-side at this point; the server's
-canonical path becomes `RELAY_CLI_WORKSPACE`. It then checks `/api/settings` — if no LLM API key is configured it opens
-the web Settings page and waits (`ensureApiKey`), so the TUI never starts in an unusable state. `prepareTheme()` then
-resolves the palette (querying the terminal in `auto` mode), and only afterwards is `app.tsx` imported. `bootstrap()`
+canonical path becomes `RELAY_CLI_WORKSPACE`. It then checks `/api/settings` — if the default selection has no connected
+credential it opens the web Settings page and waits (`ensureApiKey`), so the TUI never starts in an unusable state.
+`prepareTheme()` then resolves the palette (querying the terminal in `auto` mode), and only afterwards is `app.tsx`
+imported. `bootstrap()`
 then health-checks the server, fetches `/api/me` + `/api/config`, and resolves the initial session for the effective
 workspace (`config.ts` `workspaceCwd()`): an explicit `--session`/`relay attach` target wins, `--continue` resumes the
 most recent thread, otherwise a session is created (the server reuses an idle empty one, so repeated launches do not
@@ -169,7 +170,11 @@ saved, so the TUI cannot start without one.
   label (`borderLabel`, rendered as `╭─ INSERT ─────╮` / `╭─ NORMAL ─────╮`), and the bottom-left status line shows the
   running agent status (spinner + `Thinking…`/`Writing…`/`Running <tool>…`, plus the Esc-to-cancel hint), falling back
   to the input hints when idle
-- `StatusBar` — Branch and accumulated session cost
+- `StatusBar` — Branch, active thread model, and accumulated session cost. The model shown is the thread's sticky
+  selection (falling back to the account default from `/api/config`).
+- **Model picker** — `ctrl+s` (or `/` → Model) loads `/api/models` and opens a command palette of every connected
+  subscription's models. Selecting one sets the thread's sticky `modelSelection` signal; the next `sendMessage` sends it
+  with the request. A `model_changed` stream event updates the signal and the transcript.
 - `DiffPreview` / `DiffViewer` (components/diff.tsx) — Compact changed-lines-only preview inside an expanded tool
   bundle (edit/write calls), and the full-context scrollable review overlay. Both render ANSI-styled rows from the pure
   helpers in `diffs.ts`; the preview is memoized so streamed deltas skip unchanged diffs
@@ -181,9 +186,9 @@ saved, so the TUI cannot start without one.
 - `ToolBundleView` (components/chat.tsx) — `bundleTranscript()` (`tool-bundle.ts`) turns every agent turn's tool calls
   into a tool block after its prose and merges adjacent blocks, so `read` → `read` → `write` renders as one collapsed
   `2 reads · 1 write` row. Expanding lists every call chronologically with its target, per-call stat, capped output,
-  and edit/write diff preview. User turns and prose-bearing turns end a run (their calls start a new bundle); empty
-  agent turns are skipped without splitting it. The bundle's call array is cached per run, so memoized expanded bodies
-  skip streamed commits.
+  and edit/write diff preview. User turns and system notices (model switches) end a run (their calls start a new
+  bundle); empty agent turns are skipped without splitting it. The bundle's call array is cached per run, so memoized
+  expanded bodies skip streamed commits.
 
 ### Fonts (`fonts.ts`)
 

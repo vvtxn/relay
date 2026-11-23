@@ -42,6 +42,8 @@ export interface SessionStreamState {
 	boxId: string | null;
 	/** Position in the box-acquisition queue. */
 	queuePosition: number | null;
+	/** Sticky model selection for this thread, when one is set. */
+	model: { preset: string; model: string; label?: string; contextTokens?: number } | null;
 	/** Authoritative token total reported by the server. */
 	tokens: number;
 	/** Authoritative cost total reported by the server. */
@@ -59,6 +61,7 @@ export const initialSessionStreamState: SessionStreamState = {
 	runId: null,
 	boxId: null,
 	queuePosition: null,
+	model: null,
 	tokens: 0,
 	cost: 0,
 };
@@ -175,6 +178,19 @@ export function applyServerEvent(state: SessionStreamState, event: ServerEvent):
 				cost: event.cost,
 				status: { kind: "thinking" },
 			};
+		case "model_changed": {
+			const model = {
+				preset: event.preset,
+				model: event.model,
+				label: event.label,
+				...(event.contextTokens ? { contextTokens: event.contextTokens } : {}),
+			};
+			return {
+				...state,
+				model,
+				messages: [...state.messages, { role: "system", content: `Switched to ${event.label}` }],
+			};
+		}
 		case "turn_complete":
 			return { ...flushDraft(state), status: { kind: "thinking" } };
 		case "error":

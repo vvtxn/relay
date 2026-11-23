@@ -42,7 +42,11 @@ export function ChatView(props: { model: string; version: string }) {
 							<div class="welcome-mark">RELAY</div>
 							<div class="welcome-meta">
 								<span>v{props.version}</span>
-								<span>{props.model.split("/").pop()}</span>
+								<span>
+									{streamState().model?.label ??
+										streamState().model?.model.split("/").pop() ??
+										props.model.split("/").pop()}
+								</span>
 							</div>
 							<div class="welcome-hints">
 								Send a message, type <code>@</code> to mention files, and press Stop to cancel a run.

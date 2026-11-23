@@ -3,7 +3,7 @@ import { Link, useNavigate } from "@tanstack/solid-router";
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/solid-query";
 import type { SessionSummary, WorkspaceSummary } from "@vvtxn/relay/core/sessions/index.ts";
 import { encodeWorkspaceToken } from "@vvtxn/relay/core/workspace-token.ts";
-import { sessionsQuery, workspaceQuery, workspacesQuery } from "#/api/queries.ts";
+import { modelCatalogQuery, sessionsQuery, settingsQuery, workspaceQuery, workspacesQuery } from "#/api/queries.ts";
 import { unregisterWorkspace } from "#/api/mutations.ts";
 import { startChat } from "#/api/open-chat.ts";
 import { addWorkspace } from "#/api/workspaces.ts";
@@ -36,6 +36,12 @@ export function Sidebar(props: {
 	const navigate = useNavigate();
 	const workspaces = useQuery(() => workspacesQuery);
 	const defaultWorkspace = useQuery(() => workspaceQuery);
+
+	/** Warm the settings overlay on intent so opening it paints immediately. */
+	const prefetchSettings = () => {
+		void queryClient.prefetchQuery(settingsQuery);
+		void queryClient.prefetchQuery(modelCatalogQuery);
+	};
 	const [expanded, setExpanded] = createSignal<Set<string>>(
 		new Set(props.activeWorkspace ? [props.activeWorkspace] : []),
 	);
@@ -327,7 +333,14 @@ export function Sidebar(props: {
 			</div>
 
 			<div class="sidebar-footer">
-				<button type="button" class="sidebar-user" title="Open settings" onClick={props.onOpenSettings}>
+				<button
+					type="button"
+					class="sidebar-user"
+					title="Open settings"
+					onPointerEnter={prefetchSettings}
+					onFocus={prefetchSettings}
+					onClick={props.onOpenSettings}
+				>
 					<span class="status-user">
 						<Show when={props.avatarUrl}>
 							<img class="avatar" src={props.avatarUrl} alt="" />

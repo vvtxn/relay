@@ -4,6 +4,7 @@ import { mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises"
 import { dirname, join } from "node:path";
 import type { Message } from "#/api/types.ts";
 import { storeEffect, type StoreError } from "../effect.ts";
+import type { LlmModelSelection } from "../llm-presets.ts";
 import { normalizeEntry } from "./normalize.ts";
 import { sessionDir, sessionFilePath } from "./paths.ts";
 import {
@@ -44,7 +45,7 @@ async function readSession(path: string): Promise<Session> {
 // Entry → Message conversion
 // ---------------------------------------------------------------------------
 
-function entryToMessage(entry: Entry): Message {
+function entryToMessage(entry: Entry): Message | null {
 	switch (entry.type) {
 		case "message":
 			return {
@@ -59,12 +60,19 @@ function entryToMessage(entry: Entry): Message {
 				name: entry.toolName,
 				content: entry.content,
 			};
+		case "model_change":
+			return null;
 	}
 }
 
 /** Convert session entries into the Message[] format expected by the LLM provider. */
 export function entriesToMessages(entries: Entry[]): Message[] {
-	return entries.map(entryToMessage);
+	const messages: Message[] = [];
+	for (const entry of entries) {
+		const message = entryToMessage(entry);
+		if (message) messages.push(message);
+	}
+	return messages;
 }
 
 export { stripAttachedContext } from "../display.ts";
@@ -235,6 +243,16 @@ export class SessionManager {
 	/** Update the total cost in the session header (persisted on next append or flush). */
 	setCost(cost: number): void {
 		this.session.header.cost = cost;
+		this.headerDirty = true;
+	}
+
+	getModel(): LlmModelSelection | null {
+		return this.session.header.model ?? null;
+	}
+
+	setModel(model: LlmModelSelection | null): void {
+		if (model) this.session.header.model = model;
+		else delete this.session.header.model;
 		this.headerDirty = true;
 	}
 

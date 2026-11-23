@@ -111,6 +111,10 @@ export type ProviderKind = "openai" | "anthropic";
 export interface ProviderConfig {
 	apiKey: string;
 	baseURL: string;
+	/** OpenAI wire format; `responses` targets the Responses API. */
+	api?: "chat-completions" | "responses";
+	/** How the adapter presents the credential. Defaults to the adapter's native style. */
+	authStyle?: "x-api-key" | "bearer";
 	/** Extra static headers merged into every request (preset-provided). */
 	headers?: Record<string, string>;
 	/**

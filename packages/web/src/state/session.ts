@@ -40,6 +40,7 @@ export function ensureSession(id: string, session: OpenSessionResponse): void {
 	commit({
 		...resetSessionStreamState(),
 		messages: entriesToUIMessages(session.entries),
+		model: session.header.model ? { ...session.header.model } : null,
 		tokens: session.tokens,
 		cost: session.cost,
 		running: session.running,
@@ -57,6 +58,11 @@ export function appendUserMessage(content: string): void {
 		phase: "preparing-workspace",
 		status: { kind: "thinking" },
 	});
+}
+
+/** Reflect a model choice immediately; `null` restores the account default. */
+export function setThreadModel(model: SessionStreamState["model"]): void {
+	commit({ ...current, model });
 }
 
 /** Record a client-side error (transport failure, stream error). */

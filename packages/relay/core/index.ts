@@ -38,6 +38,7 @@ export { sessionDir, sessionsBaseDir } from "./sessions/index.ts";
 export type {
 	Entry,
 	MessageEntry,
+	ModelChangeEntry,
 	NewEntry,
 	Session,
 	SessionHandle,
@@ -56,6 +57,7 @@ export { DatabaseUserStore } from "./auth/db.ts";
 export {
 	apiKeyHint,
 	buildLlmStatus,
+	credentialExpired,
 	DEFAULT_USER_LLM_SETTINGS,
 	DatabaseUserSettingsStore,
 	effectiveKeyPreset,
@@ -70,6 +72,7 @@ export {
 	isOpenCodeGoBaseURL,
 	llmPresets,
 	resolveLlmSelection,
+	resolveModelSelection,
 	sessionHeaderFor,
 } from "./llm-presets.ts";
 export {
@@ -86,13 +89,27 @@ export { clearStoredSession, readStoredSession, writeStoredSession } from "./aut
 export { authenticate } from "./auth/service.ts";
 export type { SecretCipher } from "./auth/secret.ts";
 export type {
+	ApiKeyCredential,
+	CredentialStatus,
+	LlmCredential,
+	OAuthCredential,
 	UserLlmPatch,
 	UserLlmRecord,
 	UserLlmSettings,
 	UserLlmStatus,
 	UserSettingsStore,
 } from "./auth/settings.ts";
-export type { LlmAuthKind, LlmDefaults, LlmModelOption, LlmPreset, LlmSelection, ResolvedLlm } from "./llm-presets.ts";
+export type {
+	LlmApi,
+	LlmAuthKind,
+	LlmAuthStyle,
+	LlmDefaults,
+	LlmModelOption,
+	LlmModelSelection,
+	LlmPreset,
+	LlmSelection,
+	ResolvedLlm,
+} from "./llm-presets.ts";
 export type { GitHubProfile } from "./auth/github.ts";
 export type { AuthSession, AuthSessionStore } from "./auth/sessions.ts";
 export type { StoredSession } from "./auth/session-file.ts";

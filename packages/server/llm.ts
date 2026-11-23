@@ -8,7 +8,7 @@
 
 import { createProvider } from "@vvtxn/relay/api/providers/index.ts";
 import type { LLMProvider, ProviderKind } from "@vvtxn/relay/api/types.ts";
-import type { UserLlmRecord } from "@vvtxn/relay/core/auth/settings.ts";
+import type { LlmCredential } from "@vvtxn/relay/core/auth/settings.ts";
 import {
 	availableLlmPresets,
 	CUSTOM_PRESET_ID,
@@ -16,10 +16,12 @@ import {
 	defaultPreset,
 	getLlmPreset,
 	type LlmDefaults,
+	type LlmModelSelection,
 	type LlmPreset,
 	type LlmSelection,
 	type ResolvedLlm,
 	resolveLlmSelection,
+	resolveModelSelection,
 } from "@vvtxn/relay/core/llm-presets.ts";
 import type { ServerConfig } from "./config.ts";
 import { isLoopbackHost } from "./config.ts";
@@ -49,29 +51,50 @@ export function resolveSelection(config: ServerConfig, selection: LlmSelection):
 export interface RunLlm {
 	provider: LLMProvider | null;
 	model: string;
+	modelLabel: string;
 	contextTokens: number;
 	preset: string;
 	label: string;
 }
 
+/** Selection plus the credential that pays for it. */
+export interface RunLlmInput {
+	selection: LlmSelection;
+	credential: LlmCredential | null;
+}
+
+/** Resolves a per-thread model override against the server defaults. */
+export function resolveOverride(config: ServerConfig, override: LlmModelSelection): ResolvedLlm {
+	return resolveModelSelection(override, llmDefaults(config));
+}
+
 /**
- * Builds the provider for one run. A stored key is only used for the preset it
- * was entered for; switching providers requires entering a new key.
+ * Builds the provider for one run. The credential must belong to the resolved
+ * preset; callers fetch it by preset id, so a key is never sent to a different
+ * host.
  */
-export function createRunLlm(config: ServerConfig, record: UserLlmRecord): RunLlm {
-	const resolved = resolveSelection(config, record.settings);
-	const keyMatches = record.apiKey !== null && (record.keyPreset ?? DEFAULT_PRESET_ID) === resolved.preset;
+export function createRunLlm(config: ServerConfig, input: RunLlmInput): RunLlm {
+	const resolved = resolveSelection(config, input.selection);
+	const credential = input.credential;
 	return {
-		provider: keyMatches
+		provider: credential
 			? createProvider({
 					provider: resolved.provider,
-					apiKey: record.apiKey ?? "",
+					api: resolved.api,
+					apiKey: credential.kind === "api-key" ? credential.apiKey : credential.accessToken,
+					authStyle: resolved.authStyle,
 					baseURL: resolved.baseURL,
-					headers: resolved.headers,
+					headers: {
+						...resolved.headers,
+						...(credential.kind === "oauth" && credential.accountId
+							? { "chatgpt-account-id": credential.accountId }
+							: {}),
+					},
 					...(resolved.sessionHeader ? { sessionHeader: resolved.sessionHeader } : {}),
 				})
 			: null,
 		model: resolved.model,
+		modelLabel: resolved.modelLabel,
 		contextTokens: resolved.contextTokens,
 		preset: resolved.preset,
 		label: resolved.label,

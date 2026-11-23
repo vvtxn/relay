@@ -24,8 +24,8 @@ web/
     │   ├── storage.ts     # localStorage helpers (server URL, cwd, session id)
     │   ├── runtime.ts     # ManagedRuntime over @vvtxn/client's appLayer + runApi/fork/interrupt helpers
     │   ├── query-client.ts# QueryClient + query key helpers
-    │   ├── queries.ts     # queryOptions for me/config/workspace/workspaces/sessions/session/files
-    │   ├── mutations.ts   # createSession/sendMessage/cancel/register/unregister (Effect-backed)
+    │   ├── queries.ts     # queryOptions for me/config/workspace/workspaces/sessions/session/files/models catalog
+    │   ├── mutations.ts   # createSession/sendMessage/cancel/register/unregister/connections/OAuth (Effect-backed)
     │   ├── open-chat.ts   # startChat(): create + seed a session in a workspace, return its id
     │   ├── workspaces.ts  # addWorkspace(): validate + register + invalidate
     │   └── bootstrap.ts   # Effect program: health → me → config + workspace picker (no session)
@@ -39,7 +39,7 @@ web/
     │   ├── OverviewPage.tsx # Root view: workspace cards + "continue last chat"; boot/auth gate
     │   ├── WorkspacePage.tsx# One workspace's threads; new chat; missing/unknown states
     │   ├── SessionPage.tsx# Hydrates session, starts stream, composes the shell
-    │   └── SettingsPage.tsx # Account + appearance + provider/model/API key; overlay under `/s/:id` and standalone `/settings`
+    │   └── SettingsPage.tsx # Account + appearance + connections + default model; overlay and standalone
     └── components/
         ├── AppShell.tsx        # Shared sidebar + main-pane frame for all pages
         ├── Sidebar.tsx         # Workspace switcher, session list, new chat
@@ -50,7 +50,8 @@ web/
         ├── ToolCalls.tsx       # Per-call rows: tool accents, grep matches, output previews
         ├── DiffBlock.tsx       # Unified diffs via @pierre/diffs (plain-line fallback)
         ├── DiffModal.tsx       # Review modal (native dialog, showModal) for one edit/write diff, scrollable
-        ├── Composer.tsx        # Textarea + @-mention picker + send/stop
+        ├── Composer.tsx        # Textarea + @-mention picker + model selector + send/stop
+        ├── ModelSelector.tsx   # Thread model popover grouped by connected subscription
         ├── StatusBar.tsx       # Branch, box, cost, user, sign out
         └── BootScreen.tsx      # Loading / error / login screens
 ```
@@ -83,6 +84,10 @@ round trip. Keep these rules in mind:
 - The session route's loader (`router.tsx`) fetches a **fresh** snapshot (`fetchQuery` +
   `staleReloadMode: "blocking"`), so a stale router/query cache never paints; a just-created or still-streamed session
   resolves from cache with no request.
+- Both route loaders also **warm every query the shell reads before the route commits** (`me`, `config`, the workspace
+  picker, and the target workspace's session list). This is not just speed: Solid's resource-backed queries suspend the
+  nearest Suspense boundary while their data is undefined, and the router's root/match boundaries fall back to the
+  full-screen `BootScreen`. A query whose first read happens after commit would flash the boot screen.
 - `OverviewPage` seeds me/config/workspaces into the query cache and prefetches settings, so the first shell render
   needs no fetches.
 - Queries not needed for first paint stay lazy: the mention file list is only enabled while the picker is open
@@ -90,6 +95,13 @@ round trip. Keep these rules in mind:
 - Leaving a session stops its stream and invalidates that snapshot, so returning to it always refetches — the stream is
   the only witness of events while detached. The previous view stays on screen while the loader resolves.
 - `defaultPreload: "intent"` warms session loaders and workspace session lists on hover.
+
+**Query reads must stay inside their own Suspense boundary.** Solid attributes a suspended resource to the owner that
+created the reading memo/resource, not the JSX location — so a boundary must wrap the *component invocation* whose memos
+read query data. `AppShell` wraps `<Sidebar>` and `ModelSelector` renders `<ModelPickerBody>` inside a Suspense; both
+keep a first fetch (workspace expansion, model catalog) from suspending the route and flashing `BootScreen`. The
+composer's mention list avoids the problem by not reading `.data` while the query is loading. Any new component that
+reads a lazily-enabled query must follow one of these patterns — or warm the query before it can suspend.
 
 ### Boot flow
 
@@ -122,20 +134,42 @@ same font via `relay fonts install` — see `packages/relay/assets/fonts/README.
 
 ### Settings (`/s/:sessionId/settings` and `/settings`)
 
-`pages/SettingsPage.tsx` renders one auth-guarded `SettingsPanel` with grouped sections: **Account** (identity from
-`/api/me`, sign out), **Appearance** (dark/light switch, applied instantly and persisted locally), and **Model & API
-key** (provider preset, model, and the key). The `GET /api/settings` payload drives the form: the presets this server
-offers (including `default` and, in local mode or with `RELAY_LLM_ALLOW_CUSTOM=1`, `custom`), the stored selection, and
-the effective provider/model/context the next run will use; `/api/models?preset=` fills the picker (live catalog,
-curated fallback). Plan-scoped presets carry `allowAnyModel: false` and hide the "Other…" escape hatch. The key is
-per-user, stored encrypted server-side (local files by default), bound to the preset it was entered for, and never
-echoed back — switching presets clears a bound key, so the page asks for a new one. The form re-hydrates only when the
-saved payload actually changes, so background refetches never clobber unsaved edits.
+`pages/SettingsPage.tsx` renders one auth-guarded `SettingsPanel` with two tabs: **General** (Account identity and
+Appearance palette cards) and **Models** (Connections full width, Default model, and the advanced custom-endpoint
+form). A fresh account with no connections lands on Models; everyone else starts on General. General stacks Appearance
+below Account; Models is a responsive two-column grid (one column below 980px), where Connections spans the width and
+its provider cards share a height with bottom-aligned actions. Sections are self-contained components that read the
+shared TanStack queries. Both settings route loaders — and the sidebar chip's hover/focus — warm identity, settings, and
+model-catalog queries, so the panel paints without its Suspense fallback; that fallback is a progress bar rather than a
+text placeholder.
+
+Connections are per preset, not one global key: **OpenCode Go** stores an API key, while **Claude** and **ChatGPT** use
+subscription OAuth (`GET /api/oauth/:provider/start`). Claude uses a paste flow (the provider displays `code#state`,
+submitted to `/api/oauth/claude/complete`); ChatGPT uses the Codex loopback redirect on `localhost:1455`, and the page
+polls settings until the credential appears. Cancelling a pending sign-in calls `DELETE /api/oauth/:provider/pending`
+so the server's loopback listener closes instead of holding the port until its timeout.
+`PUT/DELETE /api/connections/:preset` manage API-key presets without
+touching the default selection. Credentials are encrypted server-side per user; the settings payload exposes only
+`connections: { kind, hint, expiresAt, accountId }[]` and never the secret.
+
+The default-model section reads `GET /api/models` (no preset), which returns one group per connected subscription.
+Saving writes the preset/model/context through `PUT /api/settings`. The form re-hydrates only when the saved payload
+actually changes, so background refetches never clobber unsaved edits.
 
 In-app entry point (the sidebar user chip) opens the **nested overlay** `/s/:sessionId/settings`: the chat stays
 mounted and its stream connected behind it, so opening/closing settings is instant and nothing is lost. The standalone
-`/settings` route serves CLI deep links (the CLI blocks until a key is set) and returns to the last opened session
-(`relay.sessionId` in localStorage) or the boot flow.
+`/settings` route serves CLI deep links (the CLI blocks until a connection is set) and returns to the last opened
+session (`relay.sessionId` in localStorage) or the boot flow. Route-loader failures render an in-place error state
+instead of redirecting to `/`, so a transient refetch (or a pruned session) can never eject an open settings overlay.
+
+### Thread model selector
+
+`components/ModelSelector.tsx` sits in the composer's action row and opens a grouped popover of every connected
+subscription's models. Selecting a model calls `setThreadModel` (optimistic state) and the composer sends the choice
+with the next message (`SendMessageRequest.model`). The selection is sticky for the thread: the server persists it on
+the session header and emits `model_changed`, which the shared reducer folds into a transcript notice and the selector
+state. Choosing **Account default** sends `model: null`, which drops the sticky override (instead of pinning today's
+default) so the thread keeps following the account default as it changes.
 
 ### Markdown and code highlighting
 

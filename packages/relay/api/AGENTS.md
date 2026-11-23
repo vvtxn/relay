@@ -12,8 +12,9 @@ api/
 ├── errors.ts              # ProviderError + retryability classification
 ├── http.ts                # postJson(): fetch timeout + ProviderError mapping shared by adapters
 ├── providers/
-│   ├── index.ts           # createProvider({ provider, apiKey, baseURL })
+│   ├── index.ts           # createProvider({ provider, api, apiKey, baseURL })
 │   ├── openai.ts          # OpenAICompletionsProvider (wire format lives here)
+│   ├── openai-responses.ts# OpenAIResponsesProvider (ChatGPT/Codex Responses API)
 │   └── anthropic.ts       # AnthropicProvider (wire format lives here)
 └── streaming/
     ├── sse.ts             # Generic event:/data: SSE reader (CRLF, comments, multi-line data)
@@ -66,11 +67,17 @@ Each adapter owns its wire types and translates at the boundary. OpenAI snake_ca
 - `OpenAICompletionsProvider` — works with any OpenAI-compatible API (OpenRouter, open-source models, Kimi, etc.).
   Normalizes base URLs (strips `/chat/completions`), maps neutral stop reasons/usage, and keeps `getGenerationStats()`
   for OpenRouter cost lookups.
-- `AnthropicProvider` — speaks the Messages API (`/messages`, `x-api-key`, `anthropic-version: 2023-06-01`). Extracts
-  system messages to the top-level `system`, maps assistant tool calls to `tool_use`, groups consecutive tool results
-  into one `tool_result` user message, synthesizes missing results, and sanitizes tool ids. Anthropic `input_tokens`
-  excludes cached tokens, so `inputTokens` sums input + cache read + cache write.
-- `createProvider()` picks the adapter for `LLM_PROVIDER` (`openai` or `anthropic`).
+- `OpenAIResponsesProvider` — speaks the Responses API used by the ChatGPT/Codex subscription backend: input items,
+  function calls/results, response text deltas, and usage. Also handles non-streaming completion. Tool calls and their
+  `function_call_output`s are paired like the Anthropic adapter: a missing output is synthesized as "No result
+  provided" and an orphaned output is dropped, because a trimmed/interrupted transcript would otherwise be rejected.
+- `AnthropicProvider` — speaks the Messages API (`/messages`, `x-api-key`, `anthropic-version: 2023-06-01`). With
+  `authStyle: "bearer"` it sends `Authorization: Bearer` instead, which the Claude subscription (OAuth) path uses.
+  Extracts system messages to the top-level `system`, maps assistant tool calls to `tool_use`, groups consecutive tool
+  results into one `tool_result` user message, synthesizes missing results, and sanitizes tool ids. Anthropic
+  `input_tokens` excludes cached tokens, so `inputTokens` sums input + cache read + cache write.
+- `createProvider()` picks the adapter from `provider` (`openai`/`anthropic`) and `api` (`chat-completions` default,
+  or `responses`).
 
 `ProviderConfig` also accepts preset-provided `headers` and a `sessionHeader`; the adapters merge those, always send
 `User-Agent: relay/<version>`, and write `request.sessionId` into `sessionHeader` when both are present. OpenCode Go

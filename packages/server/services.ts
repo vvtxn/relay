@@ -8,19 +8,24 @@ import { createWorkspaceManager, type WorkspaceManager } from "@vvtxn/box/worksp
 import type { AuthenticatedUser, AuthIdentity } from "@vvtxn/relay/core/index.ts";
 import {
 	createSecretCipher,
+	credentialExpired,
 	DatabaseAuthSessionStore,
 	DatabaseUserSettingsStore,
 	DatabaseUserStore,
 	FileUserSettingsStore,
 	loadMasterKey,
 	loadOrCreateLocalMasterKey,
+	type OAuthCredential,
 	type UserSettingsStore,
 } from "@vvtxn/relay/core/index.ts";
 import { createDatabaseClient, type DatabaseClient } from "@vvtxn/relay/core/database.ts";
-import { storeEffect, type StoreError } from "@vvtxn/relay/core/effect.ts";
+import { causeMessage, storeEffect, toStoreError, type StoreError } from "@vvtxn/relay/core/effect.ts";
+import type { LlmModelSelection } from "@vvtxn/relay/core/llm-presets.ts";
+import { getLlmPreset } from "@vvtxn/relay/core/llm-presets.ts";
 import { DatabaseSessionStore } from "@vvtxn/relay/core/sessions/index.ts";
 import type { ServerConfig } from "./config.ts";
 import { createRunLlm } from "./llm.ts";
+import { refreshOAuthCredential } from "./oauth.ts";
 import { RunManager } from "./run.ts";
 
 /**
@@ -165,9 +170,9 @@ const workspacesLayer = Layer.effect(
 );
 
 /**
- * The per-process RunManager. Each run resolves the owner's LLM selection,
- * builds a provider from their stored key, and keeps the key out of the
- * model's context.
+ * The per-process RunManager. Each run resolves a selection (the thread's
+ * override or the account default), loads the credential for that preset, and
+ * refreshes an expired subscription token before building the provider.
  */
 const runsLayer = Layer.effect(
 	Runs,
@@ -176,10 +181,58 @@ const runsLayer = Layer.effect(
 		const userSettings = yield* UserSettings;
 		const boxes = yield* Boxes;
 		const workspaces = yield* Workspaces;
-		const llmFor = (ownerId: string) =>
+		/** Coalesce refreshes so concurrent runs rotate one refresh token once. */
+		const refreshes = new Map<string, Promise<OAuthCredential>>();
+		const refreshCredential = (
+			key: string,
+			provider: "anthropic" | "openai",
+			credential: OAuthCredential,
+		): Promise<OAuthCredential> => {
+			const existing = refreshes.get(key);
+			if (existing) return existing;
+			const pending = refreshOAuthCredential(provider, credential).finally(() => {
+				refreshes.delete(key);
+			});
+			refreshes.set(key, pending);
+			return pending;
+		};
+		const llmFor = (ownerId: string, override: LlmModelSelection | null) =>
 			Effect.gen(function* () {
-				const record = yield* userSettings.getLlm(ownerId);
-				return createRunLlm(config, record);
+				const status = yield* userSettings.getLlmStatus(ownerId);
+				const selection = override
+					? {
+							preset: override.preset,
+							provider: null,
+							baseURL: null,
+							model: override.model,
+							contextTokens: override.contextTokens ?? null,
+						}
+					: status.settings;
+				let credential = yield* userSettings.getCredential(ownerId, selection.preset);
+				const oauthProvider = getLlmPreset(selection.preset)?.oauth?.provider;
+				if (credential?.kind === "oauth" && oauthProvider && credentialExpired(credential)) {
+					const expired = credential;
+					const key = `${ownerId}:${selection.preset}`;
+					credential = yield* Effect.tryPromise({
+						try: () => refreshCredential(key, oauthProvider, expired),
+						catch: toStoreError,
+					}).pipe(
+						Effect.tap((refreshed) => userSettings.setCredential(ownerId, selection.preset, refreshed)),
+						// A failed refresh must not be silent: the provider call will
+						// then fail with an opaque 401. Log it so the operator can tell
+						// "the subscription sign-in expired" apart from a provider bug.
+						Effect.catchCause((cause) =>
+							Effect.sync(() => {
+								console.warn(
+									`relay llm: could not refresh the "${selection.preset}" subscription token ` +
+										`for ${ownerId}; runs will fail until it is reconnected in Settings: ${causeMessage(cause)}`,
+								);
+								return expired;
+							}),
+						),
+					);
+				}
+				return createRunLlm(config, { selection, credential });
 			});
 		return new RunManager({ config, llmFor, boxes, workspaces });
 	}),

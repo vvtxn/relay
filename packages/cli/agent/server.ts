@@ -449,8 +449,10 @@ export async function apiKeyStatus(serverUrl: string): Promise<ApiKeyStatus> {
 		if (!response.ok) return { status: "unreachable", detail: `the server returned ${response.status}` };
 		const body = (await response.json()) as Partial<SettingsResponse> | null;
 		// A malformed body counts as "missing": the TUI can only be entered once a
-		// key is confirmed, and the user can always re-save it.
-		if (body?.apiKey?.set) return { status: "configured" };
+		// connection is confirmed, and the user can always reconnect it.
+		const selected = body?.llm?.preset;
+		const connected = body?.connections?.some((connection) => connection.preset === selected) ?? false;
+		if (connected) return { status: "configured" };
 		const label = body?.effective?.label;
 		return { status: "missing", ...(label ? { label } : {}) };
 	} catch (error) {
@@ -478,7 +480,7 @@ export async function ensureApiKey(state: ServerState): Promise<void> {
 
 	const settingsUrl = new URL("/settings", state.webUrl || state.url).toString();
 	const label = status.label ? ` for ${status.label}` : "";
-	console.log(`No API key configured${label}. Opening ${settingsUrl} — add one to continue.`);
+	console.log(`No model connection configured${label}. Opening ${settingsUrl} — connect one to continue.`);
 	openBrowser(settingsUrl);
 
 	const deadline = Date.now() + API_KEY_TIMEOUT_MS;
@@ -487,11 +489,11 @@ export async function ensureApiKey(state: ServerState): Promise<void> {
 		await delay(1_000);
 		const current = await apiKeyStatus(state.url);
 		if (current.status === "configured") {
-			console.log("API key saved.");
+			console.log("Connection saved.");
 			return;
 		}
 		if (current.status === "unauthenticated") {
-			throw new Error(`Signed out while waiting for the API key. Run \`${relayCommand()}\` again.`);
+			throw new Error(`Signed out while waiting for the connection. Run \`${relayCommand()}\` again.`);
 		}
 		if (current.status === "unreachable" && !warned) {
 			// A transient blip (server restart) should not abort the wait; the
@@ -501,7 +503,7 @@ export async function ensureApiKey(state: ServerState): Promise<void> {
 		}
 	}
 	throw new Error(
-		`Timed out waiting for an API key. Add one in the web Settings page, then run \`${relayCommand()}\` again.`,
+		`Timed out waiting for a model connection. Connect one in the web Settings page, then run \`${relayCommand()}\` again.`,
 	);
 }
 

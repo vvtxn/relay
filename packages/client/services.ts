@@ -15,12 +15,17 @@ import type {
 	FileListResponse,
 	HealthResponse,
 	MeResponse,
+	ModelCatalogResponse,
 	ModelsResponse,
+	OAuthCompleteResponse,
+	OAuthStartResponse,
 	OpenSessionResponse,
 	RegisterWorkspaceResponse,
+	SendMessageRequest,
 	SendMessageResponse,
 	ServerEvent,
 	SessionListResponse,
+	SetConnectionResponse,
 	SettingsResponse,
 	StatusResponse,
 	UpdateSettingsRequest,
@@ -64,6 +69,13 @@ export interface ApiShape {
 	getSettings(): Effect.Effect<SettingsResponse, RelayError>;
 	updateSettings(settings: UpdateSettingsRequest): Effect.Effect<StatusResponse, RelayError>;
 	listModels(preset: string): Effect.Effect<ModelsResponse, RelayError>;
+	listModelCatalog(): Effect.Effect<ModelCatalogResponse, RelayError>;
+	startOAuth(provider: string): Effect.Effect<OAuthStartResponse, RelayError>;
+	completeOAuth(provider: string, code: string): Effect.Effect<OAuthCompleteResponse, RelayError>;
+	disconnectOAuth(provider: string): Effect.Effect<OAuthCompleteResponse, RelayError>;
+	cancelOAuth(provider: string): Effect.Effect<StatusResponse, RelayError>;
+	setConnection(preset: string, apiKey: string): Effect.Effect<SetConnectionResponse, RelayError>;
+	removeConnection(preset: string): Effect.Effect<SetConnectionResponse, RelayError>;
 	listSessions(cwd: string): Effect.Effect<SessionListResponse, RelayError>;
 	listWorkspaces(): Effect.Effect<WorkspacesResponse, RelayError>;
 	validateWorkspace(cwd: string): Effect.Effect<WorkspaceValidateResponse, RelayError>;
@@ -72,7 +84,11 @@ export interface ApiShape {
 	createSession(cwd: string, options?: { forceNew?: boolean }): Effect.Effect<CreateSessionResponse, RelayError>;
 	openSession(id: string): Effect.Effect<OpenSessionResponse, RelayError>;
 	listFiles(sessionId: string): Effect.Effect<FileListResponse, RelayError>;
-	sendMessage(sessionId: string, content: string): Effect.Effect<SendMessageResponse, RelayError>;
+	sendMessage(
+		sessionId: string,
+		content: string,
+		model?: SendMessageRequest["model"],
+	): Effect.Effect<SendMessageResponse, RelayError>;
 	cancel(sessionId: string): Effect.Effect<StatusResponse, RelayError>;
 	/** Raw SSE subscription; consumed by {@link SessionStream}. */
 	subscribe(sessionId: string, options: SubscribeOptions): AsyncIterable<ServerEvent>;
@@ -90,6 +106,13 @@ export const ApiLive = (client: RelayClient): Layer.Layer<Api> =>
 		getSettings: () => tryRelay(() => client.getSettings()),
 		updateSettings: (settings) => tryRelay(() => client.updateSettings(settings)),
 		listModels: (preset) => tryRelay(() => client.listModels(preset)),
+		listModelCatalog: () => tryRelay(() => client.listModelCatalog()),
+		startOAuth: (provider) => tryRelay(() => client.startOAuth(provider)),
+		completeOAuth: (provider, code) => tryRelay(() => client.completeOAuth(provider, code)),
+		disconnectOAuth: (provider) => tryRelay(() => client.disconnectOAuth(provider)),
+		cancelOAuth: (provider) => tryRelay(() => client.cancelOAuth(provider)),
+		setConnection: (preset, apiKey) => tryRelay(() => client.setConnection(preset, apiKey)),
+		removeConnection: (preset) => tryRelay(() => client.removeConnection(preset)),
 		listSessions: (cwd) => tryRelay(() => client.listSessions(cwd)),
 		listWorkspaces: () => tryRelay(() => client.listWorkspaces()),
 		validateWorkspace: (cwd) => tryRelay(() => client.validateWorkspace(cwd)),
@@ -98,7 +121,7 @@ export const ApiLive = (client: RelayClient): Layer.Layer<Api> =>
 		createSession: (cwd, options) => tryRelay(() => client.createSession(cwd, options)),
 		openSession: (id) => tryRelay(() => client.openSession(id)),
 		listFiles: (sessionId) => tryRelay(() => client.listFiles(sessionId)),
-		sendMessage: (sessionId, content) => tryRelay(() => client.sendMessage(sessionId, content)),
+		sendMessage: (sessionId, content, model) => tryRelay(() => client.sendMessage(sessionId, content, model)),
 		cancel: (sessionId) => tryRelay(() => client.cancel(sessionId)),
 		subscribe: (sessionId, options) => client.subscribe(sessionId, options),
 	});
