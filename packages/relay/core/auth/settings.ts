@@ -171,6 +171,30 @@ export function apiKeyHint(apiKey: string): string {
 	return apiKey.length <= 4 ? "•" : apiKey.slice(-4);
 }
 
+/**
+ * Serializes read-modify-write tasks per key. Both settings backends rewrite a
+ * whole document/map on every save, so two concurrent writes for one user (a
+ * token refresh racing a Settings save, two subscriptions refreshing together)
+ * would otherwise lose one of them.
+ */
+export function createKeyedSerializer(): <T>(key: string, task: () => Promise<T>) => Promise<T> {
+	const tails = new Map<string, Promise<unknown>>();
+	return <T>(key: string, task: () => Promise<T>): Promise<T> => {
+		const previous = tails.get(key) ?? Promise.resolve();
+		// Run the task whether or not the previous one settled successfully.
+		const next = previous.then(task, task);
+		const tail = next.then(
+			() => undefined,
+			() => undefined,
+		);
+		tails.set(key, tail);
+		void tail.then(() => {
+			if (tails.get(key) === tail) tails.delete(key);
+		});
+		return next;
+	};
+}
+
 /** Legacy keys predate preset binding and belong to the server-default preset. */
 export function effectiveKeyPreset(keyPreset: string | null): string {
 	return keyPreset ?? DEFAULT_PRESET_ID;
@@ -207,6 +231,8 @@ export class DatabaseUserSettingsStore implements UserSettingsStore {
 	private readonly client: DatabaseClient;
 	private readonly cipher: SecretCipher;
 	private readonly schemaReady: Promise<void>;
+	/** One settings document per user: serialize read-modify-write saves. */
+	private readonly serialize = createKeyedSerializer();
 
 	constructor(options: DatabaseUserSettingsStoreOptions) {
 		this.client = options.client;
@@ -251,14 +277,16 @@ export class DatabaseUserSettingsStore implements UserSettingsStore {
 	}
 
 	setCredential(userId: string, preset: string, credential: LlmCredential | null): Effect.Effect<void, StoreError> {
-		return storeEffect(async () => {
-			await this.schemaReady;
-			const row = await this.readRow(userId);
-			const credentials = parseCredentialMap(row?.llm_credentials);
-			if (credential) credentials[preset] = await this.encryptCredential(userId, credential);
-			else delete credentials[preset];
-			await this.writeCredentials(userId, credentials, row);
-		});
+		return storeEffect(() =>
+			this.serialize(userId, async () => {
+				await this.schemaReady;
+				const row = await this.readRow(userId);
+				const credentials = parseCredentialMap(row?.llm_credentials);
+				if (credential) credentials[preset] = await this.encryptCredential(userId, credential);
+				else delete credentials[preset];
+				await this.writeCredentials(userId, credentials, row);
+			}),
+		);
 	}
 
 	listCredentials(userId: string): Effect.Effect<CredentialStatus[], StoreError> {
@@ -287,7 +315,7 @@ export class DatabaseUserSettingsStore implements UserSettingsStore {
 	}
 
 	setLlm(userId: string, patch: UserLlmPatch): Effect.Effect<void, StoreError> {
-		return storeEffect(() => this.setLlmPromise(userId, patch));
+		return storeEffect(() => this.serialize(userId, () => this.setLlmPromise(userId, patch)));
 	}
 
 	private async setLlmPromise(userId: string, patch: UserLlmPatch): Promise<void> {

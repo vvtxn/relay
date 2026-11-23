@@ -16,6 +16,7 @@ import { isEnoent, type SecretCipher, userSettingsAad } from "./secret.ts";
 import {
 	apiKeyHint,
 	buildLlmStatus,
+	createKeyedSerializer,
 	credentialStatusFrom,
 	effectiveKeyPreset,
 	parseCredentialPayload,
@@ -63,6 +64,8 @@ export class FileUserSettingsStore implements UserSettingsStore {
 	private readonly dir: string;
 	private readonly cipher: SecretCipher;
 	private readonly dirReady: Promise<void>;
+	/** One settings document per user: serialize read-modify-write saves. */
+	private readonly serialize = createKeyedSerializer();
 
 	constructor(options: FileUserSettingsStoreOptions) {
 		this.dir = options.dir;
@@ -114,31 +117,33 @@ export class FileUserSettingsStore implements UserSettingsStore {
 	}
 
 	setCredential(userId: string, preset: string, credential: LlmCredential | null): Effect.Effect<void, StoreError> {
-		return storeEffect(async () => {
-			await this.dirReady;
-			const stored = await this.read(userId);
-			const next = { ...(stored ?? {}) };
-			const credentials = { ...(next.credentials ?? {}) };
-			if (credential) credentials[preset] = await this.encryptCredential(userId, credential);
-			else delete credentials[preset];
-			if (Object.keys(credentials).length > 0) next.credentials = credentials;
-			else delete next.credentials;
-			// Keep the legacy single-key fields coherent when the changed preset
-			// is the one they belong to.
-			const legacyPreset = next.apiKey ? effectiveKeyPreset(next.keyPreset ?? null) : null;
-			if (legacyPreset === preset) {
-				const record = credentials[preset];
-				if (record) {
-					if (record.hint) next.hint = record.hint;
-					else delete next.hint;
-				} else {
-					delete next.apiKey;
-					delete next.hint;
-					delete next.keyPreset;
+		return storeEffect(() =>
+			this.serialize(userId, async () => {
+				await this.dirReady;
+				const stored = await this.read(userId);
+				const next = { ...(stored ?? {}) };
+				const credentials = { ...(next.credentials ?? {}) };
+				if (credential) credentials[preset] = await this.encryptCredential(userId, credential);
+				else delete credentials[preset];
+				if (Object.keys(credentials).length > 0) next.credentials = credentials;
+				else delete next.credentials;
+				// Keep the legacy single-key fields coherent when the changed preset
+				// is the one they belong to.
+				const legacyPreset = next.apiKey ? effectiveKeyPreset(next.keyPreset ?? null) : null;
+				if (legacyPreset === preset) {
+					const record = credentials[preset];
+					if (record) {
+						if (record.hint) next.hint = record.hint;
+						else delete next.hint;
+					} else {
+						delete next.apiKey;
+						delete next.hint;
+						delete next.keyPreset;
+					}
 				}
-			}
-			await this.write(userId, next);
-		});
+				await this.write(userId, next);
+			}),
+		);
 	}
 
 	listCredentials(userId: string): Effect.Effect<CredentialStatus[], StoreError> {
@@ -166,56 +171,58 @@ export class FileUserSettingsStore implements UserSettingsStore {
 	}
 
 	setLlm(userId: string, patch: UserLlmPatch): Effect.Effect<void, StoreError> {
-		return storeEffect(async () => {
-			await this.dirReady;
-			const stored = await this.read(userId);
-			const current = parseStoredLlm(stored?.llm);
-			const credentials = { ...(stored?.credentials ?? {}) };
+		return storeEffect(() =>
+			this.serialize(userId, async () => {
+				await this.dirReady;
+				const stored = await this.read(userId);
+				const current = parseStoredLlm(stored?.llm);
+				const credentials = { ...(stored?.credentials ?? {}) };
 
-			let apiKey = stored?.apiKey ?? null;
-			let hint = stored?.hint ?? null;
-			let keyPreset = stored?.apiKey ? effectiveKeyPreset(stored.keyPreset ?? null) : null;
+				let apiKey = stored?.apiKey ?? null;
+				let hint = stored?.hint ?? null;
+				let keyPreset = stored?.apiKey ? effectiveKeyPreset(stored.keyPreset ?? null) : null;
 
-			if (patch.apiKey !== undefined) {
-				if (patch.apiKey === null) {
-					delete credentials[patch.preset];
-					if (keyPreset === patch.preset) {
-						apiKey = null;
-						hint = null;
-						keyPreset = null;
+				if (patch.apiKey !== undefined) {
+					if (patch.apiKey === null) {
+						delete credentials[patch.preset];
+						if (keyPreset === patch.preset) {
+							apiKey = null;
+							hint = null;
+							keyPreset = null;
+						}
+					} else {
+						const record = await this.encryptCredential(userId, { kind: "api-key", apiKey: patch.apiKey });
+						credentials[patch.preset] = record;
+						apiKey = record.secret;
+						hint = record.hint;
+						keyPreset = patch.preset;
 					}
-				} else {
-					const record = await this.encryptCredential(userId, { kind: "api-key", apiKey: patch.apiKey });
-					credentials[patch.preset] = record;
-					apiKey = record.secret;
-					hint = record.hint;
-					keyPreset = patch.preset;
 				}
-			}
 
-			const settings: UserLlmSettings = {
-				preset: patch.preset,
-				provider: patch.provider !== undefined ? patch.provider : current.provider,
-				baseURL: patch.baseURL !== undefined ? patch.baseURL : current.baseURL,
-				model: patch.model !== undefined ? patch.model : current.model,
-				contextTokens: patch.contextTokens !== undefined ? patch.contextTokens : current.contextTokens,
-			};
+				const settings: UserLlmSettings = {
+					preset: patch.preset,
+					provider: patch.provider !== undefined ? patch.provider : current.provider,
+					baseURL: patch.baseURL !== undefined ? patch.baseURL : current.baseURL,
+					model: patch.model !== undefined ? patch.model : current.model,
+					contextTokens: patch.contextTokens !== undefined ? patch.contextTokens : current.contextTokens,
+				};
 
-			await this.write(userId, {
-				...(apiKey ? { apiKey } : {}),
-				...(hint ? { hint } : {}),
-				...(keyPreset ? { keyPreset } : {}),
-				...(Object.keys(credentials).length > 0 ? { credentials } : {}),
-				llm: {
-					preset: settings.preset,
-					...(settings.provider ? { provider: settings.provider } : {}),
-					...(settings.baseURL ? { baseURL: settings.baseURL } : {}),
-					...(settings.model ? { model: settings.model } : {}),
-					...(settings.contextTokens ? { contextTokens: settings.contextTokens } : {}),
-				},
-				updatedAt: new Date().toISOString(),
-			});
-		});
+				await this.write(userId, {
+					...(apiKey ? { apiKey } : {}),
+					...(hint ? { hint } : {}),
+					...(keyPreset ? { keyPreset } : {}),
+					...(Object.keys(credentials).length > 0 ? { credentials } : {}),
+					llm: {
+						preset: settings.preset,
+						...(settings.provider ? { provider: settings.provider } : {}),
+						...(settings.baseURL ? { baseURL: settings.baseURL } : {}),
+						...(settings.model ? { model: settings.model } : {}),
+						...(settings.contextTokens ? { contextTokens: settings.contextTokens } : {}),
+					},
+					updatedAt: new Date().toISOString(),
+				});
+			}),
+		);
 	}
 
 	/** Decrypts one preset's credential, falling back to a legacy single key. */

@@ -164,12 +164,25 @@ export class OpenAIResponsesProvider implements LLMProvider {
 
 function toResponsesInput(messages: Message[]): unknown[] {
 	const input: unknown[] = [];
+	// Call ids from the most recent assistant message that still need an output.
+	// Context trimming and interrupted runs can drop either side of a pair, and
+	// the Responses API rejects unmatched `call_id`s, so missing outputs are
+	// synthesized and orphaned outputs are dropped.
+	let expected: string[] = [];
+	const flushMissingOutputs = (): void => {
+		for (const id of expected) {
+			input.push({ type: "function_call_output", call_id: id, output: "No result provided" });
+		}
+		expected = [];
+	};
+
 	for (const message of messages) {
 		if (!message) continue;
 		switch (message.role) {
 			case "system":
 				break;
 			case "user":
+				flushMissingOutputs();
 				input.push({
 					type: "message",
 					role: "user",
@@ -177,6 +190,7 @@ function toResponsesInput(messages: Message[]): unknown[] {
 				});
 				break;
 			case "assistant": {
+				flushMissingOutputs();
 				if (message.content) {
 					input.push({
 						type: "message",
@@ -185,24 +199,33 @@ function toResponsesInput(messages: Message[]): unknown[] {
 					});
 				}
 				for (const toolCall of message.toolCalls ?? []) {
+					if (!toolCall.id) continue;
 					input.push({
 						type: "function_call",
 						call_id: toolCall.id,
 						name: toolCall.name,
 						arguments: toolCall.arguments,
 					});
+					expected.push(toolCall.id);
 				}
 				break;
 			}
-			case "tool":
+			case "tool": {
+				const callId = message.toolCallId ?? "";
+				const at = callId ? expected.indexOf(callId) : -1;
+				// A result for a call that is not in the transcript would be rejected.
+				if (at === -1) break;
+				expected.splice(at, 1);
 				input.push({
 					type: "function_call_output",
-					call_id: message.toolCallId ?? "",
+					call_id: callId,
 					output: message.content ?? "",
 				});
 				break;
+			}
 		}
 	}
+	flushMissingOutputs();
 	return input;
 }
 

@@ -204,6 +204,8 @@ the prompt per run with its box/host context.
 - `UserSettingsStore` (auth/settings*.ts) owns the default selection plus **per-preset credentials**: API keys or
   OAuth tokens, encrypted at rest (AES-256-GCM under a master key, owner-bound AAD), local files by default, database
   optional. `getCredential(userId, preset)` is the plaintext path; status reads expose only masked hints/expiry.
+  Writes go through a per-user serializer (`createKeyedSerializer`), because both backends rewrite the whole selection
+  and credential map on every save (concurrent token refreshes must not lose each other).
 
 ### Workspace Helpers (`workspace.ts`)
 

@@ -68,7 +68,9 @@ Each adapter owns its wire types and translates at the boundary. OpenAI snake_ca
   Normalizes base URLs (strips `/chat/completions`), maps neutral stop reasons/usage, and keeps `getGenerationStats()`
   for OpenRouter cost lookups.
 - `OpenAIResponsesProvider` — speaks the Responses API used by the ChatGPT/Codex subscription backend: input items,
-  function calls/results, response text deltas, and usage. Also handles non-streaming completion.
+  function calls/results, response text deltas, and usage. Also handles non-streaming completion. Tool calls and their
+  `function_call_output`s are paired like the Anthropic adapter: a missing output is synthesized as "No result
+  provided" and an orphaned output is dropped, because a trimmed/interrupted transcript would otherwise be rejected.
 - `AnthropicProvider` — speaks the Messages API (`/messages`, `x-api-key`, `anthropic-version: 2023-06-01`). With
   `authStyle: "bearer"` it sends `Authorization: Bearer` instead, which the Claude subscription (OAuth) path uses.
   Extracts system messages to the top-level `system`, maps assistant tool calls to `tool_use`, groups consecutive tool
