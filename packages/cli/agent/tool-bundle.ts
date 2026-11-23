@@ -58,7 +58,9 @@ export function bundleTranscript(messages: UIMessage[]): TranscriptBlock[] {
 		const msg = messages[index];
 		if (!msg) continue;
 
-		if (msg.role === "user") {
+		// User and system turns (e.g. a model-switch notice) are standalone rows:
+		// they always break a tool run, even when their content is empty.
+		if (msg.role === "user" || msg.role === "system") {
 			flushRun();
 			blocks.push({ kind: "message", start: index, msg });
 			continue;

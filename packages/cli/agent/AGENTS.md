@@ -186,9 +186,9 @@ saved, so the TUI cannot start without one.
 - `ToolBundleView` (components/chat.tsx) — `bundleTranscript()` (`tool-bundle.ts`) turns every agent turn's tool calls
   into a tool block after its prose and merges adjacent blocks, so `read` → `read` → `write` renders as one collapsed
   `2 reads · 1 write` row. Expanding lists every call chronologically with its target, per-call stat, capped output,
-  and edit/write diff preview. User turns and prose-bearing turns end a run (their calls start a new bundle); empty
-  agent turns are skipped without splitting it. The bundle's call array is cached per run, so memoized expanded bodies
-  skip streamed commits.
+  and edit/write diff preview. User turns and system notices (model switches) end a run (their calls start a new
+  bundle); empty agent turns are skipped without splitting it. The bundle's call array is cached per run, so memoized
+  expanded bodies skip streamed commits.
 
 ### Fonts (`fonts.ts`)
 
