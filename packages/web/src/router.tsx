@@ -20,6 +20,19 @@ import { WorkspacePage } from "#/pages/WorkspacePage.tsx";
 
 const rootRoute = createRootRoute({ component: () => <Outlet /> });
 
+/**
+ * Warm every query the settings panel reads (identity, per-user settings, and
+ * the Models tab's catalog) before either settings route commits, so the
+ * panel never suspends into its fallback on navigation.
+ */
+async function warmSettingsRoute(): Promise<void> {
+	await Promise.allSettled([
+		queryClient.ensureQueryData(meQuery),
+		queryClient.ensureQueryData(settingsQuery),
+		queryClient.ensureQueryData(modelCatalogQuery),
+	]);
+}
+
 /** Root view: every workspace, plus a way back into the last chat. */
 const indexRoute = createRoute({
 	getParentRoute: () => rootRoute,
@@ -133,6 +146,11 @@ function SessionRouteError(props: { error: Error }) {
 const sessionSettingsRoute = createRoute({
 	getParentRoute: () => sessionRoute,
 	path: "settings",
+	loader: {
+		// Warm the overlay's data before it commits so opening it from a thread
+		// never shows the Suspense fallback.
+		handler: () => warmSettingsRoute(),
+	},
 	component: SessionSettingsRoute,
 });
 
@@ -141,15 +159,7 @@ const settingsRoute = createRoute({
 	path: "/settings",
 	loader: {
 		// Standalone settings (CLI deep links, workspace/session entry points).
-		// Seed the identity and connection data so the panel paints without
-		// suspending the route boundary mid-navigation.
-		handler: async () => {
-			await Promise.allSettled([
-				queryClient.ensureQueryData(meQuery),
-				queryClient.ensureQueryData(settingsQuery),
-				queryClient.ensureQueryData(modelCatalogQuery),
-			]);
-		},
+		handler: () => warmSettingsRoute(),
 	},
 	component: SettingsPage,
 });

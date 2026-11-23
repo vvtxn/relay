@@ -134,10 +134,14 @@ same font via `relay fonts install` — see `packages/relay/assets/fonts/README.
 
 ### Settings (`/s/:sessionId/settings` and `/settings`)
 
-`pages/SettingsPage.tsx` renders one auth-guarded `SettingsPanel` with grouped sections: **Account** (identity from
-`/api/me`, sign out), **Appearance** (dark/light switch, applied instantly and persisted locally), **Connections**
-(subscription sign-in and API keys), **New threads start on** (the account-default model), and an advanced custom
-endpoint form when the server allows one.
+`pages/SettingsPage.tsx` renders one auth-guarded `SettingsPanel` with two tabs: **General** (Account identity and
+Appearance palette cards) and **Models** (Connections full width, Default model, and the advanced custom-endpoint
+form). A fresh account with no connections lands on Models; everyone else starts on General. General stacks Appearance
+below Account; Models is a responsive two-column grid (one column below 980px), where Connections spans the width and
+its provider cards share a height with bottom-aligned actions. Sections are self-contained components that read the
+shared TanStack queries. Both settings route loaders — and the sidebar chip's hover/focus — warm identity, settings, and
+model-catalog queries, so the panel paints without its Suspense fallback; that fallback is a progress bar rather than a
+text placeholder.
 
 Connections are per preset, not one global key: **OpenCode Go** stores an API key, while **Claude** and **ChatGPT** use
 subscription OAuth (`GET /api/oauth/:provider/start`). Claude uses a paste flow (the provider displays `code#state`,
