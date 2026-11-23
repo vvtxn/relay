@@ -2,26 +2,18 @@ import { createEffect, createMemo, createSignal, For, on, Show } from "solid-js"
 import { Link, useNavigate, useParams } from "@tanstack/solid-router";
 import { useMutation, useQuery } from "@tanstack/solid-query";
 import { decodeWorkspaceToken, encodeWorkspaceToken } from "@vvtxn/relay/core/workspace-token.ts";
-import type { SessionSummary, WorkspaceSummary } from "@vvtxn/relay/core/sessions/index.ts";
+import type { WorkspaceSummary } from "@vvtxn/relay/core/sessions/index.ts";
 import { RelayError } from "@vvtxn/client/services.ts";
 import { configQuery, meQuery, sessionsQuery, workspacesQuery } from "#/api/queries.ts";
 import { startChat } from "#/api/open-chat.ts";
 import { addWorkspace } from "#/api/workspaces.ts";
 import { AppShell } from "#/components/AppShell.tsx";
 import { BootError, BootScreen } from "#/components/BootScreen.tsx";
+import { formatExactTime, formatRelativeTime, runPhaseLabel, threadPreview } from "#/state/format.ts";
 import { displayPath, rememberWorkspace, setHomeDir, workspaceName } from "#/state/workspace.ts";
 
 function errorMessage(error: unknown): string {
 	return error instanceof Error ? error.message : String(error);
-}
-
-function formatTimestamp(timestamp: number | string): string {
-	const date = new Date(timestamp);
-	return Number.isNaN(date.getTime()) ? "" : date.toLocaleString();
-}
-
-function preview(session: SessionSummary): string {
-	return session.firstUserMessage || "(empty session)";
 }
 
 function missing(workspace: WorkspaceSummary | undefined): boolean {
@@ -244,9 +236,25 @@ export function WorkspacePage() {
 																params={{ sessionId: session.reference }}
 																class="thread-item"
 															>
-																<span class="thread-preview">{preview(session)}</span>
-																<span class="thread-time">
-																	{formatTimestamp(session.timestamp)}
+																<span class="thread-preview">
+																	{threadPreview(session)}
+																</span>
+																<span class="thread-side">
+																	<Show when={session.running}>
+																		<span
+																			class="pill running"
+																			title={`Running: ${session.runPhase ?? "running"}`}
+																		>
+																			<span class="pill-dot" aria-hidden="true" />
+																			{runPhaseLabel(session.runPhase)}
+																		</span>
+																	</Show>
+																	<span
+																		class="thread-time"
+																		title={formatExactTime(session.timestamp)}
+																	>
+																		{formatRelativeTime(session.timestamp)}
+																	</span>
 																</span>
 															</Link>
 														)}
