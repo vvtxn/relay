@@ -32,7 +32,8 @@ interface Row {
 export function ModelSelector(props: {
 	current: CurrentModel;
 	defaultModel: string;
-	onSelect: (selection: LlmModelSelection, label: string) => void;
+	/** `null` clears the thread override so the account default applies. */
+	onSelect: (selection: LlmModelSelection | null, label: string) => void;
 }) {
 	const [open, setOpen] = createSignal(false);
 	const queryClient = useQueryClient();
@@ -109,7 +110,8 @@ export function ModelSelector(props: {
 function ModelPickerBody(props: {
 	current: CurrentModel;
 	defaultModel: string;
-	onSelect: (selection: LlmModelSelection, label: string) => void;
+	/** `null` clears the thread override so the account default applies. */
+	onSelect: (selection: LlmModelSelection | null, label: string) => void;
 	onClose: () => void;
 }) {
 	const settings = useQuery(() => settingsQuery);
@@ -159,18 +161,22 @@ function ModelPickerBody(props: {
 		);
 	};
 
+	/** Display label for the account-default row (falls back to the raw ids). */
+	const defaultLabel = () => {
+		const effective = settings.data?.effective;
+		if (!effective) return props.defaultModel;
+		const preset = settings.data?.presets.find((item) => item.id === effective.preset);
+		const model = preset?.models.find((entry) => entry.id === effective.model);
+		return model ? `${effective.label} · ${model.label}` : `${effective.label} · ${effective.model}`;
+	};
+
+	/**
+	 * "Account default" drops the thread override instead of pinning the current
+	 * default as a sticky selection, so the thread keeps following the account
+	 * default when it changes.
+	 */
 	const chooseDefault = (): void => {
-		const selection = settings.data?.effective;
-		if (selection) {
-			props.onSelect(
-				{
-					preset: selection.preset,
-					model: selection.model,
-					...(selection.contextTokens ? { contextTokens: selection.contextTokens } : {}),
-				},
-				selection.model,
-			);
-		}
+		props.onSelect(null, defaultLabel());
 	};
 
 	const onKeyDown = (event: KeyboardEvent): void => {
@@ -204,9 +210,14 @@ function ModelPickerBody(props: {
 				<span class="model-popover-title">Model</span>
 				<span class="settings-hint">applies from the next message</span>
 			</div>
-			<button type="button" class="model-item model-default" onClick={chooseDefault}>
+			<button
+				type="button"
+				class={props.current === null ? "model-item model-default selected" : "model-item model-default"}
+				aria-selected={props.current === null}
+				onClick={chooseDefault}
+			>
 				<span class="model-item-name">Account default</span>
-				<span class="model-item-note">{settings.data?.effective.model ?? props.defaultModel}</span>
+				<span class="model-item-note">{defaultLabel()}</span>
 			</button>
 			<Show
 				when={groups().length > 0}

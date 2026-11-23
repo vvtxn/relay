@@ -27,7 +27,7 @@ export function Composer(props: { sessionId: string; defaultModel: string }) {
 	const files = useQuery(() => ({ ...filesQuery(props.sessionId), enabled: mentionOpen() }));
 
 	const send = useMutation(() => ({
-		mutationFn: (input: { content: string; model?: LlmModelSelection }) =>
+		mutationFn: (input: { content: string; model: LlmModelSelection | null }) =>
 			sendMessage(props.sessionId, input.content, input.model),
 		onError: (error) => {
 			setRunning(false);
@@ -57,18 +57,18 @@ export function Composer(props: { sessionId: string; defaultModel: string }) {
 		setValue("");
 		closeMentions();
 		appendUserMessage(content);
+		// Always send the thread selection: `null` clears the sticky override and
+		// keeps the thread following the account default.
 		const model = streamState().model;
 		send.mutate({
 			content,
-			...(model
+			model: model
 				? {
-						model: {
-							preset: model.preset,
-							model: model.model,
-							...(model.contextTokens ? { contextTokens: model.contextTokens } : {}),
-						},
+						preset: model.preset,
+						model: model.model,
+						...(model.contextTokens ? { contextTokens: model.contextTokens } : {}),
 					}
-				: {}),
+				: null,
 		});
 	}
 
@@ -184,12 +184,18 @@ export function Composer(props: { sessionId: string; defaultModel: string }) {
 							current={streamState().model}
 							defaultModel={props.defaultModel}
 							onSelect={(selection, label) => {
-								setThreadModel({
-									preset: selection.preset,
-									model: selection.model,
-									label,
-									...(selection.contextTokens ? { contextTokens: selection.contextTokens } : {}),
-								});
+								setThreadModel(
+									selection
+										? {
+												preset: selection.preset,
+												model: selection.model,
+												label,
+												...(selection.contextTokens
+													? { contextTokens: selection.contextTokens }
+													: {}),
+											}
+										: null,
+								);
 							}}
 						/>
 						<span class="composer-hint">

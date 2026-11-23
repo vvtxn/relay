@@ -11,7 +11,14 @@ import type {
 } from "@vvtxn/client/protocol.ts";
 import { themes, type ThemeName } from "@vvtxn/relay/core/theme.ts";
 import { meQuery, modelCatalogQuery, settingsQuery } from "#/api/queries.ts";
-import { completeOAuth, removeConnection, setConnection, startOAuth, updateSettings } from "#/api/mutations.ts";
+import {
+	cancelOAuth,
+	completeOAuth,
+	removeConnection,
+	setConnection,
+	startOAuth,
+	updateSettings,
+} from "#/api/mutations.ts";
 import { readStoredSessionId } from "#/api/storage.ts";
 import { RelayError } from "@vvtxn/client/services.ts";
 import { queryKeys } from "#/api/query-client.ts";
@@ -479,6 +486,11 @@ function ConnectionsSection() {
 		},
 	}));
 
+	/** Best effort: drops the server's pending attempt and closes its listener. */
+	const cancelSignIn = useMutation(() => ({
+		mutationFn: (provider: string) => cancelOAuth(provider),
+	}));
+
 	async function beginSignIn(preset: LlmPreset): Promise<void> {
 		const provider = preset.oauth?.provider;
 		if (!provider) return;
@@ -573,8 +585,11 @@ function ConnectionsSection() {
 									}}
 									finishPending={finishOAuth.isPending}
 									onCancelOAuth={() => {
+										const active = activeFlow();
 										pollToken++;
 										setOauthFlow(null);
+										setOAuthCode("");
+										if (active) cancelSignIn.mutate(active.provider);
 									}}
 								/>
 							);

@@ -23,13 +23,16 @@ export const completeOAuth = (provider: string, code: string) => runApi((api) =>
 /** Remove a stored subscription credential. */
 export const disconnectOAuth = (provider: string) => runApi((api) => api.disconnectOAuth(provider));
 
+/** Abandon a pending subscription sign-in (closes the server's loopback listener). */
+export const cancelOAuth = (provider: string) => runApi((api) => api.cancelOAuth(provider));
+
 /** Store an API key for one preset without changing the default selection. */
 export const setConnection = (preset: string, apiKey: string) => runApi((api) => api.setConnection(preset, apiKey));
 
 /** Remove a preset's stored credential. */
 export const removeConnection = (preset: string) => runApi((api) => api.removeConnection(preset));
 
-export const sendMessage = (sessionId: string, content: string, model?: LlmModelSelection) =>
+export const sendMessage = (sessionId: string, content: string, model?: LlmModelSelection | null) =>
 	runApi((api) => api.sendMessage(sessionId, content, model));
 
 export const cancelRun = (sessionId: string) => runApi((api) => api.cancel(sessionId));

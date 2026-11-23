@@ -60,7 +60,7 @@ export function appendUserMessage(content: string): void {
 	});
 }
 
-/** Reflect a model choice immediately; the server confirms it on the run. */
+/** Reflect a model choice immediately; `null` restores the account default. */
 export function setThreadModel(model: SessionStreamState["model"]): void {
 	commit({ ...current, model });
 }

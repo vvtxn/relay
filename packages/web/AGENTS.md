@@ -146,7 +146,9 @@ text placeholder.
 Connections are per preset, not one global key: **OpenCode Go** stores an API key, while **Claude** and **ChatGPT** use
 subscription OAuth (`GET /api/oauth/:provider/start`). Claude uses a paste flow (the provider displays `code#state`,
 submitted to `/api/oauth/claude/complete`); ChatGPT uses the Codex loopback redirect on `localhost:1455`, and the page
-polls settings until the credential appears. `PUT/DELETE /api/connections/:preset` manage API-key presets without
+polls settings until the credential appears. Cancelling a pending sign-in calls `DELETE /api/oauth/:provider/pending`
+so the server's loopback listener closes instead of holding the port until its timeout.
+`PUT/DELETE /api/connections/:preset` manage API-key presets without
 touching the default selection. Credentials are encrypted server-side per user; the settings payload exposes only
 `connections: { kind, hint, expiresAt, accountId }[]` and never the secret.
 
@@ -166,7 +168,8 @@ instead of redirecting to `/`, so a transient refetch (or a pruned session) can 
 subscription's models. Selecting a model calls `setThreadModel` (optimistic state) and the composer sends the choice
 with the next message (`SendMessageRequest.model`). The selection is sticky for the thread: the server persists it on
 the session header and emits `model_changed`, which the shared reducer folds into a transcript notice and the selector
-state. The account default still comes from settings and is shown as "Account default" in the popover.
+state. Choosing **Account default** sends `model: null`, which drops the sticky override (instead of pinning today's
+default) so the thread keeps following the account default as it changes.
 
 ### Markdown and code highlighting
 
