@@ -305,9 +305,10 @@ export interface SendMessageRequest {
 	content: string;
 	/**
 	 * Override the thread's model for this message. The selection sticks to the
-	 * session (and to its persisted header) until changed again.
+	 * session (and to its persisted header) until changed again. `null` clears
+	 * the thread override so the account default applies again.
 	 */
-	model?: LlmModelSelection;
+	model?: LlmModelSelection | null;
 }
 
 export interface SendMessageResponse {

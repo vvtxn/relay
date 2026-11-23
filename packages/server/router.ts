@@ -58,6 +58,7 @@ import {
 } from "./workspace.ts";
 import { handleGetSettings, handleUpdateSettings } from "./settings.ts";
 import {
+	handleOAuthCancel,
 	handleOAuthComplete,
 	handleOAuthDisconnect,
 	handleOAuthStart,
@@ -347,6 +348,11 @@ export function createAppLayer(services: ServerServices) {
 						),
 					),
 				),
+			);
+			yield* router.add(
+				"DELETE",
+				"/api/oauth/:provider/pending",
+				respond(authenticated(services, (rs) => withProvider((provider) => handleOAuthCancel(rs, provider)))),
 			);
 			yield* router.add(
 				"DELETE",

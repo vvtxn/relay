@@ -246,7 +246,9 @@ export function handleSendMessage(
 		}
 
 		// A per-message model override is validated against the preset it names
-		// before any run starts, so an unknown preset/model fails fast.
+		// before any run starts, so an unknown preset/model fails fast. `null`
+		// explicitly clears the thread's sticky override (account default).
+		const clearModel = body.model === null;
 		const override = parseModelOverride(body.model);
 		if (override) {
 			const preset = presetInfo(services.config, override.preset);
@@ -267,7 +269,7 @@ export function handleSendMessage(
 		// The thread may already carry a sticky model that differs from the
 		// account default; the credential check must follow the model the run
 		// will actually use.
-		const sticky = services.runs.getHandle(sessionId, services.user.id)?.getModel() ?? null;
+		const sticky = clearModel ? null : (services.runs.getHandle(sessionId, services.user.id)?.getModel() ?? null);
 		const presetId = override?.preset ?? sticky?.preset ?? stored.settings.preset;
 		const credential = yield* services.userSettings
 			.getCredential(services.user.id, presetId)
@@ -288,7 +290,7 @@ export function handleSendMessage(
 		}
 
 		try {
-			services.runs.startMessage(sessionId, body.content, override);
+			services.runs.startMessage(sessionId, body.content, override, { clearModel });
 		} catch (err) {
 			if (err instanceof RunConflictError) return error(409, err.message);
 			throw err;
@@ -297,8 +299,8 @@ export function handleSendMessage(
 	});
 }
 
-/** Normalizes a wire model override; null when absent/invalid. */
-function parseModelOverride(raw: LlmModelSelection | undefined): LlmModelSelection | null {
+/** Normalizes a wire model override; null when absent/cleared/invalid. */
+function parseModelOverride(raw: LlmModelSelection | null | undefined): LlmModelSelection | null {
 	if (!raw || typeof raw !== "object") return null;
 	if (typeof raw.preset !== "string" || !raw.preset) return null;
 	if (typeof raw.model !== "string" || !raw.model) return null;

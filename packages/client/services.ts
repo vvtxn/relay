@@ -73,6 +73,7 @@ export interface ApiShape {
 	startOAuth(provider: string): Effect.Effect<OAuthStartResponse, RelayError>;
 	completeOAuth(provider: string, code: string): Effect.Effect<OAuthCompleteResponse, RelayError>;
 	disconnectOAuth(provider: string): Effect.Effect<OAuthCompleteResponse, RelayError>;
+	cancelOAuth(provider: string): Effect.Effect<StatusResponse, RelayError>;
 	setConnection(preset: string, apiKey: string): Effect.Effect<SetConnectionResponse, RelayError>;
 	removeConnection(preset: string): Effect.Effect<SetConnectionResponse, RelayError>;
 	listSessions(cwd: string): Effect.Effect<SessionListResponse, RelayError>;
@@ -109,6 +110,7 @@ export const ApiLive = (client: RelayClient): Layer.Layer<Api> =>
 		startOAuth: (provider) => tryRelay(() => client.startOAuth(provider)),
 		completeOAuth: (provider, code) => tryRelay(() => client.completeOAuth(provider, code)),
 		disconnectOAuth: (provider) => tryRelay(() => client.disconnectOAuth(provider)),
+		cancelOAuth: (provider) => tryRelay(() => client.cancelOAuth(provider)),
 		setConnection: (preset, apiKey) => tryRelay(() => client.setConnection(preset, apiKey)),
 		removeConnection: (preset) => tryRelay(() => client.removeConnection(preset)),
 		listSessions: (cwd) => tryRelay(() => client.listSessions(cwd)),

@@ -27,7 +27,8 @@ REST payloads cover health, auth info, identity (`MeResponse` includes an option
 (`SettingsResponse` carries the default selection plus masked `connections`), model/config info (`ConfigResponse`
 exposes the server's `provider` and `model`), workspace, sessions CRUD, files, boxes, and subscription OAuth
 (`OAuthStartResponse`, paste completion, connection management). `SendMessageRequest` accepts an optional
-`model: LlmModelSelection` that overrides the thread's model for that message and sticks to the session.
+`model: LlmModelSelection | null` that overrides the thread's model for that message and sticks to the session;
+`null` clears the override so the account default applies again.
 `ServerEvent` mirrors the agent runner callbacks 1:1 plus server lifecycle events: `run_state` snapshots (run id,
 phase, draft, box id, queue position), `run_status` phase transitions, `model_changed` (sticky model switch),
 `run_finished`. `RunSummary`/`RunListResponse` back `GET /api/runs`, and `SessionSummary` carries optional

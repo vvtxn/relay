@@ -19,7 +19,7 @@ import {
 	type UserSettingsStore,
 } from "@vvtxn/relay/core/index.ts";
 import { createDatabaseClient, type DatabaseClient } from "@vvtxn/relay/core/database.ts";
-import { storeEffect, toStoreError, type StoreError } from "@vvtxn/relay/core/effect.ts";
+import { causeMessage, storeEffect, toStoreError, type StoreError } from "@vvtxn/relay/core/effect.ts";
 import type { LlmModelSelection } from "@vvtxn/relay/core/llm-presets.ts";
 import { getLlmPreset } from "@vvtxn/relay/core/llm-presets.ts";
 import { DatabaseSessionStore } from "@vvtxn/relay/core/sessions/index.ts";
@@ -218,7 +218,18 @@ const runsLayer = Layer.effect(
 						catch: toStoreError,
 					}).pipe(
 						Effect.tap((refreshed) => userSettings.setCredential(ownerId, selection.preset, refreshed)),
-						Effect.catchCause(() => Effect.succeed(credential)),
+						// A failed refresh must not be silent: the provider call will
+						// then fail with an opaque 401. Log it so the operator can tell
+						// "the subscription sign-in expired" apart from a provider bug.
+						Effect.catchCause((cause) =>
+							Effect.sync(() => {
+								console.warn(
+									`relay llm: could not refresh the "${selection.preset}" subscription token ` +
+										`for ${ownerId}; runs will fail until it is reconnected in Settings: ${causeMessage(cause)}`,
+								);
+								return expired;
+							}),
+						),
 					);
 				}
 				return createRunLlm(config, { selection, credential });

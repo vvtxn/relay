@@ -132,6 +132,11 @@ export class RelayClient {
 		return await this.delete(`/api/oauth/${encodeURIComponent(provider)}`);
 	}
 
+	/** Abandons a pending subscription sign-in (closes the loopback listener). */
+	async cancelOAuth(provider: string): Promise<StatusResponse> {
+		return await this.delete(`/api/oauth/${encodeURIComponent(provider)}/pending`);
+	}
+
 	/** Stores an API key for a preset connection without touching the default. */
 	async setConnection(preset: string, apiKey: string): Promise<SetConnectionResponse> {
 		return await this.put(`/api/connections/${encodeURIComponent(preset)}`, {
@@ -231,7 +236,9 @@ export class RelayClient {
 	): Promise<SendMessageResponse> {
 		return await this.post(`/api/sessions/${sessionId}/messages`, {
 			content,
-			...(model ? { model } : {}),
+			// `null` is meaningful (clear the thread override); only `undefined`
+			// leaves the stored selection untouched.
+			...(model !== undefined ? { model } : {}),
 		} satisfies SendMessageRequest);
 	}
 

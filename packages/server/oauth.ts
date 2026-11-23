@@ -130,6 +130,27 @@ export function takePendingOAuth(state: string): PendingOAuth | null {
 	return entry;
 }
 
+/**
+ * Drops a user's pending attempts for one provider (the client dismissed the
+ * flow) and closes the ChatGPT loopback listener when it belongs to them.
+ * Without this the one-shot listener would hold `localhost:1455` until its
+ * timeout.
+ */
+export function cancelPendingOAuth(userId: string, provider: OAuthProvider): number {
+	pruned();
+	let cancelled = 0;
+	for (const [state, entry] of pending) {
+		if (entry.userId !== userId || entry.provider !== provider) continue;
+		pending.delete(state);
+		cancelled += 1;
+		if (activeLoopback?.state === state) {
+			activeLoopback.server.close();
+			activeLoopback = null;
+		}
+	}
+	return cancelled;
+}
+
 /** Resolves the provider's preset id for a completed credential. */
 export function presetForProvider(provider: OAuthProvider): string {
 	return presetFor(provider);
@@ -292,7 +313,17 @@ export async function refreshOAuthCredential(
  * closes after the first callback (success or failure) and after a timeout.
  * Starting a new sign-in closes any listener left over from an abandoned one.
  */
-let activeLoopback: Server | null = null;
+let activeLoopback: { server: Server; state: string } | null = null;
+
+/** Escapes text interpolated into the loopback response page. */
+function escapeHtml(text: string): string {
+	return text
+		.replace(/&/g, "&amp;")
+		.replace(/</g, "&lt;")
+		.replace(/>/g, "&gt;")
+		.replace(/"/g, "&quot;")
+		.replace(/'/g, "&#39;");
+}
 
 export function startChatGptLoopback(
 	state: string,
@@ -300,7 +331,7 @@ export function startChatGptLoopback(
 	onError: (message: string) => void,
 ): Promise<Server> {
 	if (activeLoopback) {
-		activeLoopback.close();
+		activeLoopback.server.close();
 		activeLoopback = null;
 	}
 	return new Promise((resolve, reject) => {
@@ -317,9 +348,9 @@ export function startChatGptLoopback(
 				response
 					.writeHead(200, { "Content-Type": "text/html; charset=utf-8" })
 					.end(
-						`<!doctype html><meta charset="utf-8"><title>${title}</title>` +
+						`<!doctype html><meta charset="utf-8"><title>${escapeHtml(title)}</title>` +
 							`<body style="font-family:system-ui;max-width:40rem;margin:15vh auto;padding:0 1.5rem">` +
-							`<h1>${title}</h1><p>${message}</p><p>You can close this tab.</p></body>`,
+							`<h1>${escapeHtml(title)}</h1><p>${escapeHtml(message)}</p><p>You can close this tab.</p></body>`,
 					);
 			};
 			const close = (): void => {
@@ -347,10 +378,10 @@ export function startChatGptLoopback(
 		});
 		server.on("error", (error) => reject(error));
 		server.on("close", () => {
-			if (activeLoopback === server) activeLoopback = null;
+			if (activeLoopback?.server === server) activeLoopback = null;
 		});
 		server.listen(CHATGPT_CALLBACK_PORT, "localhost", () => {
-			activeLoopback = server;
+			activeLoopback = { server, state };
 			const timer = setTimeout(() => {
 				server.close();
 				onError("The ChatGPT sign-in timed out. Try connecting again.");

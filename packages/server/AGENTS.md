@@ -100,7 +100,9 @@ Owns active runs, one per session:
   `listActive`/`GET /api/runs` expose owner-scoped run state to every client.
 - Each run resolves a model from the explicit per-message override, the session header's sticky `model`, or the
   account default (in that order). A changed selection is written to the header, appended as a `model_change` entry,
-  and published as `model_changed` so every client's selector follows.
+  and published as `model_changed` so every client's selector follows. `SendMessageRequest.model: null` clears the
+  sticky selection (back to the account default). The transcript entry is written after the user's message, matching
+  the optimistic order clients render while the run streams.
 
 ### Sessions
 
@@ -165,10 +167,16 @@ code path.
 
 Credentials are per preset, not a single global key: `UserSettingsStore.getCredential(userId, preset)` returns an API
 key or OAuth tokens (encrypted at rest, owner-bound AES-GCM). The settings store keeps them in local files by default
-or in the `llm_credentials` column of the database backend, with legacy single-key rows still read as a fallback. OAuth subscriptions are connected through `GET /api/oauth/:provider/start` (+
+or in the `llm_credentials` column of the database backend, with legacy single-key rows still read as a fallback.
+Both backends serialize per-user writes (a whole-document read-modify-write), so a token refresh racing a Settings save
+cannot drop the other change. OAuth subscriptions are connected through `GET /api/oauth/:provider/start` (+
 `POST /api/oauth/:provider/complete` for Claude's paste flow; ChatGPT's Codex loopback callback on `localhost:1455`
 completes in the background). Expired access tokens refresh lazily before a run and the rotated tokens are written
-back. API-key presets connect through `/api/connections/:preset` without changing the default selection.
+back; a failed refresh is logged because the provider call then fails with an opaque 401. API-key presets connect
+through `/api/connections/:preset` without changing the default selection. Connecting a preset the first time makes it
+the default when the current default has no credential; disconnecting the default falls back to another connected
+preset so runs are not blocked by a stale selection. `DELETE /api/oauth/:provider/pending` abandons a pending sign-in
+and closes the ChatGPT loopback listener.
 
 Selections are validated on save (`PUT /api/settings`): model ids must be well-formed for every preset and, for
 plan-scoped presets (`allowAnyModel: false`, today OpenCode Go), must come from the preset's curated list. Custom
@@ -217,6 +225,7 @@ starting": it adopts a healthy winner, otherwise it reports the bind error. The 
 | `/api/models`                | GET    | Model picker options (all connections, or `?preset=`) |
 | `/api/oauth/:provider/start` | GET    | Begin Claude/ChatGPT subscription sign-in             |
 | `/api/oauth/:provider/complete` | POST | Finish Claude's paste flow                          |
+| `/api/oauth/:provider/pending` | DELETE | Abandon a pending sign-in (closes the loopback listener) |
 | `/api/oauth/:provider`       | DELETE | Disconnect a subscription                             |
 | `/api/connections/:preset`   | PUT    | Store an API key for one preset (no default change)   |
 | `/api/connections/:preset`   | DELETE | Remove a preset's stored credential                   |

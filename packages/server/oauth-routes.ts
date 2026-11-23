@@ -14,12 +14,14 @@ import type {
 	OAuthStartResponse,
 	SetConnectionRequest,
 	SetConnectionResponse,
+	StatusResponse,
 } from "@vvtxn/client/protocol.ts";
 import { getLlmPreset } from "@vvtxn/relay/core/llm-presets.ts";
 import type { RequestServices } from "./services.ts";
 import { BadRequestError, json, readJsonBody } from "./http.ts";
 import {
 	beginOAuth,
+	cancelPendingOAuth,
 	exchangeOAuthCode,
 	oauthPresetId,
 	presetForProvider,
@@ -55,12 +57,13 @@ export function handleOAuthStart(
 		if (provider === "openai") {
 			// ChatGPT's registered redirect is a loopback URL. The listener
 			// completes the flow in the background; the client polls settings.
+			const state = stateFromUrl(start.url);
 			yield* Effect.tryPromise({
 				try: () =>
 					startChatGptLoopback(
-						stateFromUrl(start.url),
+						state,
 						async (code) => {
-							const flow = takePendingOAuth(stateFromUrl(start.url));
+							const flow = takePendingOAuth(state);
 							if (!flow || flow.userId !== services.user.id) {
 								throw new Error("The sign-in attempt expired. Try connecting again.");
 							}
@@ -72,7 +75,7 @@ export function handleOAuthStart(
 									credential,
 								),
 							);
-							await Effect.runPromise(adoptDefaultIfUnset(services));
+							await Effect.runPromise(adoptDefaultIfUnset(services, presetForProvider(provider)));
 						},
 						(message) => {
 							console.error(`relay oauth: ${message}`);
@@ -115,7 +118,7 @@ export function handleOAuthComplete(
 			catch: (cause) => new BadRequestError(cause instanceof Error ? cause.message : String(cause)),
 		});
 		yield* services.userSettings.setCredential(services.user.id, presetForProvider(provider), credential);
-		yield* adoptDefaultIfUnset(services);
+		yield* adoptDefaultIfUnset(services, presetForProvider(provider));
 		return json({ status: "connected", preset: presetForProvider(provider) } satisfies OAuthCompleteResponse);
 	});
 }
@@ -129,7 +132,21 @@ export function handleOAuthDisconnect(
 		if (!provider) return yield* Effect.fail(new BadRequestError(`Unknown subscription provider "${rawProvider}"`));
 		const preset = presetForProvider(provider);
 		yield* services.userSettings.setCredential(services.user.id, preset, null);
+		yield* fallbackAfterDisconnect(services, preset);
 		return json({ status: "connected", preset } satisfies OAuthCompleteResponse);
+	});
+}
+
+/** Abandons a pending sign-in attempt (and its loopback listener). */
+export function handleOAuthCancel(
+	services: RequestServices,
+	rawProvider: string,
+): Effect.Effect<HttpServerResponse.HttpServerResponse, BadRequestError> {
+	return Effect.gen(function* () {
+		const provider = parseProvider(rawProvider);
+		if (!provider) return yield* Effect.fail(new BadRequestError(`Unknown subscription provider "${rawProvider}"`));
+		cancelPendingOAuth(services.user.id, provider);
+		return json({ status: "ok" } satisfies StatusResponse);
 	});
 }
 
@@ -150,7 +167,7 @@ export function handleSetConnection(
 		if (!apiKey) return yield* Effect.fail(new BadRequestError("An API key is required"));
 		if (apiKey.length > 512) return yield* Effect.fail(new BadRequestError("API key is too long"));
 		yield* services.userSettings.setCredential(services.user.id, preset.id, { kind: "api-key", apiKey });
-		yield* adoptDefaultIfUnset(services);
+		yield* adoptDefaultIfUnset(services, preset.id);
 		return json({ status: "connected", preset: preset.id } satisfies SetConnectionResponse);
 	});
 }
@@ -164,6 +181,7 @@ export function handleRemoveConnection(
 		const preset = getLlmPreset(presetId);
 		if (!preset) return yield* Effect.fail(new BadRequestError(`Unknown connection "${presetId}"`));
 		yield* services.userSettings.setCredential(services.user.id, preset.id, null);
+		yield* fallbackAfterDisconnect(services, preset.id);
 		return json({ status: "connected", preset: preset.id } satisfies SetConnectionResponse);
 	});
 }
@@ -178,18 +196,15 @@ function stateFromUrl(url: string): string {
 
 /**
  * First-connection convenience: when the selected default has no credential
- * yet, make the newly connected preset (and its first curated model) the
- * default. An existing, already-connected default is never overwritten.
+ * yet, make the preset that was just connected (and its first curated model)
+ * the default. An existing, already-connected default is never overwritten.
  */
-function adoptDefaultIfUnset(services: RequestServices): Effect.Effect<void, never> {
+function adoptDefaultIfUnset(services: RequestServices, presetId: string): Effect.Effect<void, never> {
 	return Effect.gen(function* () {
 		const status = yield* services.userSettings.getLlmStatus(services.user.id);
 		const current = yield* services.userSettings.getCredential(services.user.id, status.settings.preset);
 		if (current) return;
-		const connections = yield* services.userSettings.listCredentials(services.user.id);
-		const available = connections.find((connection) => getLlmPreset(connection.preset) !== undefined);
-		if (!available) return;
-		const preset = getLlmPreset(available.preset);
+		const preset = getLlmPreset(presetId);
 		if (!preset) return;
 		const first = preset.models[0];
 		yield* services.userSettings.setLlm(services.user.id, {
@@ -201,6 +216,37 @@ function adoptDefaultIfUnset(services: RequestServices): Effect.Effect<void, nev
 		Effect.catchCause((cause) =>
 			Effect.sync(() => {
 				console.warn("relay settings: could not adopt the new connection as default:", cause);
+			}),
+		),
+	);
+}
+
+/**
+ * Disconnecting the account's default leaves it pointing at a preset with no
+ * credential, which would block every run (and the CLI's startup check) even
+ * when another connection is available. Fall back to a preset that is still
+ * connected; with none left, the selection stays put so Settings can explain
+ * which connection needs attention.
+ */
+function fallbackAfterDisconnect(services: RequestServices, presetId: string): Effect.Effect<void, never> {
+	return Effect.gen(function* () {
+		const status = yield* services.userSettings.getLlmStatus(services.user.id);
+		if (status.settings.preset !== presetId) return;
+		const connections = yield* services.userSettings.listCredentials(services.user.id);
+		const next = connections
+			.map((connection) => getLlmPreset(connection.preset))
+			.find((preset) => preset !== undefined);
+		if (!next) return;
+		const first = next.models[0];
+		yield* services.userSettings.setLlm(services.user.id, {
+			preset: next.id,
+			model: first?.id ?? null,
+			contextTokens: first?.contextTokens ?? null,
+		});
+	}).pipe(
+		Effect.catchCause((cause) =>
+			Effect.sync(() => {
+				console.warn("relay settings: could not fall back after disconnecting:", cause);
 			}),
 		),
 	);
