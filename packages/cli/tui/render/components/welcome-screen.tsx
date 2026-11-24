@@ -105,10 +105,10 @@ function renderRow(cells: Array<OrbCell | undefined>, clock: number, colors: Arr
 function palette(): Array<string | null> {
 	return [
 		null,
-		toAnsi(theme.textFaint),
 		toAnsi(theme.textDim),
 		toAnsi(theme.textMuted),
 		toAnsi(theme.text),
+		toAnsi(theme.heading1),
 		toAnsi(theme.mention),
 	];
 }

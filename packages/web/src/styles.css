@@ -714,7 +714,7 @@ body {
 
 .relay-orb {
 	display: block;
-	width: clamp(150px, 40vw, 210px);
+	width: clamp(170px, 44vw, 240px);
 	aspect-ratio: 1;
 	margin: 0 auto 0.65rem;
 	pointer-events: none;
@@ -2270,11 +2270,10 @@ body {
 
 .overview-hero-art {
 	flex-shrink: 0;
-	opacity: 0.92;
 }
 
 .overview-hero-art .relay-orb {
-	width: 96px;
+	width: 104px;
 	margin: 0;
 }
 

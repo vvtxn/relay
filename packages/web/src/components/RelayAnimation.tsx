@@ -97,8 +97,8 @@ function draw(
 	const radius = Math.min(width, height) * 0.435;
 
 	const halo = ctx.createRadialGradient(cx, cy, radius * 0.15, cx, cy, radius * 1.2);
-	halo.addColorStop(0, css(palette.brand, 0.07));
-	halo.addColorStop(0.65, css(palette.brand, 0.025));
+	halo.addColorStop(0, css(palette.brand, 0.1));
+	halo.addColorStop(0.65, css(palette.brand, 0.036));
 	halo.addColorStop(1, css(palette.brand, 0));
 	ctx.fillStyle = halo;
 	ctx.fillRect(0, 0, width, height);
@@ -117,11 +117,11 @@ function draw(
 		let style = styles.get(key);
 		if (!style) {
 			const bucket = key / 24;
-			let color = mix(palette.dim, palette.brand, Math.min(1, bucket * 1.5));
-			if (bucket > 0.72) color = mix(color, palette.accent, ((bucket - 0.72) / 0.28) * 0.55);
+			let color = mix(palette.dim, palette.brand, Math.min(1, bucket * 1.8));
+			if (bucket > 0.82) color = mix(color, palette.accent, ((bucket - 0.82) / 0.18) * 0.38);
 			style = {
-				fill: css(color, 0.4 + 0.6 * bucket),
-				glow: css(color, Math.max(0, (bucket - 0.78) * 0.32)),
+				fill: css(color, 0.5 + 0.5 * bucket),
+				glow: css(color, Math.max(0, (bucket - 0.72) * 0.45)),
 			};
 			styles.set(key, style);
 		}
@@ -145,9 +145,9 @@ function draw(
 		const wave =
 			0.5 + 0.5 * Math.sin(dot.polar * 2.6 - clock * 1.5 + Math.sin(dot.azimuth * 2 + clock * 0.6) * 0.8);
 		const ripple = 0.5 + 0.5 * Math.sin(dot.azimuth * 3 - clock * 1.1 + dot.polar * 1.6);
-		const energy = 0.46 + 0.54 * wave ** 1.1 * (0.7 + 0.3 * ripple);
+		const energy = 0.5 + 0.5 * wave ** 1.1 * (0.7 + 0.3 * ripple);
 		const lum = energy * (0.42 + 0.58 * depth);
-		const dotRadius = 1 + 2 * lum * (0.6 + 0.4 * depth);
+		const dotRadius = 1.15 + 2.4 * lum * (0.6 + 0.4 * depth);
 		const style = styleFor(lum);
 
 		ctx.beginPath();
@@ -156,7 +156,7 @@ function draw(
 		ctx.fill();
 
 		// The brightest nodes get a soft bloom.
-		if (lum > 0.78) {
+		if (lum > 0.72) {
 			ctx.beginPath();
 			ctx.arc(px, py, dotRadius * 3.1, 0, Math.PI * 2);
 			ctx.fillStyle = style.glow;
