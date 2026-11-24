@@ -26,7 +26,7 @@ web/
     │   ├── query-client.ts# QueryClient + query key helpers
     │   ├── queries.ts     # queryOptions for me/config/workspace/workspaces/sessions/session/files/models catalog
     │   ├── mutations.ts   # createSession/sendMessage/cancel/register/unregister/connections/OAuth (Effect-backed)
-    │   ├── open-chat.ts   # startChat(): create + seed a session in a workspace, return its id
+    │   ├── open-chat.ts   # startChat()/startChatWithMessage(): create + seed a session, return its id
     │   ├── workspaces.ts  # addWorkspace(): validate + register + invalidate
     │   └── bootstrap.ts   # Effect program: health → me → config + workspace picker (no session)
     ├── auth/auth.ts       # OAuth seam: login/logout URLs, redirect helpers
@@ -34,9 +34,10 @@ web/
     │   ├── session.ts     # Live stream store (survives navigation) + reconnect fiber + query invalidation
     │   ├── workspace.ts   # Workspace path helpers + last-visited memory (route-derived active workspace)
     │   ├── diff-preview.ts # Diff open in the review modal (module-level; survives chat re-renders)
+    │   ├── format.ts      # Relative/exact timestamps, thread previews, run-phase labels
     │   └── theme.ts       # Palette preference (persisted; dark default)
     ├── pages/
-    │   ├── OverviewPage.tsx # Root view: workspace cards + "continue last chat"; boot/auth gate
+    │   ├── OverviewPage.tsx # Root command hub: hero composer, continue card + recent threads, workspace cards
     │   ├── WorkspacePage.tsx# One workspace's threads; new chat; missing/unknown states
     │   ├── SessionPage.tsx# Hydrates session, starts stream, composes the shell
     │   └── SettingsPage.tsx # Account + appearance + connections + default model; overlay and standalone
@@ -88,8 +89,8 @@ round trip. Keep these rules in mind:
   picker, and the target workspace's session list). This is not just speed: Solid's resource-backed queries suspend the
   nearest Suspense boundary while their data is undefined, and the router's root/match boundaries fall back to the
   full-screen `BootScreen`. A query whose first read happens after commit would flash the boot screen.
-- `OverviewPage` seeds me/config/workspaces into the query cache and prefetches settings, so the first shell render
-  needs no fetches.
+- `OverviewPage` seeds me/config/workspaces into the query cache, prefetches settings, and warms the recent session
+  lists, so the first shell render needs no fetches.
 - Queries not needed for first paint stay lazy: the mention file list is only enabled while the picker is open
   (prefetched on composer focus).
 - Leaving a session stops its stream and invalidates that snapshot, so returning to it always refetches — the stream is
@@ -205,10 +206,18 @@ into `<attached_context>` blocks before the run.
 
 ### Workspaces
 
-A workspace is a project directory, and it has a URL: `/` is the root overview (workspace cards + "continue the last
-chat"), `/w/<token>` is one workspace's thread list, and chats stay at flat `/s/:id` — the workspace is derived from the
-session header. `<token>` is `base64url` of the canonical cwd via `encodeWorkspaceToken`/`decodeWorkspaceToken`
+A workspace is a project directory, and it has a URL: `/` is the root overview (hero composer + recent activity +
+workspace cards), `/w/<token>` is one workspace's thread list, and chats stay at flat `/s/:id` — the workspace is
+derived from the session header. `<token>` is `base64url` of the canonical cwd via
+`encodeWorkspaceToken`/`decodeWorkspaceToken`
 (`@vvtxn/relay/core/workspace-token.ts`), a single path segment shared with the CLI's `relay web` deep links.
+
+The overview is a command hub: the hero composer picks a workspace and model, then `startChatWithMessage()` creates the
+thread, sends the first message, seeds the cache with the optimistic user entry, and lands on `/s/:id` with no loading
+flash. Below it, a **Continue** card (the last opened thread, else the newest) and a **recent threads** feed read the
+session lists of the most recently active workspaces plus the last visited one; workspace cards show thread counts,
+relative activity, and live run badges. Those session queries are created inside the dashboard and every `.data` read
+is guarded by `isPending`, so first fetches never suspend the route into `BootScreen`.
 
 The sidebar renders workspaces as an expandable **tree**: each row has a chevron, session count, a `missing` flag when
 its directory is gone, and a hide button; its sessions nest underneath, capped at the latest three with a `+N more…`

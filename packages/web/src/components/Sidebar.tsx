@@ -1,26 +1,15 @@
 import { createEffect, createMemo, createSignal, For, on, Show } from "solid-js";
 import { Link, useNavigate } from "@tanstack/solid-router";
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/solid-query";
-import type { SessionSummary, WorkspaceSummary } from "@vvtxn/relay/core/sessions/index.ts";
+import type { WorkspaceSummary } from "@vvtxn/relay/core/sessions/index.ts";
 import { encodeWorkspaceToken } from "@vvtxn/relay/core/workspace-token.ts";
 import { modelCatalogQuery, sessionsQuery, settingsQuery, workspaceQuery, workspacesQuery } from "#/api/queries.ts";
 import { unregisterWorkspace } from "#/api/mutations.ts";
 import { startChat } from "#/api/open-chat.ts";
 import { addWorkspace } from "#/api/workspaces.ts";
 import { queryKeys } from "#/api/query-client.ts";
+import { formatExactTime, formatRelativeTime, threadPreview } from "#/state/format.ts";
 import { displayPath, lastWorkspace, resolveWorkspaceInput, workspaceName } from "#/state/workspace.ts";
-
-function formatTimestamp(timestamp: number | string): string {
-	const date = new Date(timestamp);
-	return Number.isNaN(date.getTime()) ? "" : date.toLocaleString();
-}
-
-function preview(session: SessionSummary): string {
-	if (!session.firstUserMessage) return "(empty session)";
-	return session.firstUserMessage.length > 48
-		? `${session.firstUserMessage.slice(0, 48)}…`
-		: session.firstUserMessage;
-}
 
 /** Latest threads shown per workspace in the sidebar tree; the pane lists them all. */
 const SIDEBAR_THREAD_LIMIT = 3;
@@ -270,10 +259,13 @@ export function Sidebar(props: {
 																	{session.running && (
 																		<span class="session-running">●</span>
 																	)}
-																	{preview(session)}
+																	{threadPreview(session, 48)}
 																</span>
-																<span class="session-time">
-																	{formatTimestamp(session.timestamp)}
+																<span
+																	class="session-time"
+																	title={formatExactTime(session.timestamp)}
+																>
+																	{formatRelativeTime(session.timestamp)}
 																</span>
 															</Link>
 														)}
