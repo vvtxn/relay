@@ -1,6 +1,6 @@
 import { createEffect, createSignal, For, onCleanup, Show, Suspense, type Component } from "solid-js";
 import { Dynamic } from "solid-js/web";
-import { useNavigate, useParams } from "@tanstack/solid-router";
+import { useNavigate, useParams, useRouter } from "@tanstack/solid-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/solid-query";
 import type {
 	ConnectionStatus,
@@ -966,9 +966,9 @@ function SettingsPanel(props: { onBack: () => void }) {
 			{(user) => (
 				<div class="settings">
 					<header class="settings-header">
-						<button type="button" class="settings-back" aria-label="Back to chat" onClick={props.onBack}>
+						<button type="button" class="settings-back" aria-label="Back" onClick={props.onBack}>
 							<BackIcon />
-							<span>Back to chat</span>
+							<span>Back</span>
 						</button>
 						<span class="settings-title">Settings</span>
 						<span class="settings-version">v{VERSION}</span>
@@ -1043,9 +1043,9 @@ function SettingsLoading(props: { onBack: () => void }) {
 	return (
 		<div class="settings">
 			<header class="settings-header">
-				<button type="button" class="settings-back" aria-label="Back to chat" onClick={props.onBack}>
+				<button type="button" class="settings-back" aria-label="Back" onClick={props.onBack}>
 					<BackIcon />
-					<span>Back to chat</span>
+					<span>Back</span>
 				</button>
 				<span class="settings-title">Settings</span>
 			</header>
@@ -1080,12 +1080,19 @@ export function SessionSettingsRoute() {
 }
 
 /**
- * Standalone page (CLI deep link to `/settings`). Returns to the last chat
- * opened in this browser, falling back to the boot flow.
+ * Standalone page (CLI deep link to `/settings`, or the sidebar/overview).
+ * Returns to wherever the user came from when settings was opened inside the
+ * app; a direct deep link falls back to the last chat opened in this browser,
+ * then to the boot flow.
  */
 export function SettingsPage() {
 	const navigate = useNavigate();
+	const router = useRouter();
 	const onBack = () => {
+		if (router.history.canGoBack()) {
+			router.history.back();
+			return;
+		}
 		const sessionId = readStoredSessionId();
 		if (sessionId) {
 			void navigate({ to: "/s/$sessionId", params: { sessionId } });
