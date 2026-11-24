@@ -712,24 +712,20 @@ body {
 	color: var(--relay-text-dim, #808080);
 }
 
-.relay-anim {
-	margin: 0 auto 0.5rem;
-	padding: 0;
-	color: var(--relay-brand, #c0c0c0);
-	font-family: var(--relay-font-mono);
-	font-size: 0.62rem;
-	line-height: 1.05;
-	letter-spacing: 0;
-	white-space: pre;
+.relay-orb {
+	display: block;
+	width: clamp(150px, 40vw, 210px);
+	aspect-ratio: 1;
+	margin: 0 auto 0.65rem;
+	pointer-events: none;
 	user-select: none;
-	text-shadow: 0 0 6px color-mix(in srgb, var(--relay-brand, #c0c0c0) 35%, transparent);
-	animation: relay-anim-in 0.6s ease-out both;
+	animation: relay-anim-in 0.7s ease-out both;
 }
 
 @keyframes relay-anim-in {
 	from {
 		opacity: 0;
-		transform: translateY(6px);
+		transform: scale(0.94);
 	}
 	to {
 		opacity: 1;
@@ -738,7 +734,7 @@ body {
 }
 
 @media (prefers-reduced-motion: reduce) {
-	.relay-anim {
+	.relay-orb {
 		animation: none;
 	}
 }
@@ -2274,13 +2270,12 @@ body {
 
 .overview-hero-art {
 	flex-shrink: 0;
-	opacity: 0.72;
+	opacity: 0.92;
 }
 
-.overview-hero-art .relay-anim {
+.overview-hero-art .relay-orb {
+	width: 96px;
 	margin: 0;
-	font-size: 0.4rem;
-	line-height: 1.12;
 }
 
 .overview-hero-copy {

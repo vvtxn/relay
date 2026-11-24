@@ -1,235 +1,235 @@
-import { createSignal, onCleanup, onMount } from "solid-js";
+import { onCleanup, onMount } from "solid-js";
 
 /**
- * A fluid ASCII relay: an armature swings between two contacts while current
- * flows along the live branch. Drawn into a character grid and re-rendered on
- * an animation frame; the whole thing is decorative, so it is hidden from
- * assistive tech and freezes on a single frame under reduced motion.
+ * A vector signal orb: a slowly rotating sphere of nodes whose brightness and
+ * radius are driven by waves of current sweeping across the surface. Drawn on
+ * a HiDPI canvas with the active theme tokens, so it tracks the palette; the
+ * whole thing is decorative, hidden from assistive tech, and rests on a single
+ * frame under reduced motion.
  */
 
-const WIDTH = 68;
-const HEIGHT = 22;
+const DOT_COUNT = 820;
 const FRAME_MS = 1000 / 30;
-const PERIOD_MS = 4600;
+const GOLDEN_ANGLE = Math.PI * (3 - Math.sqrt(5));
+const RESTING_CLOCK = 1.45;
 
-type Grid = string[][];
-interface Point {
+type Rgb = readonly [number, number, number];
+
+interface Dot {
+	/** Unit-sphere coordinates. */
 	x: number;
 	y: number;
+	z: number;
+	/** Polar angle from the north pole, used for the traveling wave. */
+	polar: number;
+	/** Azimuth around the sphere, used for the secondary shimmer. */
+	azimuth: number;
 }
 
-function makeGrid(): Grid {
-	return Array.from({ length: HEIGHT }, () => Array.from({ length: WIDTH }, () => " "));
+interface Palette {
+	dim: Rgb;
+	brand: Rgb;
+	accent: Rgb;
 }
 
-function put(grid: Grid, x: number, y: number, ch: string): void {
-	const xi = Math.round(x);
-	const yi = Math.round(y);
-	if (xi < 0 || xi >= WIDTH || yi < 0 || yi >= HEIGHT) return;
-	grid[yi]![xi] = ch;
+const FALLBACK: Palette = {
+	dim: [0x80, 0x80, 0x80],
+	brand: [0xc0, 0xc0, 0xc0],
+	accent: [0x8f, 0xd0, 0xd8],
+};
+
+function buildSphere(count: number): Dot[] {
+	const dots: Dot[] = [];
+	for (let i = 0; i < count; i++) {
+		const y = 1 - (i / (count - 1)) * 2;
+		const radius = Math.sqrt(Math.max(0, 1 - y * y));
+		const azimuth = i * GOLDEN_ANGLE;
+		dots.push({
+			x: Math.cos(azimuth) * radius,
+			y,
+			z: Math.sin(azimuth) * radius,
+			polar: Math.acos(Math.max(-1, Math.min(1, y))),
+			azimuth,
+		});
+	}
+	return dots;
 }
 
-function putText(grid: Grid, x: number, y: number, text: string): void {
-	for (let i = 0; i < text.length; i++) put(grid, x + i, y, text[i]!);
+function parseHex(value: string, fallback: Rgb): Rgb {
+	const match = /^#?([0-9a-f]{6})$/i.exec(value.trim());
+	if (!match) return fallback;
+	const n = Number.parseInt(match[1] ?? "", 16);
+	return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
 }
 
-function drawLine(grid: Grid, x0: number, y0: number, x1: number, y1: number, ch?: string): void {
-	let x = Math.round(x0);
-	let y = Math.round(y0);
-	const ex = Math.round(x1);
-	const ey = Math.round(y1);
-	const dx = Math.abs(ex - x);
-	const dy = Math.abs(ey - y);
-	const sx = x < ex ? 1 : -1;
-	const sy = y < ey ? 1 : -1;
-	let err = dx - dy;
-	for (;;) {
-		const c = ch ?? (dx === 0 ? "│" : dy === 0 ? "─" : sx === sy ? "╲" : "╱");
-		put(grid, x, y, c);
-		if (x === ex && y === ey) break;
-		const e2 = 2 * err;
-		if (e2 > -dy) {
-			err -= dy;
-			x += sx;
+function readPalette(element: Element): Palette {
+	const style = globalThis.getComputedStyle(element);
+	const read = (name: string, fallback: Rgb): Rgb => parseHex(style.getPropertyValue(name), fallback);
+	return {
+		dim: read("--relay-text-dim", FALLBACK.dim),
+		brand: read("--relay-brand", FALLBACK.brand),
+		accent: read("--relay-mention", FALLBACK.accent),
+	};
+}
+
+function mix(from: Rgb, to: Rgb, t: number): Rgb {
+	const f = Math.max(0, Math.min(1, t));
+	return [from[0] + (to[0] - from[0]) * f, from[1] + (to[1] - from[1]) * f, from[2] + (to[2] - from[2]) * f];
+}
+
+function css(color: Rgb, alpha: number): string {
+	const a = Math.max(0, Math.min(1, alpha));
+	return `rgba(${Math.round(color[0])}, ${Math.round(color[1])}, ${Math.round(color[2])}, ${a.toFixed(3)})`;
+}
+
+function draw(
+	ctx: CanvasRenderingContext2D,
+	width: number,
+	height: number,
+	clock: number,
+	dots: Dot[],
+	palette: Palette,
+) {
+	ctx.clearRect(0, 0, width, height);
+
+	const cx = width / 2;
+	const cy = height / 2;
+	const radius = Math.min(width, height) * 0.435;
+
+	const halo = ctx.createRadialGradient(cx, cy, radius * 0.15, cx, cy, radius * 1.2);
+	halo.addColorStop(0, css(palette.brand, 0.07));
+	halo.addColorStop(0.65, css(palette.brand, 0.025));
+	halo.addColorStop(1, css(palette.brand, 0));
+	ctx.fillStyle = halo;
+	ctx.fillRect(0, 0, width, height);
+
+	const spin = clock * 0.26;
+	const cosY = Math.cos(spin);
+	const sinY = Math.sin(spin);
+	const tilt = -0.38 + Math.sin(clock * 0.21) * 0.06;
+	const cosX = Math.cos(tilt);
+	const sinX = Math.sin(tilt);
+
+	// Luminescence is bucketed so identical dots share one fill-style string.
+	const styles = new Map<number, { fill: string; glow: string }>();
+	const styleFor = (lum: number) => {
+		const key = Math.round(lum * 24);
+		let style = styles.get(key);
+		if (!style) {
+			const bucket = key / 24;
+			let color = mix(palette.dim, palette.brand, Math.min(1, bucket * 1.5));
+			if (bucket > 0.72) color = mix(color, palette.accent, ((bucket - 0.72) / 0.28) * 0.55);
+			style = {
+				fill: css(color, 0.4 + 0.6 * bucket),
+				glow: css(color, Math.max(0, (bucket - 0.78) * 0.32)),
+			};
+			styles.set(key, style);
 		}
-		if (e2 < dx) {
-			err += dx;
-			y += sy;
+		return style;
+	};
+
+	for (const dot of dots) {
+		// Rotate around the vertical axis, then tilt slightly on X.
+		const x1 = dot.x * cosY + dot.z * sinY;
+		const z1 = -dot.x * sinY + dot.z * cosY;
+		const y1 = dot.y;
+		const y2 = y1 * cosX - z1 * sinX;
+		const z2 = y1 * sinX + z1 * cosX;
+
+		const depth = (z2 + 1) / 2;
+		const px = cx + x1 * radius;
+		const py = cy + y2 * radius;
+
+		// A band of current travels from pole to pole while a slower ripple
+		// rolls around the equator; depth fades the far hemisphere.
+		const wave =
+			0.5 + 0.5 * Math.sin(dot.polar * 2.6 - clock * 1.5 + Math.sin(dot.azimuth * 2 + clock * 0.6) * 0.8);
+		const ripple = 0.5 + 0.5 * Math.sin(dot.azimuth * 3 - clock * 1.1 + dot.polar * 1.6);
+		const energy = 0.46 + 0.54 * wave ** 1.1 * (0.7 + 0.3 * ripple);
+		const lum = energy * (0.42 + 0.58 * depth);
+		const dotRadius = 1 + 2 * lum * (0.6 + 0.4 * depth);
+		const style = styleFor(lum);
+
+		ctx.beginPath();
+		ctx.arc(px, py, dotRadius, 0, Math.PI * 2);
+		ctx.fillStyle = style.fill;
+		ctx.fill();
+
+		// The brightest nodes get a soft bloom.
+		if (lum > 0.78) {
+			ctx.beginPath();
+			ctx.arc(px, py, dotRadius * 3.1, 0, Math.PI * 2);
+			ctx.fillStyle = style.glow;
+			ctx.fill();
 		}
 	}
-}
-
-function cornerChar(inDir: Point, outDir: Point): string {
-	const dirs = new Set([`${inDir.x},${inDir.y}`, `${outDir.x},${outDir.y}`]);
-	const has = (x: number, y: number) => dirs.has(`${x},${y}`);
-	if (has(0, 1) && has(-1, 0)) return "┘";
-	if (has(0, 1) && has(1, 0)) return "└";
-	if (has(0, -1) && has(-1, 0)) return "┐";
-	if (has(0, -1) && has(1, 0)) return "┌";
-	return "┼";
-}
-
-function drawWire(grid: Grid, path: Point[]): void {
-	for (let i = 1; i < path.length; i++) {
-		drawLine(grid, path[i - 1]!.x, path[i - 1]!.y, path[i]!.x, path[i]!.y);
-	}
-	for (let i = 1; i < path.length - 1; i++) {
-		const prev = path[i - 1]!;
-		const cur = path[i]!;
-		const next = path[i + 1]!;
-		put(
-			grid,
-			cur.x,
-			cur.y,
-			cornerChar(
-				{ x: Math.sign(cur.x - prev.x), y: Math.sign(cur.y - prev.y) },
-				{ x: Math.sign(next.x - cur.x), y: Math.sign(next.y - cur.y) },
-			),
-		);
-	}
-}
-
-function pathLength(path: Point[]): number {
-	let total = 0;
-	for (let i = 1; i < path.length; i++) {
-		total += Math.hypot(path[i]!.x - path[i - 1]!.x, path[i]!.y - path[i - 1]!.y);
-	}
-	return total;
-}
-
-function pointAt(path: Point[], s: number): Point {
-	let target = Math.min(1, Math.max(0, s)) * pathLength(path);
-	for (let i = 1; i < path.length; i++) {
-		const a = path[i - 1]!;
-		const b = path[i]!;
-		const seg = Math.hypot(b.x - a.x, b.y - a.y);
-		if (target <= seg) {
-			const f = seg === 0 ? 0 : target / seg;
-			return { x: a.x + (b.x - a.x) * f, y: a.y + (b.y - a.y) * f };
-		}
-		target -= seg;
-	}
-	return path[path.length - 1]!;
-}
-
-const PIVOT: Point = { x: 34, y: 14 };
-const ARM_LEN = 10;
-const MAX_ANGLE = 0.62;
-const LEFT_CONTACT: Point = { x: 28, y: 5 };
-const RIGHT_CONTACT: Point = { x: 40, y: 5 };
-const LEFT_PATH: Point[] = [LEFT_CONTACT, { x: 28, y: 2 }, { x: 8, y: 2 }, { x: 8, y: 19 }];
-const RIGHT_PATH: Point[] = [RIGHT_CONTACT, { x: 40, y: 2 }, { x: 60, y: 2 }, { x: 60, y: 19 }];
-const COIL_PATH: Point[] = [PIVOT, { x: 34, y: 19 }];
-const COIL_LEFT = 12;
-const COIL_TOP = 16;
-
-function easeOutBack(x: number): number {
-	const c1 = 1.70158;
-	const c3 = c1 + 1;
-	const c = Math.min(1, Math.max(0, x));
-	return 1 + c3 * (c - 1) ** 3 + c1 * (c - 1) ** 2;
-}
-
-/** Armature position in [-1, 1]: a springy snap between the two contacts with a hold at each. */
-function armatureValue(t: number): number {
-	const u = (((t % PERIOD_MS) + PERIOD_MS) % PERIOD_MS) / PERIOD_MS;
-	const move = 0.16;
-	const hold = 0.34;
-	if (u < move) return -1 + 2 * easeOutBack(u / move);
-	if (u < move + hold) return 1;
-	if (u < 2 * move + hold) return 1 - 2 * easeOutBack((u - move - hold) / move);
-	return -1;
-}
-
-function drawArmature(grid: Grid, angle: number, ch?: string): void {
-	const ex = PIVOT.x + ARM_LEN * Math.sin(angle);
-	const ey = PIVOT.y - ARM_LEN * Math.cos(angle);
-	drawLine(grid, PIVOT.x, PIVOT.y, ex, ey, ch);
-}
-
-function drawCoil(grid: Grid, t: number, energized: boolean): void {
-	for (let i = 0; i < 4; i++) {
-		const x = COIL_LEFT + i * 4;
-		const wave = energized && (Math.floor(t / 110) + i) % 4 < 2;
-		const bar = wave ? "═" : "─";
-		put(grid, x, COIL_TOP, "╭");
-		put(grid, x + 1, COIL_TOP, bar);
-		put(grid, x + 2, COIL_TOP, "╮");
-		put(grid, x, COIL_TOP + 1, "╰");
-		put(grid, x + 1, COIL_TOP + 1, bar);
-		put(grid, x + 2, COIL_TOP + 1, "╯");
-	}
-}
-
-function drawCurrent(grid: Grid, path: Point[], t: number, speed: number, count: number): void {
-	for (let k = 0; k < count; k++) {
-		const s = (t / speed + k / count) % 1;
-		const p = pointAt(path, s);
-		put(grid, p.x, p.y, "•");
-	}
-}
-
-function render(t: number): string {
-	const grid = makeGrid();
-	const value = armatureValue(t);
-	const angle = value * MAX_ANGLE;
-	const energized = value > 0.85;
-
-	drawWire(grid, LEFT_PATH);
-	drawWire(grid, RIGHT_PATH);
-	drawLine(grid, PIVOT.x, PIVOT.y, PIVOT.x, 19);
-	drawCoil(grid, t, energized);
-
-	put(grid, LEFT_CONTACT.x, LEFT_CONTACT.y, "●");
-	put(grid, RIGHT_CONTACT.x, RIGHT_CONTACT.y, "●");
-	putText(grid, LEFT_CONTACT.x - 4, LEFT_CONTACT.y, "NC");
-	putText(grid, RIGHT_CONTACT.x + 2, RIGHT_CONTACT.y, "NO");
-	putText(grid, 2, COIL_TOP, "coil");
-	putText(grid, PIVOT.x + 2, 19, "COM");
-
-	// Motion trail: earlier armature poses fade behind the live one.
-	drawArmature(grid, armatureValue(t - 70) * MAX_ANGLE, "·");
-	drawArmature(grid, armatureValue(t - 140) * MAX_ANGLE, "·");
-	drawArmature(grid, armatureValue(t - 210) * MAX_ANGLE, "·");
-	drawArmature(grid, angle);
-	put(grid, PIVOT.x, PIVOT.y, "◉");
-
-	if (value < -0.85) drawCurrent(grid, LEFT_PATH, t, 900, 5);
-	if (value > 0.85) drawCurrent(grid, RIGHT_PATH, t, 900, 5);
-	if (energized) drawCurrent(grid, COIL_PATH, t, 700, 3);
-
-	// A spark where the armature lands on a contact.
-	if (Math.abs(value) > 0.95) {
-		const contact = value > 0 ? RIGHT_CONTACT : LEFT_CONTACT;
-		put(grid, contact.x, contact.y - 1, "*");
-		put(grid, contact.x + (value > 0 ? 1 : -1), contact.y, "*");
-	}
-
-	return grid.map((row) => row.join("")).join("\n");
 }
 
 export function RelayAnimation() {
-	const [frame, setFrame] = createSignal(render(0));
+	let canvas: HTMLCanvasElement | undefined;
 
 	onMount(() => {
-		if (globalThis.matchMedia?.("(prefers-reduced-motion: reduce)").matches) return;
+		if (!canvas) return;
+		const ctx = canvas.getContext("2d");
+		if (!ctx) return;
+
+		const dots = buildSphere(DOT_COUNT);
+		let palette = readPalette(canvas);
+		let width = 0;
+		let height = 0;
 		let raf = 0;
 		let last = 0;
 		const start = performance.now();
-		const tick = (now: number) => {
-			if (now - last >= FRAME_MS) {
-				last = now;
-				setFrame(render(now - start));
-			}
-			raf = requestAnimationFrame(tick);
+		const reduced = globalThis.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
+
+		const paint = (clock: number) => {
+			if (width <= 0 || height <= 0) return;
+			draw(ctx, width, height, clock, dots, palette);
 		};
-		raf = requestAnimationFrame(tick);
-		onCleanup(() => cancelAnimationFrame(raf));
+
+		const resize = () => {
+			if (!canvas) return;
+			const rect = canvas.getBoundingClientRect();
+			const dpr = Math.min(globalThis.devicePixelRatio || 1, 2.5);
+			width = Math.max(1, rect.width);
+			height = Math.max(1, rect.height);
+			canvas.width = Math.round(width * dpr);
+			canvas.height = Math.round(height * dpr);
+			ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+			paint(reduced ? RESTING_CLOCK : (performance.now() - start) / 1000);
+		};
+
+		resize();
+		const resizeObserver = new ResizeObserver(resize);
+		resizeObserver.observe(canvas);
+
+		// The palette is applied as CSS variables + `data-theme` on the root.
+		const themeObserver = new MutationObserver(() => {
+			palette = readPalette(canvas ?? document.documentElement);
+			paint(reduced ? RESTING_CLOCK : (performance.now() - start) / 1000);
+		});
+		themeObserver.observe(document.documentElement, {
+			attributes: true,
+			attributeFilter: ["data-theme", "class", "style"],
+		});
+
+		if (!reduced) {
+			const tick = (now: number) => {
+				if (now - last >= FRAME_MS) {
+					last = now;
+					paint((now - start) / 1000);
+				}
+				raf = requestAnimationFrame(tick);
+			};
+			raf = requestAnimationFrame(tick);
+		}
+
+		onCleanup(() => {
+			cancelAnimationFrame(raf);
+			resizeObserver.disconnect();
+			themeObserver.disconnect();
+		});
 	});
 
-	return (
-		<pre class="relay-anim" aria-hidden="true">
-			{frame()}
-		</pre>
-	);
+	return <canvas ref={canvas} class="relay-orb" aria-hidden="true" />;
 }
