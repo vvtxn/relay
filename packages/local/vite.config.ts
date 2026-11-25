@@ -21,6 +21,10 @@ export default defineConfig({
 		dts: false,
 		sourcemap: false,
 		clean: true,
+		// Minify the bundle embedded in the SEA: the executable carries every
+		// server module, and the runtime reads the node:sea assets rather than
+		// these sources, so readability has no runtime benefit.
+		minify: true,
 		deps: {
 			// Bundle the CLI, server, TUI, and their JS dependencies. The libSQL
 			// native client is loaded from the extracted runtime via createRequire.

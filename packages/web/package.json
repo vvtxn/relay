@@ -11,6 +11,9 @@
 	},
 	"dependencies": {
 		"@pierre/diffs": "^1.5.2",
+		"@pierre/theme": "^2.0.0",
+		"@pierre/theming": "^1.0.1",
+		"@shikijs/langs": "4.5.0",
 		"@tanstack/solid-query": "^5",
 		"@tanstack/solid-router": "^1",
 		"@vvtxn/client": "workspace:*",

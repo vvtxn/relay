@@ -18,6 +18,9 @@ web/
     ├── theme.ts     # applyTheme(mode): palette + color-scheme → --relay-* CSS variables
     ├── version.ts   # Display version
     ├── highlight.ts # Shared Shiki bridge (lazy grammars; pierre-dark/light, light-dark())
+    ├── shiki-shim.ts # Curated "shiki" entry (aliased): core engine + ~40 grammars, no theme/WASM registries
+    ├── pierre-themes-shim.ts # " @pierre/theming/themes" entry (aliased): just pierre-dark/light
+    ├── shiki-wasm-stub.ts # Stub for the unused "shiki/wasm" payload
     ├── styles.css   # Layout + components, all colors via var(--relay-*)
     ├── api/
     │   ├── client.ts      # RelayClient singleton (credentials: include, localStorage server URL)
@@ -86,6 +89,9 @@ round trip. Keep these rules in mind:
 - The session route's loader (`router.tsx`) fetches a **fresh** snapshot (`fetchQuery` +
   `staleReloadMode: "blocking"`), so a stale router/query cache never paints; a just-created or still-streamed session
   resolves from cache with no request.
+- The chat route's component is code-split (`lazyRouteComponent`): `markdown-it`, Shiki, and `@pierre/diffs` load with
+  `SessionPage`, not at boot. `defaultPreload: "intent"` warms the chunk on link hover and the router awaits it before
+  committing, so new work must not statically import `SessionPage` from `router.tsx`.
 - Both route loaders also **warm every query the shell reads before the route commits** (`me`, `config`, the workspace
   picker, and the target workspace's session list). This is not just speed: Solid's resource-backed queries suspend the
   nearest Suspense boundary while their data is undefined, and the router's root/match boundaries fall back to the
@@ -182,9 +188,15 @@ rendered as text and links use `rel="noreferrer noopener"`, because LLM output i
 `innerHTML`. A small core rule adds GFM task-list checkboxes, and fenced blocks become `CodeBlock.tsx` components.
 
 `highlight.ts` owns the one Shiki instance: it borrows `@pierre/diffs`' shared highlighter (JavaScript regex engine, no
-WASM; any bundled grammar resolved lazily on first use) with the `pierre-dark` / `pierre-light` themes. Tokens are
+WASM; a curated grammar set resolved lazily on first use) with the `pierre-dark` / `pierre-light` themes. Tokens are
 highlighted once with `defaultColor: "light-dark()"`, so switching the app palette needs no re-highlight. Unknown
 languages stay plain text.
+
+Shiki's root `"shiki"` entry and `@pierre/theming/themes` are aliased (see `vite.config.ts`) to `shiki-shim.ts` and
+`pierre-themes-shim.ts`. The upstream entries statically reference every bundled grammar (~200 chunks), every bundled
+theme (~65 chunks), and the Oniguruma WASM payload, even though the app only ever uses the language list in
+`shiki-shim.ts` and the two Pierre themes. Adding a language means adding it (and any fence aliases) to that map; the
+grammar chunk stays lazy.
 
 ### Messages and tool calls
 
@@ -258,7 +270,9 @@ browser origin).
 - `effect` (v4) — services, layers, streams, runtime, typed errors
 - `markdown-it` — markdown lexer (rendered safely to vnodes)
 - `shiki` — syntax highlighting; the shared instance also colors code in diffs
+- `@shikijs/langs` — per-grammar modules for the curated language set in `shiki-shim.ts`
 - `@pierre/diffs` — Shiki-based unified diff rendering for edit/write tool calls
+- `@pierre/theme` + `@pierre/theming` — the `pierre-dark` / `pierre-light` theme data and loader API
 - `vite-plugin-solid` — Solid compiler plugin; Vite itself comes from `vite-plus`
 - `@vvtxn/client` — protocol, RelayClient, shared session-state reducer
 - `@vvtxn/relay` — `display.ts` helpers and `theme.ts` tokens (browser-pure)
