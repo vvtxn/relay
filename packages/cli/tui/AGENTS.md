@@ -232,7 +232,10 @@ All exported from `render/components.tsx`:
   cached per content string)
 - **`memo(component)`** - Marks a pure presentational component so the renderer skips re-invocation while its props are
   shallow-equal (see Render-Cost Model)
-- **`WelcomeScreen`** - Welcome screen with logo, subtitle, and hints, re-exported from `components/welcome-screen.tsx`
+- **`WelcomeScreen`** - Side-by-side welcome mark: an animated halftone signal orb on the left, "Welcome to Relay" plus
+  subtitle/hints on the right; re-exported from `components/welcome-screen.tsx`. The orb is a 26×13 cell sphere whose
+  glyph density and palette-derived color follow traveling current waves, repainted at 20fps through a signal (fixed
+  `width`/`height` on each row keeps Yoga from re-measuring on every tick).
 - **`CommandPalette`** - Re-exported from `components/command-palette.tsx`
 
 ## Hooks

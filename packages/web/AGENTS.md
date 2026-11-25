@@ -54,6 +54,7 @@ web/
         ├── Composer.tsx        # Textarea + @-mention picker + model selector + send/stop
         ├── ModelSelector.tsx   # Thread model popover grouped by connected subscription
         ├── StatusBar.tsx       # Branch, box, cost, user, sign out
+        ├── RelayAnimation.tsx  # Decorative canvas signal orb (theme-aware, reduced-motion aware)
         └── BootScreen.tsx      # Loading / error / login screens
 ```
 
@@ -159,9 +160,11 @@ actually changes, so background refetches never clobber unsaved edits.
 
 In-app entry point (the sidebar user chip) opens the **nested overlay** `/s/:sessionId/settings`: the chat stays
 mounted and its stream connected behind it, so opening/closing settings is instant and nothing is lost. The standalone
-`/settings` route serves CLI deep links (the CLI blocks until a connection is set) and returns to the last opened
-session (`relay.sessionId` in localStorage) or the boot flow. Route-loader failures render an in-place error state
-instead of redirecting to `/`, so a transient refetch (or a pruned session) can never eject an open settings overlay.
+`/settings` route serves CLI deep links (the CLI blocks until a connection is set) and overview/workspace entry points;
+its **Back** button returns through router history when the page was opened inside the app, and otherwise falls back to
+the last opened session (`relay.sessionId` in localStorage) or the boot flow. Route-loader failures render an in-place
+error state instead of redirecting to `/`, so a transient refetch (or a pruned session) can never eject an open settings
+overlay.
 
 ### Thread model selector
 
