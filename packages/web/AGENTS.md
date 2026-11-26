@@ -17,7 +17,6 @@ web/
     ├── router.tsx   # Code-based routes: "/" overview, "/w/$token" workspace, "/s/$sessionId" chat (+ settings)
     ├── theme.ts     # applyTheme(mode): palette + color-scheme → --relay-* CSS variables
     ├── version.ts   # Display version
-    ├── highlight.ts # Shared Shiki bridge (lazy grammars; pierre-dark/light, light-dark())
     ├── styles.css   # Layout + components, all colors via var(--relay-*)
     ├── api/
     │   ├── client.ts      # RelayClient singleton (credentials: include, localStorage server URL)
@@ -49,7 +48,7 @@ web/
         ├── Markdown.tsx        # markdown-it token stream → Solid vnodes (no innerHTML)
         ├── CodeBlock.tsx       # Fenced code block highlighted by the shared Shiki instance
         ├── ToolCalls.tsx       # Per-call rows: tool accents, grep matches, output previews
-        ├── DiffBlock.tsx       # Unified diffs via @pierre/diffs (plain-line fallback)
+        ├── DiffBlock.tsx       # Unified diffs from prettyDiff() (same model + tokens as the TUI)
         ├── DiffModal.tsx       # Review modal (native dialog, showModal) for one edit/write diff, scrollable
         ├── Composer.tsx        # Textarea + @-mention picker + model selector + send/stop
         ├── ModelSelector.tsx   # Thread model popover grouped by connected subscription
@@ -86,6 +85,9 @@ round trip. Keep these rules in mind:
 - The session route's loader (`router.tsx`) fetches a **fresh** snapshot (`fetchQuery` +
   `staleReloadMode: "blocking"`), so a stale router/query cache never paints; a just-created or still-streamed session
   resolves from cache with no request.
+- The chat route's component is code-split (`lazyRouteComponent`): `markdown-it` and the chat components load with
+  `SessionPage`, not at boot. `defaultPreload: "intent"` warms the chunk on link hover and the router awaits it before
+  committing, so new work must not statically import `SessionPage` from `router.tsx`.
 - Both route loaders also **warm every query the shell reads before the route commits** (`me`, `config`, the workspace
   picker, and the target workspace's session list). This is not just speed: Solid's resource-backed queries suspend the
   nearest Suspense boundary while their data is undefined, and the router's root/match boundaries fall back to the
@@ -175,16 +177,15 @@ the session header and emits `model_changed`, which the shared reducer folds int
 state. Choosing **Account default** sends `model: null`, which drops the sticky override (instead of pinning today's
 default) so the thread keeps following the account default as it changes.
 
-### Markdown and code highlighting
+### Markdown and code blocks
 
 `Markdown.tsx` lexes with `markdown-it` (`html: false`) and walks the token stream into Solid elements — raw HTML is
 rendered as text and links use `rel="noreferrer noopener"`, because LLM output is untrusted and is never injected via
 `innerHTML`. A small core rule adds GFM task-list checkboxes, and fenced blocks become `CodeBlock.tsx` components.
 
-`highlight.ts` owns the one Shiki instance: it borrows `@pierre/diffs`' shared highlighter (JavaScript regex engine, no
-WASM; any bundled grammar resolved lazily on first use) with the `pierre-dark` / `pierre-light` themes. Tokens are
-highlighted once with `defaultColor: "light-dark()"`, so switching the app palette needs no re-highlight. Unknown
-languages stay plain text.
+`CodeBlock.tsx` renders fenced code as plain mono text with a language chip. The web app deliberately ships no syntax
+highlighter: Shiki and `@pierre/diffs` were removed because they dominated the bundle (every grammar/theme chunk plus a
+WASM engine) and could not be shared with the terminal client. Diffs are not highlighted either; see below.
 
 ### Messages and tool calls
 
@@ -193,9 +194,10 @@ Turn rendering is a web-native take on the terminal client: user turns carry an 
 Turns that run tools drop the `brand` stripe and its padding, so only their per-tool accents show.
 Each tool call is a single collapsed row — per-tool colored display name (from the shared theme's `toolRead`, `toolWrite`,
 … tokens), argument, and a short result stat (`3 matches in 2 files`, `+4 −3`, `40 lines`, `error`, or a pulsing
-`running…`). Clicking a row expands the full result: edit/write diffs render through `@pierre/diffs` (see
-`DiffBlock.tsx`; falls back to `parseDiffLines` coloring when a patch cannot be parsed), grep output is split into
-colored file/line/text, and other results show as preformatted text. Collapsed by default is deliberate — long outputs
+`running…`). Clicking a row expands the full result: edit/write diffs render through `DiffBlock.tsx` (the shared
+`prettyDiff` rows the TUI uses: hunk headers, line-number gutter, per-file sections, add/remove coloring; the `+`/`-`
+prefixes are never printed), grep output is split into colored file/line/text, and other results show as preformatted
+text. Collapsed by default is deliberate — long outputs
 stay one line unless the reader asks for them. Edit and write calls that produced a diff also get a **View diff**
 button beside the row. It opens `DiffModal.tsx`, a native modal `<dialog>` with the full diff in a scrollable body;
 Escape, the Close button, or a backdrop click dismisses it. Its state lives in `state/diff-preview.ts`, outside the
@@ -257,11 +259,10 @@ browser origin).
 - `solid-js` (1.x), `@tanstack/solid-query`, `@tanstack/solid-router` (npm)
 - `effect` (v4) — services, layers, streams, runtime, typed errors
 - `markdown-it` — markdown lexer (rendered safely to vnodes)
-- `shiki` — syntax highlighting; the shared instance also colors code in diffs
-- `@pierre/diffs` — Shiki-based unified diff rendering for edit/write tool calls
 - `vite-plugin-solid` — Solid compiler plugin; Vite itself comes from `vite-plus`
 - `@vvtxn/client` — protocol, RelayClient, shared session-state reducer
-- `@vvtxn/relay` — `display.ts` helpers and `theme.ts` tokens (browser-pure)
+- `@vvtxn/relay` — `display.ts`/`diff-view.ts` helpers (including `parseDiff`/`prettyDiff`) and `theme.ts` tokens
+  (browser-pure)
 
 ## Task Completion Checklist
 

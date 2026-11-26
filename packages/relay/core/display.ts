@@ -360,7 +360,3 @@ export function parseDiff(raw: string): DiffFile[] {
 
 	return files;
 }
-
-export function parseDiffLines(raw: string): DiffLine[] {
-	return parseDiff(raw).flatMap((file) => file.hunks.flatMap((hunk) => hunk.lines));
-}

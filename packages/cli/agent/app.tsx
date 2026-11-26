@@ -25,7 +25,8 @@ import { StatusBar } from "./components/status-bar.tsx";
 import { BootError, BootScreen } from "./components/boot-screen.tsx";
 import { MessageView, ToolBundleView } from "./components/chat.tsx";
 import { DiffViewer } from "./components/diff.tsx";
-import { buildDiffRows, collectSessionDiffs, type DiffRows, type SessionDiff } from "./diffs.ts";
+import { prettyDiff, type DiffView } from "@vvtxn/relay/core/diff-view.ts";
+import { collectSessionDiffs, type SessionDiff } from "./diffs.ts";
 import { bundleTranscript } from "./tool-bundle.ts";
 
 // ---------------------------------------------------------------------------
@@ -133,7 +134,7 @@ function App({ onQuit, initialSessionId, info }: AppProps) {
 	const diffViewer = useSignal<{
 		diffs: SessionDiff[];
 		index: number;
-		view: DiffRows;
+		view: DiffView;
 	} | null>(null);
 
 	const pushStream = () => {
@@ -257,7 +258,7 @@ function App({ onQuit, initialSessionId, info }: AppProps) {
 		const next = Math.max(0, Math.min(index ?? diffs.length - 1, diffs.length - 1));
 		const diff = diffs[next];
 		if (!diff) return;
-		diffViewer.value = { diffs, index: next, view: buildDiffRows(diff.diff, { context: true }) };
+		diffViewer.value = { diffs, index: next, view: prettyDiff(diff.diff, { context: true }) };
 	};
 
 	const cycleDiffViewer = (delta: number) => {
@@ -272,7 +273,7 @@ function App({ onQuit, initialSessionId, info }: AppProps) {
 		const index = (current.index + delta + diffs.length) % diffs.length;
 		const diff = diffs[index];
 		if (!diff) return;
-		diffViewer.value = { diffs, index, view: buildDiffRows(diff.diff, { context: true }) };
+		diffViewer.value = { diffs, index, view: prettyDiff(diff.diff, { context: true }) };
 	};
 
 	const closeDiffViewer = () => {

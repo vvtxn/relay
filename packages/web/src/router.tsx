@@ -1,4 +1,12 @@
-import { createRootRoute, createRoute, createRouter, Link, Outlet, redirect } from "@tanstack/solid-router";
+import {
+	createRootRoute,
+	createRoute,
+	createRouter,
+	lazyRouteComponent,
+	Link,
+	Outlet,
+	redirect,
+} from "@tanstack/solid-router";
 import { decodeWorkspaceToken } from "@vvtxn/relay/core/workspace-token.ts";
 import { RelayError } from "@vvtxn/client/services.ts";
 import { queryClient } from "#/api/query-client.ts";
@@ -14,9 +22,16 @@ import {
 } from "#/api/queries.ts";
 import { BootScreen } from "#/components/BootScreen.tsx";
 import { OverviewPage } from "#/pages/OverviewPage.tsx";
-import { SessionPage } from "#/pages/SessionPage.tsx";
 import { SessionSettingsRoute, SettingsPage } from "#/pages/SettingsPage.tsx";
 import { WorkspacePage } from "#/pages/WorkspacePage.tsx";
+
+/**
+ * The chat surface carries the markdown lexer and message rendering. Loading it
+ * lazily keeps that weight out of the boot/overview/login chunk; the router's
+ * `intent` preloading fetches it on link hover, and the route loader still
+ * commits only once it is ready.
+ */
+const SessionPage = lazyRouteComponent(() => import("#/pages/SessionPage.tsx"), "SessionPage");
 
 const rootRoute = createRootRoute({ component: () => <Outlet /> });
 

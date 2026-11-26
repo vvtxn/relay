@@ -16,6 +16,8 @@ local/
 
 - `scripts/build-sea.ts` builds the web app, copies the libSQL runtime tree into a temporary directory, writes an asset
   manifest, and runs `vp -C packages/local pack`. Vite+ Pack's `exe` mode bundles everything into one SEA.
+- The JS bundle is minified (`pack.minify`): the executable carries the whole server/CLI graph, and nothing reads the
+  bundle text at runtime, so readability buys nothing there.
 - Assets are keyed `web/…`, `fonts/…`, and `runtime/…`. On first launch `main.ts` extracts them under
   `~/.relay/runtime/<version>/`.
 - The libSQL native addon cannot be loaded from SEA assets. `runtime/` contains the JS packages plus

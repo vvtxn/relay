@@ -18,7 +18,7 @@ agent/
 ├── client.ts             # RelayClient singleton (server URL from config/env)
 ├── config.ts             # RelayConfig: serverUrl + theme mode (env RELAY_SERVER_URL / RELAY_THEME or ~/.relay/config.json)
 ├── theme.ts              # Palette preference → terminal query → derived theme, applied before app.tsx loads
-├── diffs.ts              # Session diff collection + preview/viewer row building (pure)
+├── diffs.ts              # Session diff collection (pure); row building is shared in relay display
 ├── tool-bundle.ts        # Folds tool calls from consecutive agent turns into collapsible transcript bundles (pure)
 ├── tool-display.ts       # Shared tool-call colors and label column width
 ├── components/
@@ -81,8 +81,9 @@ Edit/write tool results arrive with a unified diff on `UIToolCall.diff` (live fr
 `tool_result` entries), so the terminal needs no server or protocol changes to render changes.
 
 - Expanding a tool bundle shows each edit/write call's compact preview: changed lines only, hunk separators, line
-  numbers, tabs expanded to four spaces, and `+`/`−` in the shared success/error tokens. Previews cap at 8 changed
-  lines per file; the remainder is summarized as `… N more changed lines · ctrl+o`.
+  numbers, tabs expanded to four spaces, and add/remove rows colored from the shared success/error tokens. Change
+  prefixes are never printed — the color carries the signal. Previews cap at 8 changed lines per file; the remainder is
+  summarized as `… N more changed lines · ctrl+o`.
 - `ctrl+o` opens `DiffViewer` for the most recent diff; `n`/`p` cycle every diff in the session, arrows/PgUp/PgDn/wheel
   scroll, and Esc/`q` close it. `/` → **Review Changes** opens the same overlay. The overlay keeps full context and
   `@@` headers, unlike the transcript preview.
@@ -92,9 +93,10 @@ Edit/write tool results arrive with a unified diff on `UIToolCall.diff` (live fr
 - Key registration order matters: command palettes first (an open palette owns ctrl+o), the diff viewer next (Escape
   closes it instead of priming cancellation), then the double-Esc cancel handler. While the overlay is open the
   composer and chat `ScrollArea` are unfocused, and every non-navigation key is swallowed.
-- `diffs.ts` is pure: `collectSessionDiffs()` folds messages into reviewable diffs and `buildDiffRows()` produces
-  compact or full-context rows. Both are unit-tested; the shared `parseDiff()`/`diffStats()` live in
-  `@vvtxn/relay/core/display.ts`.
+- `diffs.ts` is pure: `collectSessionDiffs()` folds messages into reviewable diffs. Row building
+  (`prettyDiff()`, compact or full-context) and the `diffRowToken()` color contract live in
+  `@vvtxn/relay/core/diff-view.ts`; `parseDiff()`/`diffStats()` live in `display.ts`. All are shared with the web
+  client.
 
 ### Boot Flow
 
@@ -176,8 +178,9 @@ saved, so the TUI cannot start without one.
   subscription's models. Selecting one sets the thread's sticky `modelSelection` signal; the next `sendMessage` sends it
   with the request. A `model_changed` stream event updates the signal and the transcript.
 - `DiffPreview` / `DiffViewer` (components/diff.tsx) — Compact changed-lines-only preview inside an expanded tool
-  bundle (edit/write calls), and the full-context scrollable review overlay. Both render ANSI-styled rows from the pure
-  helpers in `diffs.ts`; the preview is memoized so streamed deltas skip unchanged diffs
+  bundle (edit/write calls), and the full-context scrollable review overlay. Both render ANSI-styled rows from the
+  shared `prettyDiff()` in `@vvtxn/relay/core/diff-view.ts`; the preview is memoized so streamed deltas skip unchanged
+  diffs
 - `MessageView` (components/chat.tsx) — Shared display contract from `@vvtxn/relay/core/display.ts`; `UIMessage` is
   re-exported from there (single definition). Renders prose only: user turns sit on a full-width `surfaceElevated`
   band, agent turns are marked with a `●` (brand), and turns are separated by the scroll gap. Tool calls are not drawn
@@ -256,7 +259,8 @@ After concluding that a task is complete, always run these commands from the rep
 - Render the transcript through `bundleTranscript()` so tool calls from consecutive turns collapse into one bundle row;
   its per-run call-array cache is what keeps memoized bundle bodies on the fast path, so preserve identity when
   touching the fold
-- Diff presentation is pure and testable (`diffs.ts`); render it through `DiffPreview`/`DiffViewer` instead of stuffing
-  raw patches into `Markdown` (which would show every context line and bypass the preview cap)
+- Diff presentation is pure and shared (`prettyDiff()` in `@vvtxn/relay/core/diff-view.ts`); render it through
+  `DiffPreview`/`DiffViewer` instead of stuffing raw patches into `Markdown` (which would show every context line and
+  bypass the preview cap)
 - A global key handler that should win over run cancellation must be registered before the double-Esc handler; one that
   should lose to an open palette must be registered after the palette hooks

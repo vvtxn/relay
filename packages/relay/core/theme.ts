@@ -19,6 +19,13 @@ export interface Theme {
 	error: string;
 	info: string;
 
+	/** Diff add/remove text, stronger than the semantic success/error tones. */
+	diffAdd: string;
+	diffDel: string;
+	/** Faint line backgrounds that make added/removed rows read at a glance. */
+	diffAddBackground: string;
+	diffDelBackground: string;
+
 	text: string;
 	textMuted: string;
 	textDim: string;
@@ -58,6 +65,11 @@ export const theme: Theme = {
 	warning: "#B8B0A0",
 	error: "#B0A0A0",
 	info: "#A8A8B0",
+
+	diffAdd: "#7EC699",
+	diffDel: "#D98A8A",
+	diffAddBackground: "#0F2417",
+	diffDelBackground: "#2A1414",
 
 	text: "#F2F2F2",
 	textMuted: "#C0C0C0",
@@ -103,6 +115,11 @@ export const lightTheme: Theme = {
 	warning: "#7A6A3A",
 	error: "#8A3F3F",
 	info: "#3F4A6B",
+
+	diffAdd: "#1E7A3C",
+	diffDel: "#B23B3B",
+	diffAddBackground: "#E9F6EC",
+	diffDelBackground: "#FBEDED",
 
 	text: "#1C1C1C",
 	textMuted: "#3C3C3C",

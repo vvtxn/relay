@@ -15,8 +15,16 @@ import { BOLD, BOLD_OFF, RESET_FG } from "#/tui/core/ansi.ts";
 import { toAnsi } from "#/tui/core/primitives/color.ts";
 import { Box, memo, ScrollArea, Text } from "#/tui/render/components.tsx";
 import { theme } from "#/tui/theme.ts";
+import {
+	diffRowBackground,
+	diffRowToken,
+	formatDiffGutter,
+	prettyDiff,
+	type DiffView,
+	type DiffViewRow,
+} from "@vvtxn/relay/core/diff-view.ts";
 import { getToolDisplayName } from "@vvtxn/relay/core/display.ts";
-import { buildDiffRows, type DiffRow, type DiffRows, type SessionDiff } from "../diffs.ts";
+import type { SessionDiff } from "../diffs.ts";
 import { TOOL_COLORS } from "../tool-display.ts";
 
 /** Changed lines shown in a transcript preview before the `… more` footer. */
@@ -28,18 +36,23 @@ function paint(text: string, color: string, bold = false): string {
 	return bold ? `${BOLD}${styled}${BOLD_OFF}` : styled;
 }
 
-/** Format one structured row into an ANSI string for a single `<Text>`. */
-function formatDiffRow(row: DiffRow, gutter: number): string {
-	if (row.kind === "hunk") return paint(row.text, theme.accent);
+/** Faint line tint for added/removed rows; spread into `<Text>` when present. */
+function backgroundProps(row: DiffViewRow): { bgColor?: string } {
+	const token = diffRowBackground(row);
+	return token ? { bgColor: theme[token] } : {};
+}
+
+/** Format one shared view row into an ANSI string for a single `<Text>`. */
+function formatDiffRow(row: DiffViewRow, gutter: number): string {
+	if (row.kind === "file") {
+		return `${paint(row.path, theme.text)} ${paint(`+${row.adds} −${row.deletes}`, theme.textFaint)}`;
+	}
+	if (row.kind === "hunk") return paint(row.header, theme.accent);
 	if (row.kind === "separator") return paint(`${" ".repeat(gutter)} ${row.text}`, theme.textFaint);
 
-	const lineNo = paint(String(row.lineNo).padStart(gutter), theme.textFaint);
-	if (row.prefix === " ") {
-		return `${lineNo} ${paint(` ${row.content}`, theme.textDim)}`;
-	}
-
-	const color = row.prefix === "+" ? theme.success : theme.error;
-	return `${lineNo} ${paint(row.prefix, color, true)}${paint(row.content, color)}`;
+	const lineNo = paint(formatDiffGutter(row.lineNo, gutter), theme.textFaint);
+	const content = row.text ? paint(row.text, theme[diffRowToken(row)]) : "";
+	return `${lineNo} ${content}`;
 }
 
 export type DiffPreviewProps = {
@@ -53,18 +66,20 @@ export type DiffPreviewProps = {
  * Pure: memoized because a draft message is re-invoked on every text delta.
  */
 export const DiffPreview = memo(function DiffPreview(props: DiffPreviewProps) {
-	const { rows, gutter, hidden } = buildDiffRows(props.diff, {
-		maxLines: props.maxLines ?? PREVIEW_MAX_LINES,
+	const { rows, gutter, hiddenChanged } = prettyDiff(props.diff, {
+		maxChangedLines: props.maxLines ?? PREVIEW_MAX_LINES,
 	});
 
 	return (
 		<Box flexDirection="column">
 			{rows.map((row, index) => (
-				<Text key={index}>{formatDiffRow(row, gutter)}</Text>
+				<Text key={index} {...backgroundProps(row)}>
+					{formatDiffRow(row, gutter)}
+				</Text>
 			))}
-			{hidden > 0 && (
+			{hiddenChanged > 0 && (
 				<Text color={theme.textFaint}>
-					{`${" ".repeat(gutter + 2)}… ${hidden} more changed line${hidden === 1 ? "" : "s"} · ctrl+o`}
+					{`${" ".repeat(gutter + 2)}… ${hiddenChanged} more changed line${hiddenChanged === 1 ? "" : "s"} · ctrl+o`}
 				</Text>
 			)}
 		</Box>
@@ -75,11 +90,13 @@ export const DiffPreview = memo(function DiffPreview(props: DiffPreviewProps) {
  * The scrollable body of the review overlay. Memoized so the row VNodes are
  * reused while the app re-renders behind it (streamed text, spinner ticks).
  */
-const DiffBody = memo(function DiffBody(props: { view: DiffRows; key?: number }) {
+const DiffBody = memo(function DiffBody(props: { view: DiffView; key?: number }) {
 	return (
 		<Box flexDirection="column">
 			{props.view.rows.map((row, index) => (
-				<Text key={index}>{formatDiffRow(row, props.view.gutter)}</Text>
+				<Text key={index} {...backgroundProps(row)}>
+					{formatDiffRow(row, props.view.gutter)}
+				</Text>
 			))}
 		</Box>
 	);
@@ -88,7 +105,7 @@ const DiffBody = memo(function DiffBody(props: { view: DiffRows; key?: number })
 export interface DiffViewerProps {
 	diff: SessionDiff;
 	/** Pre-built full-context rows for `diff`. */
-	view: DiffRows;
+	view: DiffView;
 	/** Zero-based position across the session's diffs. */
 	index: number;
 	total: number;
