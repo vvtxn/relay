@@ -81,7 +81,7 @@ export {
 } from "./core/display.ts";
 export type { DiffFile, DiffHunk, DiffLine, UIMessage, UIToolCall } from "./core/display.ts";
 
-export { diffRowToken, formatDiffGutter, prettyDiff } from "./core/diff-view.ts";
+export { diffRowBackground, diffRowToken, formatDiffGutter, prettyDiff } from "./core/diff-view.ts";
 export type { DiffLineKind, DiffView, DiffViewOptions, DiffViewRow } from "./core/diff-view.ts";
 
 // Theme (shared design tokens for terminal and web clients)

@@ -56,8 +56,20 @@ export function diffRowToken(row: DiffViewRow): keyof Theme {
 		case "separator":
 			return "textFaint";
 		case "line":
-			return row.type === "add" ? "success" : row.type === "del" ? "error" : "textDim";
+			return row.type === "add" ? "diffAdd" : row.type === "del" ? "diffDel" : "textDim";
 	}
+}
+
+/**
+ * Theme token for a row's line background, or null when it stays transparent.
+ * Added/removed rows get a faint tint so they read at a glance without the
+ * `+`/`-` markers.
+ */
+export function diffRowBackground(row: DiffViewRow): keyof Theme | null {
+	if (row.kind !== "line") return null;
+	if (row.type === "add") return "diffAddBackground";
+	if (row.type === "del") return "diffDelBackground";
+	return null;
 }
 
 /** Right-align a line number in the view's gutter. */

@@ -1,14 +1,21 @@
 import { createMemo, For, Show } from "solid-js";
-import { diffRowToken, formatDiffGutter, prettyDiff, type DiffViewRow } from "@vvtxn/relay/core/diff-view.ts";
+import {
+	diffRowBackground,
+	diffRowToken,
+	formatDiffGutter,
+	prettyDiff,
+	type DiffViewRow,
+} from "@vvtxn/relay/core/diff-view.ts";
 
 /**
  * Unified diff rendering for edit/write tool calls.
  *
  * Rows come from `prettyDiff` in `@vvtxn/relay/core/diff-view.ts` — the same
  * model the terminal client renders — so both clients show the same hunks,
- * line-number gutter, and per-file sections. `diffRowToken` names the theme
- * token for each row; `styles.css` maps those names to `--relay-*` variables.
- * Change prefixes are never rendered: the color carries the signal.
+ * line-number gutter, and per-file sections. `diffRowToken` /
+ * `diffRowBackground` name the theme tokens for each row; `styles.css` maps
+ * those names to `--relay-*` variables. Change prefixes are never rendered:
+ * color and the faint line tint carry the signal.
  */
 
 function Row(props: { row: DiffViewRow; gutter: number }) {
@@ -18,8 +25,8 @@ function Row(props: { row: DiffViewRow; gutter: number }) {
 			<div class="diff-row diff-row-file">
 				<span class="diff-row-path">{row.path}</span>
 				<span class="diff-row-stat">
-					<span data-token="success">+{row.adds}</span>
-					<span data-token="error">−{row.deletes}</span>
+					<span data-token="diffAdd">+{row.adds}</span>
+					<span data-token="diffDel">−{row.deletes}</span>
 				</span>
 			</div>
 		);
@@ -39,7 +46,7 @@ function Row(props: { row: DiffViewRow; gutter: number }) {
 		);
 	}
 	return (
-		<div class="diff-row" data-token={diffRowToken(row)}>
+		<div class="diff-row" data-token={diffRowToken(row)} data-bg={diffRowBackground(row) ?? undefined}>
 			<span class="diff-row-gutter">{formatDiffGutter(row.lineNo, props.gutter)}</span>
 			<span class="diff-row-text">{row.text}</span>
 		</div>

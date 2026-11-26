@@ -16,6 +16,7 @@ import { toAnsi } from "#/tui/core/primitives/color.ts";
 import { Box, memo, ScrollArea, Text } from "#/tui/render/components.tsx";
 import { theme } from "#/tui/theme.ts";
 import {
+	diffRowBackground,
 	diffRowToken,
 	formatDiffGutter,
 	prettyDiff,
@@ -33,6 +34,12 @@ function paint(text: string, color: string, bold = false): string {
 	const ansi = toAnsi(color);
 	const styled = ansi ? `${ansi}${text}${RESET_FG}` : text;
 	return bold ? `${BOLD}${styled}${BOLD_OFF}` : styled;
+}
+
+/** Faint line tint for added/removed rows; spread into `<Text>` when present. */
+function backgroundProps(row: DiffViewRow): { bgColor?: string } {
+	const token = diffRowBackground(row);
+	return token ? { bgColor: theme[token] } : {};
 }
 
 /** Format one shared view row into an ANSI string for a single `<Text>`. */
@@ -66,7 +73,9 @@ export const DiffPreview = memo(function DiffPreview(props: DiffPreviewProps) {
 	return (
 		<Box flexDirection="column">
 			{rows.map((row, index) => (
-				<Text key={index}>{formatDiffRow(row, gutter)}</Text>
+				<Text key={index} {...backgroundProps(row)}>
+					{formatDiffRow(row, gutter)}
+				</Text>
 			))}
 			{hiddenChanged > 0 && (
 				<Text color={theme.textFaint}>
@@ -85,7 +94,9 @@ const DiffBody = memo(function DiffBody(props: { view: DiffView; key?: number })
 	return (
 		<Box flexDirection="column">
 			{props.view.rows.map((row, index) => (
-				<Text key={index}>{formatDiffRow(row, props.view.gutter)}</Text>
+				<Text key={index} {...backgroundProps(row)}>
+					{formatDiffRow(row, props.view.gutter)}
+				</Text>
 			))}
 		</Box>
 	);

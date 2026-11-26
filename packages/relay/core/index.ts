@@ -17,7 +17,7 @@ export {
 } from "./display.ts";
 export type { DiffFile, DiffHunk, DiffLine, UIMessage, UIToolCall } from "./display.ts";
 
-export { diffRowToken, formatDiffGutter, prettyDiff } from "./diff-view.ts";
+export { diffRowBackground, diffRowToken, formatDiffGutter, prettyDiff } from "./diff-view.ts";
 export type { DiffLineKind, DiffView, DiffViewOptions, DiffViewRow } from "./diff-view.ts";
 
 export { estimateMessageTokens, estimateTokens, trimContext } from "./context.ts";

@@ -20,6 +20,18 @@ function rgbToHex(color: Rgb): string {
 	return `#${channel(color.r)}${channel(color.g)}${channel(color.b)}`;
 }
 
+/** Parse a `#rrggbb` value; `semantic()` may instead return an ANSI color name. */
+function parseHex(value: string): Rgb | null {
+	const match = /^#([0-9a-f]{6})$/i.exec(value);
+	const digits = match?.[1];
+	if (!digits) return null;
+	return {
+		r: Number.parseInt(digits.slice(0, 2), 16),
+		g: Number.parseInt(digits.slice(2, 4), 16),
+		b: Number.parseInt(digits.slice(4, 6), 16),
+	};
+}
+
 /** Linear interpolation in sRGB: `amount` 0 = a, 1 = b. */
 function mix(a: Rgb, b: Rgb, amount: number): Rgb {
 	return {
@@ -138,6 +150,12 @@ export function deriveTheme(foreground: Rgb, background: Rgb, ansi: ReadonlyArra
 	const error = pick(1, 9, "red");
 	const info = pick(4, 12, "blue", elevatedSurfaces, 3.5);
 
+	/** Faint tint of a semantic hue over the canvas; neutral when it names an ANSI slot. */
+	const tint = (color: string, amount: number): string => {
+		const rgb = parseHex(color);
+		return rgbToHex(rgb ? mix(background, rgb, amount) : mix(background, foreground, 0.06));
+	};
+
 	return {
 		brand: rgbToHex(brand),
 		accent: rgbToHex(accent),
@@ -146,6 +164,11 @@ export function deriveTheme(foreground: Rgb, background: Rgb, ansi: ReadonlyArra
 		warning,
 		error,
 		info,
+
+		diffAdd: success,
+		diffDel: error,
+		diffAddBackground: tint(success, dark ? 0.2 : 0.14),
+		diffDelBackground: tint(error, dark ? 0.2 : 0.14),
 
 		text: rgbToHex(foreground),
 		textMuted: rgbToHex(textMuted),

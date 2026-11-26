@@ -128,8 +128,10 @@ Shared across all clients (TUI, web). Deliberately dependency-free so browser bu
 - `prettyDiff()` (in `diff-view.ts`) — Flattens `parseDiff()` into client-agnostic rows (file sections, hunk headers,
   line-number gutter, add/remove/context lines). Compact mode keeps changed lines only; context mode keeps every line;
   multi-file patches get per-file `+N −M` headers. Change prefixes are data, never text — clients never print `+`/`-`.
-- `diffRowToken()` / `formatDiffGutter()` — The shared presentation contract: each row maps to a `Theme` token name and
-  the gutter formatter, so the TUI (ANSI) and web (`--relay-*` CSS variables) render identical structure and semantics.
+- `diffRowToken()` / `diffRowBackground()` / `formatDiffGutter()` — The shared presentation contract: each row maps to a
+  `Theme` token name (text and, for added/removed lines, a faint `diffAddBackground`/`diffDelBackground` tint) plus the
+  gutter formatter, so the TUI (ANSI) and web (`--relay-*` CSS variables) render identical structure and semantics.
+  Diff text uses the dedicated `diffAdd`/`diffDel` tokens, which are stronger than the semantic success/error tones.
 
 ### Tool System
 
