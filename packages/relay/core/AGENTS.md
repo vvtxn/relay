@@ -9,7 +9,8 @@ core/
 ├── index.ts              # Internal barrel re-exports (see packages/relay/mod.ts for public API)
 ├── agent.ts              # Agent loop (Stream of AgentEvents)
 ├── runner.ts             # runAgentLoop(): callback adapter over the event stream
-├── display.ts            # Display utilities: UIMessage, UIToolCall, parseDiff/buildDiffRows, tool-call summaries
+├── display.ts            # Display utilities: UIMessage, UIToolCall, parseDiff/diffStats, tool-call summaries
+├── diff-view.ts          # prettyDiff(): shared diff rows + theme-token color contract for TUI and web
 ├── theme.ts              # Graphite/Silver design tokens (incl. per-tool accents) shared by terminal + web clients
 ├── fonts.ts              # Shared font identity: web faces, CSS stack, terminal install files
 ├── assets/fonts/         # Bundled font files + license (see its README for the swap procedure)
@@ -124,9 +125,11 @@ Shared across all clients (TUI, web). Deliberately dependency-free so browser bu
 - `parseDiff()` — Parses unified diffs into files → hunks → lines with line numbers; handles git headers, multiple
   hunks/files, no-newline markers, and header-looking content lines
 - `diffStats()` — Added/removed line counts from a diff's hunk bodies (never file headers)
-- `buildDiffRows()` — Flattens `parseDiff()` into client-agnostic rows (hunk headers, line-number gutter, add/remove/
-  context lines). Compact mode keeps changed lines only; context mode keeps every line. Shared by the TUI preview/viewer
-  and the web `DiffBlock`, so both clients render identical structure.
+- `prettyDiff()` (in `diff-view.ts`) — Flattens `parseDiff()` into client-agnostic rows (file sections, hunk headers,
+  line-number gutter, add/remove/context lines). Compact mode keeps changed lines only; context mode keeps every line;
+  multi-file patches get per-file `+N −M` headers. Change prefixes are data, never text — clients never print `+`/`-`.
+- `diffRowToken()` / `formatDiffGutter()` — The shared presentation contract: each row maps to a `Theme` token name and
+  the gutter formatter, so the TUI (ANSI) and web (`--relay-*` CSS variables) render identical structure and semantics.
 
 ### Tool System
 

@@ -1017,9 +1017,10 @@ body {
 	color: var(--relay-text-dim, #808080);
 }
 
-/* Unified diffs come from the shared display rows (the same model the TUI
- * renders): a line-number gutter, `@@` hunk headers, and add/remove/context
- * lines colored from the shared theme tokens. */
+/* Unified diffs come from the shared rows in relay `diff-view.ts` (the same
+ * model the TUI renders). `data-token` carries the shared theme-token name, so
+ * the color contract lives in one place; add/remove signal is color-only (the
+ * +/- prefixes are never printed). */
 .diff-block {
 	display: flex;
 	flex-direction: column;
@@ -1038,29 +1039,62 @@ body {
 	word-break: break-word;
 }
 
+.diff-row[data-token="accent"] {
+	color: var(--relay-accent, #d8d8d8);
+}
+
+.diff-row[data-token="success"] {
+	color: var(--relay-success, #a8b0a8);
+}
+
+.diff-row[data-token="error"] {
+	color: var(--relay-error, #b0a0a0);
+}
+
+.diff-row[data-token="textDim"] {
+	color: var(--relay-text-dim, #808080);
+}
+
+.diff-row[data-token="textFaint"] {
+	color: var(--relay-text-faint, #606060);
+}
+
+.diff-row-hunk {
+	padding: 0.15rem 0;
+}
+
+.diff-row-file {
+	align-items: baseline;
+	justify-content: space-between;
+	padding: 0.2rem 0;
+	color: var(--relay-text, #f2f2f2);
+}
+
+.diff-row-path {
+	font-weight: 500;
+}
+
+.diff-row-stat {
+	display: flex;
+	flex: none;
+	gap: 0.5rem;
+	font-size: 0.78rem;
+}
+
+.diff-row-stat [data-token="success"] {
+	color: var(--relay-success, #a8b0a8);
+}
+
+.diff-row-stat [data-token="error"] {
+	color: var(--relay-error, #b0a0a0);
+}
+
 .diff-row-gutter {
 	flex: none;
 	min-width: 3ch;
 	text-align: right;
 	color: var(--relay-text-faint, #606060);
 	user-select: none;
-}
-
-.diff-row-hunk {
-	color: var(--relay-accent, #d8d8d8);
-	padding: 0.15rem 0;
-}
-
-.diff-row[data-kind="add"] {
-	color: var(--relay-success, #a8b0a8);
-}
-
-.diff-row[data-kind="del"] {
-	color: var(--relay-error, #b0a0a0);
-}
-
-.diff-row[data-kind="ctx"] {
-	color: var(--relay-text-faint, #606060);
 }
 
 /* Review modal for one edit/write diff: a native <dialog> opened with showModal(),

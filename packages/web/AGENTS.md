@@ -48,7 +48,7 @@ web/
         ├── Markdown.tsx        # markdown-it token stream → Solid vnodes (no innerHTML)
         ├── CodeBlock.tsx       # Fenced code block highlighted by the shared Shiki instance
         ├── ToolCalls.tsx       # Per-call rows: tool accents, grep matches, output previews
-        ├── DiffBlock.tsx       # Unified diffs from the shared display rows (same model as the TUI)
+        ├── DiffBlock.tsx       # Unified diffs from prettyDiff() (same model + tokens as the TUI)
         ├── DiffModal.tsx       # Review modal (native dialog, showModal) for one edit/write diff, scrollable
         ├── Composer.tsx        # Textarea + @-mention picker + model selector + send/stop
         ├── ModelSelector.tsx   # Thread model popover grouped by connected subscription
@@ -195,8 +195,9 @@ Turns that run tools drop the `brand` stripe and its padding, so only their per-
 Each tool call is a single collapsed row — per-tool colored display name (from the shared theme's `toolRead`, `toolWrite`,
 … tokens), argument, and a short result stat (`3 matches in 2 files`, `+4 −3`, `40 lines`, `error`, or a pulsing
 `running…`). Clicking a row expands the full result: edit/write diffs render through `DiffBlock.tsx` (the shared
-`buildDiffRows` model the TUI uses: hunk headers, line-number gutter, add/remove coloring), grep output is split into
-colored file/line/text, and other results show as preformatted text. Collapsed by default is deliberate — long outputs
+`prettyDiff` rows the TUI uses: hunk headers, line-number gutter, per-file sections, add/remove coloring; the `+`/`-`
+prefixes are never printed), grep output is split into colored file/line/text, and other results show as preformatted
+text. Collapsed by default is deliberate — long outputs
 stay one line unless the reader asks for them. Edit and write calls that produced a diff also get a **View diff**
 button beside the row. It opens `DiffModal.tsx`, a native modal `<dialog>` with the full diff in a scrollable body;
 Escape, the Close button, or a backdrop click dismisses it. Its state lives in `state/diff-preview.ts`, outside the
@@ -260,7 +261,8 @@ browser origin).
 - `markdown-it` — markdown lexer (rendered safely to vnodes)
 - `vite-plugin-solid` — Solid compiler plugin; Vite itself comes from `vite-plus`
 - `@vvtxn/client` — protocol, RelayClient, shared session-state reducer
-- `@vvtxn/relay` — `display.ts` helpers (including `parseDiff`/`buildDiffRows`) and `theme.ts` tokens (browser-pure)
+- `@vvtxn/relay` — `display.ts`/`diff-view.ts` helpers (including `parseDiff`/`prettyDiff`) and `theme.ts` tokens
+  (browser-pure)
 
 ## Task Completion Checklist
 

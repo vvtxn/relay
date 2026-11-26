@@ -2,8 +2,9 @@
  * Diff presentation helpers for the terminal client.
  *
  * Pure and UI-free so session collection can be tested without mounting the
- * TUI. `parseDiff`/`diffStats`/`buildDiffRows` come from the shared display
- * module, so the CLI and web read and flatten patches identically.
+ * TUI. `parseDiff`/`diffStats` come from the shared display module and
+ * `prettyDiff` from the shared diff-view module, so the CLI and web read and
+ * render patches identically.
  */
 
 import { diffStats, parseDiff, type UIMessage } from "@vvtxn/relay/core/display.ts";

@@ -1,37 +1,53 @@
 import { createMemo, For, Show } from "solid-js";
-import { buildDiffRows, type DiffRow } from "@vvtxn/relay/core/display.ts";
+import { diffRowToken, formatDiffGutter, prettyDiff, type DiffViewRow } from "@vvtxn/relay/core/diff-view.ts";
 
 /**
  * Unified diff rendering for edit/write tool calls.
  *
- * The rows come from `buildDiffRows` in `@vvtxn/relay/core/display.ts` — the
- * same pure model the terminal client renders, so both clients show the same
- * hunks, line-number gutter, and add/remove coloring. Rows are colored from the
- * shared `--relay-*` theme tokens; no highlighting library is involved.
+ * Rows come from `prettyDiff` in `@vvtxn/relay/core/diff-view.ts` — the same
+ * model the terminal client renders — so both clients show the same hunks,
+ * line-number gutter, and per-file sections. `diffRowToken` names the theme
+ * token for each row; `styles.css` maps those names to `--relay-*` variables.
+ * Change prefixes are never rendered: the color carries the signal.
  */
 
-function kindOf(prefix: "+" | "-" | " "): "add" | "del" | "ctx" {
-	if (prefix === "+") return "add";
-	if (prefix === "-") return "del";
-	return "ctx";
-}
-
-function Row(props: { row: DiffRow; gutter: number }) {
+function Row(props: { row: DiffViewRow; gutter: number }) {
 	const row = props.row;
-	if (row.kind !== "line") return <div class="diff-row diff-row-hunk">{row.text}</div>;
+	if (row.kind === "file") {
+		return (
+			<div class="diff-row diff-row-file">
+				<span class="diff-row-path">{row.path}</span>
+				<span class="diff-row-stat">
+					<span data-token="success">+{row.adds}</span>
+					<span data-token="error">−{row.deletes}</span>
+				</span>
+			</div>
+		);
+	}
+	if (row.kind === "hunk") {
+		return (
+			<div class="diff-row diff-row-hunk" data-token={diffRowToken(row)}>
+				{row.header}
+			</div>
+		);
+	}
+	if (row.kind === "separator") {
+		return (
+			<div class="diff-row" data-token={diffRowToken(row)}>
+				{row.text}
+			</div>
+		);
+	}
 	return (
-		<div class="diff-row" data-kind={kindOf(row.prefix)}>
-			<span class="diff-row-gutter">{String(row.lineNo).padStart(props.gutter)}</span>
-			<span class="diff-row-text">
-				{row.prefix}
-				{row.content}
-			</span>
+		<div class="diff-row" data-token={diffRowToken(row)}>
+			<span class="diff-row-gutter">{formatDiffGutter(row.lineNo, props.gutter)}</span>
+			<span class="diff-row-text">{row.text}</span>
 		</div>
 	);
 }
 
 export function DiffBlock(props: { diff: string }) {
-	const view = createMemo(() => buildDiffRows(props.diff, { context: true }));
+	const view = createMemo(() => prettyDiff(props.diff, { context: true }));
 	return (
 		<Show when={view().rows.length > 0}>
 			<div class="diff-block">
