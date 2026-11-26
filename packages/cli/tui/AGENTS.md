@@ -302,6 +302,7 @@ After concluding that a task is complete, always run these commands from the rep
 
 1. `pnpm exec vp fmt` — auto-format all code
 2. `pnpm check` — format, lint, and type-check (Oxfmt, Oxlint, tsgo via Vite+)
+3. Show proof of work and get the user's explicit green light before pushing (see root `AGENTS.md` Workflow)
 
 If any command fails, fix the issues and re-run until all pass cleanly.
 

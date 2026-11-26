@@ -40,3 +40,11 @@ local/
 ```bash
 pnpm build:sea
 ```
+
+## Task Completion Checklist
+
+After concluding that a task is complete:
+
+1. `pnpm build:sea` — verify the single executable still builds
+2. Show proof of work (build output, checksums, or a run of `dist/relay`) and get the user's explicit green light before
+   pushing (see root `AGENTS.md` Workflow)

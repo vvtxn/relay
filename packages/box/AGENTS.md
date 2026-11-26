@@ -44,8 +44,9 @@ box/
 - The project directory and box data directory must not contain each other. Session workspace clones live under
   `RELAY_SESSION_WORKSPACE_ROOT`, which must not overlap the project directory either.
 - Session workspaces are self-contained clones. SSH remotes are rewritten to HTTPS inside the clone so token-based
-  askpass works; the original checkout and its remotes are never modified. The agent commits, pushes, and opens pull
-  requests from the workspace instead of syncing patches back into the local checkout.
+  askpass works; the original checkout and its remotes are never modified. The agent commits and pushes to `main` from
+  the workspace (no pull requests), after the user green-lights the push with proof of work shown in the session,
+  instead of syncing patches back into the local checkout.
 - The manifest stores a hash of the runtime secret set (never the values). When the configured credentials change, the
   next lease recreates the VM so it picks up the new token.
 - `MicrosandboxRuntime` is lazy-loaded. A missing platform package or KVM must not prevent Relay from starting.
@@ -69,3 +70,13 @@ files to the repository. Verify box behavior end-to-end with
 `pnpm relay:local` (boxes are on by default) when KVM is available. Stress the real runtime: create/exec, live
 resize, pause/resume, stop, retention cleanup, and reconcile after a server restart. Set `RELAY_BOX=0` for the
 unsandboxed host path (development only; the server logs a warning).
+
+## Task Completion Checklist
+
+After concluding that a task is complete:
+
+1. `pnpm exec vp fmt` — auto-format all code
+2. `pnpm check` — format, lint, and type-check (Oxfmt, Oxlint, tsgo via Vite+)
+3. Show proof of work and get the user's explicit green light before pushing (see root `AGENTS.md` Workflow). Rendered
+   UI changes need real-browser screenshots or recordings; everything else needs tables, command output, or other
+   verifiable evidence.

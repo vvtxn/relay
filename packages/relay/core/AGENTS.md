@@ -174,8 +174,9 @@ loops (`maxConcurrency`, default 3). The server wires one per run with `read_fil
 `buildSystemPrompt({ mode, box, host, extraInstructions })` builds a deliberately small prompt:
 
 - `mode: "main"` (default) renders an identity, a few operating rules (hypothesis-driven investigation, stop once
-  actionable, batch independent calls, read before editing, use dedicated file tools, stay concise), optional
-  workspace context (durable clone + isolated box), and a one-line safety policy.
+  actionable, batch independent calls, read before editing, use dedicated file tools, commit on `main` with no pull
+  requests and get approval before pushing with proof of work, stay concise), optional workspace context (durable clone
+  + isolated box), and a one-line safety policy.
 - `mode: "subagent"` renders a single focused read-only investigator instruction.
 - Tool mechanics and tool-choice guidance live in each tool's schema `description`; the prompt does not list tools or
   duplicate their guidance.
@@ -242,6 +243,7 @@ After concluding that a task is complete, always run these commands from the rep
 
 1. `pnpm exec vp fmt` — auto-format all code
 2. `pnpm check` — format, lint, and type-check (Oxfmt, Oxlint, tsgo via Vite+)
+3. Show proof of work and get the user's explicit green light before pushing (see root `AGENTS.md` Workflow)
 
 ## Code Patterns
 

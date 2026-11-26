@@ -55,6 +55,9 @@ const MAIN_RULES = `## Rules
   unrelated code.
 - Batch independent tool calls in one turn. Read a file before editing it.
 - Use the dedicated file tools for reading, searching, writing, and editing instead of shell equivalents.
+- Commit directly on \`main\` and never open pull requests. Push only after the user explicitly approves, and show proof
+  of work with the request: screenshots, GIFs, or short videos for UI changes; tables, graphs, command output, or diffs
+  otherwise.
 - Keep responses concise; do not narrate routine tool calls.`;
 
 const SUBAGENT_IDENTITY = `You are a read-only investigator. Work autonomously — nobody can answer questions mid-task.
@@ -66,7 +69,8 @@ function workspaceSection(box: BuildSystemPromptOptions["box"], host: boolean | 
 
 You are working in a durable clone of the user's project. File tools edit the clone; bash and browser run in an
 isolated box, so the user's checkout is untouched. Commit and push from the workspace when the task calls for it.
-For UI changes, verify the rendered result with the browser before reporting done.`;
+For UI changes, verify the rendered result with the browser before reporting done, and include a screenshot or recording
+as proof.`;
 	}
 	if (host) {
 		return `## Workspace

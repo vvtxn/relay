@@ -80,8 +80,9 @@ Owns active runs, one per session:
 - With boxes enabled, a run owns a durable session workspace: a self-contained clone of the project. File tools run on
   the host against it; `sandbox.ts` leases a box lazily on the first bash/browser call and pins that lease until the run
   finalizer, so services and browser checks share one VM. A run with no sandbox tool never holds a box. The original
-  checkout is never modified; the agent commits, pushes, and opens pull requests from the workspace using git/gh. In
-  local mode the server mirrors the host's `gh auth token` into the box's secret environment (the guest sees a
+  checkout is never modified; the agent commits and pushes to `main` from the workspace using git/gh (no pull requests),
+  after the user green-lights the push with proof of work shown in the session. In local mode the server mirrors the
+  host's `gh auth token` into the box's secret environment (the guest sees a
   placeholder substituted only for the allowed git host). SSH remotes are rewritten to HTTPS inside the clone so the
   token-based askpass helper works. A changed secret set recreates pooled VMs on their next lease.
 - Host runs (`RELAY_BOX=0`) execute directly on the host with no sandbox and no approval prompts; `main.ts` logs a
@@ -123,8 +124,8 @@ Active runs are never removed.
 The per-session project cwd comes from the client (CLI sends its terminal cwd); the durable session workspace is
 created lazily under `RELAY_SESSION_WORKSPACE_ROOT` and mounted into the project's box pool. File tools are confined to
 that workspace; bash is not (documented in relay core AGENTS.md). Local mode reads `gh auth token` for the project's
-origin host at startup so the box can push branches and open pull requests; `RELAY_BOX_GITHUB_TOKEN` overrides it, and
-cloud mode never reads the host's login.
+origin host at startup so the box can push `main`; `RELAY_BOX_GITHUB_TOKEN` overrides it, and cloud mode never reads
+the host's login.
 
 Workspace creation and registration run through `validateWorkspacePath` (core): the path must be an absolute, existing
 directory whose canonical (symlink-resolved) path sits within `config.workspaceRoots`. `handleCreateSession` stores the
@@ -297,6 +298,7 @@ After concluding that a task is complete, always run these commands from the rep
 
 1. `pnpm exec vp fmt` — auto-format all code
 2. `pnpm check` — format, lint, and type-check (Oxfmt, Oxlint, tsgo via Vite+)
+3. Show proof of work and get the user's explicit green light before pushing (see root `AGENTS.md` Workflow)
 
 ## Code Patterns
 

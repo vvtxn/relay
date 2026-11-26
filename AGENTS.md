@@ -90,9 +90,10 @@ After concluding that a task is complete, always run these commands in order:
 
 1. `pnpm exec vp fmt` — auto-format all code
 2. `pnpm check` — format, lint, and type-check (Oxfmt, Oxlint, tsgo via Vite+)
+3. Show proof of work and get the user's explicit green light before pushing (see [Workflow](#workflow))
 
 If any command fails, fix the issues and re-run until they pass cleanly. Do not report the task as done until they pass
-cleanly.
+cleanly. Do not push until the user has approved the proof.
 
 ### Testing
 
@@ -134,8 +135,8 @@ There are no development/production env files and no `RELAY_ENV` mode.
 Tag-based releases via GitHub Actions (`.github/workflows/release.yml`):
 
 1. `pnpm run version:bump <patch|minor|major>`
-2. Commit and push to `main`
-3. `git tag v<version> && git push --tags`
+2. Commit and push to `main` (the push needs the user's green light)
+3. `git tag v<version> && git push --tags` (also green-lit by the user)
 4. CI verifies checks, builds `dist/relay`, and creates the GitHub Release with the Linux x64 executable and its
    checksum
 
@@ -215,25 +216,16 @@ Use scopes when relevant: `feat(agent):`, `fix(tui):`, `refactor(core):`, `feat(
 
 Keep the subject line concise. Use the body for additional context when needed.
 
-### Branch Naming
-
-Use descriptive, kebab-case branch names with a category prefix:
-
-- `feat/description` — New features (e.g., `feat/agent-changes`, `feat/new-diffs`)
-- `fix/description` — Bug fixes (e.g., `fix/md-import-crash`, `fix/stream-abort-naming`)
-- `refactor/description` — Code restructuring (e.g., `refactor/signals-store`)
-- `docs/description` — Documentation updates (e.g., `docs/readme-update`)
-- `chore/description` — Maintenance tasks (e.g., `chore/version-bump`)
-
-Avoid vague names like `dev`, `temp`, or `wip-description` — use the category prefix instead.
-
 ### Workflow
 
-1. Create a branch from `main` for your changes
-2. Make focused commits with clear messages
-3. Push the branch to the remote
-
-**Never push directly to `main`.** Always create a branch, even for small fixes.
+1. Commit directly on `main` with focused, clear messages — no branches and no pull requests
+2. **Never push without the user's explicit green light.** Ask first, every time, even for small fixes
+3. Show proof of work in the chat response when asking for the green light (never commit proof artifacts):
+   - **UI changes** — screenshots, GIFs, or short videos of the rendered result
+   - **Non-UI changes** — graphs, tables, benchmark numbers, command output, before/after diffs, or other verifiable
+     evidence
+4. Push only after the user approves, and push exactly the work they saw; if the work changes afterward, show the new
+   proof and ask again
 
 ### Versioning & Releases
 
@@ -242,4 +234,5 @@ Avoid vague names like `dev`, `temp`, or `wip-description` — use the category 
 - Version bumps are separate commits: `chore: version bump`
 - `packages/relay/version.ts` is the single source; `packages/cli/version.ts` and `packages/web/src/version.ts`
   re-export it, and `scripts/bump.ts` updates it
-- After bumping, commit to `main`, then tag and push tags to trigger the release CI
+- After bumping, commit to `main`, then tag and push tags to trigger the release CI (both pushes need the user's green
+  light)

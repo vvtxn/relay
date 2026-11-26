@@ -302,15 +302,15 @@ Use `relay box list|new|resize|pause|resume|stop|rm` to manage boxes; `relay box
 without starting a thread.
 
 Sessions are the working copies. Each session gets a durable clone of the project workspace under
-`RELAY_SESSION_WORKSPACE_ROOT`; the agent edits, commits, pushes, and opens pull requests there, and the user's local
-checkout is never modified. Sanitization removes host credentials from the clone, then SSH remotes are rewritten to
-HTTPS so the box's token-based git authentication works.
+`RELAY_SESSION_WORKSPACE_ROOT`; the agent edits, commits, and pushes to `main` there (no pull requests) once the user
+approves the proof of work, and the user's local checkout is never modified. Sanitization removes host credentials from
+the clone, then SSH remotes are rewritten to HTTPS so the box's token-based git authentication works.
 
 In local mode the host's GitHub CLI session is mirrored into the box automatically: the server reads
 `gh auth token` at startup, keeps the token on the host, and Microsandbox substitutes it only for the project's git
 host and the GitHub API (defaults to the origin host, then `github.com`). Set `RELAY_BOX_GITHUB_TOKEN` (or
 `GITHUB_TOKEN`/`GH_TOKEN`) to override it. Cloud mode never reads the host's gh login; configure the token explicitly
-there. Without a token, local commits work but pushes and pull requests fail.
+there. Without a token, local commits work but pushes fail.
 
 ### `packages/relay/api/` — LLM Provider Layer
 
