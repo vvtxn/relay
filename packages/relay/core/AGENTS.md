@@ -9,7 +9,7 @@ core/
 ├── index.ts              # Internal barrel re-exports (see packages/relay/mod.ts for public API)
 ├── agent.ts              # Agent loop (Stream of AgentEvents)
 ├── runner.ts             # runAgentLoop(): callback adapter over the event stream
-├── display.ts            # Display utilities: UIMessage, UIToolCall, parseDiffLines, tool-call summaries
+├── display.ts            # Display utilities: UIMessage, UIToolCall, parseDiff/buildDiffRows, tool-call summaries
 ├── theme.ts              # Graphite/Silver design tokens (incl. per-tool accents) shared by terminal + web clients
 ├── fonts.ts              # Shared font identity: web faces, CSS stack, terminal install files
 ├── assets/fonts/         # Bundled font files + license (see its README for the swap procedure)
@@ -124,7 +124,9 @@ Shared across all clients (TUI, web). Deliberately dependency-free so browser bu
 - `parseDiff()` — Parses unified diffs into files → hunks → lines with line numbers; handles git headers, multiple
   hunks/files, no-newline markers, and header-looking content lines
 - `diffStats()` — Added/removed line counts from a diff's hunk bodies (never file headers)
-- `parseDiffLines()` — Flat `DiffLine[]` view of `parseDiff()`, kept for the web's plain-line diff fallback
+- `buildDiffRows()` — Flattens `parseDiff()` into client-agnostic rows (hunk headers, line-number gutter, add/remove/
+  context lines). Compact mode keeps changed lines only; context mode keeps every line. Shared by the TUI preview/viewer
+  and the web `DiffBlock`, so both clients render identical structure.
 
 ### Tool System
 

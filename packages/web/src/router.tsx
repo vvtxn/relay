@@ -26,10 +26,10 @@ import { SessionSettingsRoute, SettingsPage } from "#/pages/SettingsPage.tsx";
 import { WorkspacePage } from "#/pages/WorkspacePage.tsx";
 
 /**
- * The chat surface is the only consumer of markdown-it, Shiki, and
- * `@pierre/diffs` (~470 KB minified). Loading it lazily keeps that weight out of
- * the boot/overview/login chunk; the router's `intent` preloading fetches it on
- * link hover, and the route loader still commits only once it is ready.
+ * The chat surface carries the markdown lexer and message rendering. Loading it
+ * lazily keeps that weight out of the boot/overview/login chunk; the router's
+ * `intent` preloading fetches it on link hover, and the route loader still
+ * commits only once it is ready.
  */
 const SessionPage = lazyRouteComponent(() => import("#/pages/SessionPage.tsx"), "SessionPage");
 

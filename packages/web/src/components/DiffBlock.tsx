@@ -1,73 +1,42 @@
-import { createEffect, createMemo, For, onCleanup, Show } from "solid-js";
-import { FileDiff, parsePatchFiles, type FileDiffMetadata } from "@pierre/diffs";
-import { parseDiffLines } from "@vvtxn/relay/core/display.ts";
-import { CODE_THEMES } from "#/highlight.ts";
-import { theme } from "#/state/theme.ts";
+import { createMemo, For, Show } from "solid-js";
+import { buildDiffRows, type DiffRow } from "@vvtxn/relay/core/display.ts";
 
 /**
  * Unified diff rendering for edit/write tool calls.
  *
- * `@pierre/diffs` (Shiki-based) renders each file in the patch with line
- * numbers, inline change highlighting, and collapsible context. It shares the
- * app's Shiki highlighter with markdown code blocks (see `highlight.ts`), and
- * tracks the app palette via `themeType`. Unparseable diffs fall back to plain
- * line coloring from `parseDiffLines`.
+ * The rows come from `buildDiffRows` in `@vvtxn/relay/core/display.ts` — the
+ * same pure model the terminal client renders, so both clients show the same
+ * hunks, line-number gutter, and add/remove coloring. Rows are colored from the
+ * shared `--relay-*` theme tokens; no highlighting library is involved.
  */
 
-/** Parse a patch; tolerate nothing — fall back to plain lines on any error. */
-function parseFiles(raw: string): FileDiffMetadata[] {
-	try {
-		return parsePatchFiles(raw, undefined, true).flatMap((patch) => patch.files);
-	} catch {
-		return [];
-	}
+function kindOf(prefix: "+" | "-" | " "): "add" | "del" | "ctx" {
+	if (prefix === "+") return "add";
+	if (prefix === "-") return "del";
+	return "ctx";
 }
 
-function DiffFile(props: { file: FileDiffMetadata }) {
-	let host: HTMLDivElement | undefined;
-
-	createEffect(() => {
-		if (!host) return;
-		const instance = new FileDiff({
-			theme: { dark: CODE_THEMES.dark, light: CODE_THEMES.light },
-			themeType: theme(),
-			diffStyle: "unified",
-			overflow: "wrap",
-			disableFileHeader: true,
-		});
-		instance.render({ fileDiff: props.file, containerWrapper: host });
-		onCleanup(() => instance.cleanUp());
-	});
-
-	return <div class="diff-file" ref={host} />;
-}
-
-/** Fallback for diffs Pierre cannot parse: still color added/removed lines. */
-function PlainDiff(props: { diff: string }) {
-	const lines = createMemo(() => parseDiffLines(props.diff));
+function Row(props: { row: DiffRow; gutter: number }) {
+	const row = props.row;
+	if (row.kind !== "line") return <div class="diff-row diff-row-hunk">{row.text}</div>;
 	return (
-		<pre class="diff-plain">
-			<For each={lines()}>
-				{(line) => (
-					<span
-						class="diff-plain-line"
-						data-kind={line.prefix === "+" ? "add" : line.prefix === "-" ? "del" : "ctx"}
-					>
-						{line.prefix}
-						{line.content}
-						{"\n"}
-					</span>
-				)}
-			</For>
-		</pre>
+		<div class="diff-row" data-kind={kindOf(row.prefix)}>
+			<span class="diff-row-gutter">{String(row.lineNo).padStart(props.gutter)}</span>
+			<span class="diff-row-text">
+				{row.prefix}
+				{row.content}
+			</span>
+		</div>
 	);
 }
 
 export function DiffBlock(props: { diff: string }) {
-	const files = createMemo(() => parseFiles(props.diff));
+	const view = createMemo(() => buildDiffRows(props.diff, { context: true }));
 	return (
-		<Show when={files().length > 0} fallback={<PlainDiff diff={props.diff} />}>
-			<For each={files()}>{(file) => <DiffFile file={file} />}</For>
+		<Show when={view().rows.length > 0}>
+			<div class="diff-block">
+				<For each={view().rows}>{(row) => <Row row={row} gutter={view().gutter} />}</For>
+			</div>
 		</Show>
 	);
 }

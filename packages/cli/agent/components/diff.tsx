@@ -16,7 +16,8 @@ import { toAnsi } from "#/tui/core/primitives/color.ts";
 import { Box, memo, ScrollArea, Text } from "#/tui/render/components.tsx";
 import { theme } from "#/tui/theme.ts";
 import { getToolDisplayName } from "@vvtxn/relay/core/display.ts";
-import { buildDiffRows, type DiffRow, type DiffRows, type SessionDiff } from "../diffs.ts";
+import { buildDiffRows, type DiffRow, type DiffRows } from "@vvtxn/relay/core/display.ts";
+import type { SessionDiff } from "../diffs.ts";
 import { TOOL_COLORS } from "../tool-display.ts";
 
 /** Changed lines shown in a transcript preview before the `… more` footer. */

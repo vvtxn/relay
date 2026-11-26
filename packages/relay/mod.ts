@@ -68,6 +68,7 @@ export type { RunnerCallbacks } from "./core/runner.ts";
 // Display utilities
 export {
 	abbreviateHome,
+	buildDiffRows,
 	createUIToolCall,
 	diffStats,
 	entriesToUIMessages,
@@ -75,12 +76,20 @@ export {
 	getToolDisplayName,
 	isPendingToolCall,
 	parseDiff,
-	parseDiffLines,
 	summarizeToolArgs,
 	TOOL_DISPLAY_NAMES,
 	toolCallStat,
 } from "./core/display.ts";
-export type { DiffFile, DiffHunk, DiffLine, UIMessage, UIToolCall } from "./core/display.ts";
+export type {
+	DiffFile,
+	DiffHunk,
+	DiffLine,
+	DiffRow,
+	DiffRowOptions,
+	DiffRows,
+	UIMessage,
+	UIToolCall,
+} from "./core/display.ts";
 
 // Theme (shared design tokens for terminal and web clients)
 export { theme, themeToCssVariables } from "./core/theme.ts";

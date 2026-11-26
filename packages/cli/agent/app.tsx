@@ -25,7 +25,8 @@ import { StatusBar } from "./components/status-bar.tsx";
 import { BootError, BootScreen } from "./components/boot-screen.tsx";
 import { MessageView, ToolBundleView } from "./components/chat.tsx";
 import { DiffViewer } from "./components/diff.tsx";
-import { buildDiffRows, collectSessionDiffs, type DiffRows, type SessionDiff } from "./diffs.ts";
+import { buildDiffRows, type DiffRows } from "@vvtxn/relay/core/display.ts";
+import { collectSessionDiffs, type SessionDiff } from "./diffs.ts";
 import { bundleTranscript } from "./tool-bundle.ts";
 
 // ---------------------------------------------------------------------------

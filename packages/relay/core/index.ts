@@ -5,18 +5,27 @@ export { runAgentLoop } from "./runner.ts";
 export type { RunnerCallbacks } from "./runner.ts";
 
 export {
+	buildDiffRows,
 	createUIToolCall,
 	diffStats,
 	entriesToUIMessages,
 	getToolDisplayName,
 	isPendingToolCall,
 	parseDiff,
-	parseDiffLines,
 	summarizeToolArgs,
 	TOOL_DISPLAY_NAMES,
 	toolCallStat,
 } from "./display.ts";
-export type { DiffFile, DiffHunk, DiffLine, UIMessage, UIToolCall } from "./display.ts";
+export type {
+	DiffFile,
+	DiffHunk,
+	DiffLine,
+	DiffRow,
+	DiffRowOptions,
+	DiffRows,
+	UIMessage,
+	UIToolCall,
+} from "./display.ts";
 
 export { estimateMessageTokens, estimateTokens, trimContext } from "./context.ts";
 export type { TrimOptions } from "./context.ts";

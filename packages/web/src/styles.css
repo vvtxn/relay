@@ -1017,36 +1017,49 @@ body {
 	color: var(--relay-text-dim, #808080);
 }
 
-/* @pierre/diffs renders inside a shadow root; these custom properties pierce
- * it. The canvas follows the panel surface so diffs read as part of it. */
-.diff-file {
+/* Unified diffs come from the shared display rows (the same model the TUI
+ * renders): a line-number gutter, `@@` hunk headers, and add/remove/context
+ * lines colored from the shared theme tokens. */
+.diff-block {
+	display: flex;
+	flex-direction: column;
 	margin-top: 0.15rem;
 	border-radius: 4px;
 	overflow: hidden;
-	font-size: 0.85rem;
-	--diffs-font-family: var(--relay-font-mono);
-	--diffs-light-bg: var(--relay-surface, #101010);
-	--diffs-dark-bg: var(--relay-surface, #101010);
-}
-
-.diff-plain {
-	margin: 0;
-	font-family: inherit;
+	font-family: var(--relay-font-mono);
 	font-size: 0.82rem;
 	line-height: 1.5;
+}
+
+.diff-row {
+	display: flex;
+	gap: 0.75rem;
 	white-space: pre-wrap;
 	word-break: break-word;
 }
 
-.diff-plain-line[data-kind="add"] {
+.diff-row-gutter {
+	flex: none;
+	min-width: 3ch;
+	text-align: right;
+	color: var(--relay-text-faint, #606060);
+	user-select: none;
+}
+
+.diff-row-hunk {
+	color: var(--relay-accent, #d8d8d8);
+	padding: 0.15rem 0;
+}
+
+.diff-row[data-kind="add"] {
 	color: var(--relay-success, #a8b0a8);
 }
 
-.diff-plain-line[data-kind="del"] {
+.diff-row[data-kind="del"] {
 	color: var(--relay-error, #b0a0a0);
 }
 
-.diff-plain-line[data-kind="ctx"] {
+.diff-row[data-kind="ctx"] {
 	color: var(--relay-text-faint, #606060);
 }
 
